@@ -1,0 +1,175 @@
+UV-K5 custom-cw: спектр, RF runtime и переносимость в UV98 Rust
+Дата исследования: 2026-11-09. Только исходники и документация.
+
+Репозиторий: https://github.com/briand/uv-k5-firmware-custom-cw
+Закреплённый commit: ff2547182e8557de61298c53ef76dfc9870374c4.
+Файлы прочитаны GitHub connector именно с этим ref, не с подвижной main.
+Сборка этой C-прошивки, COM и аппаратные проверки не выполнялись.
+C-код не копировался. Наша прошивка/калибровки/NOR не изменялись.
+
+ВЫВОД
+Брать модель работы пользователя: самостоятельное окно обзора, перестройку
+окна, выбор шага/числа точек, поиск пика, временное прослушивание и возврат.
+Не переносить регистровые значения, GPIO, временные ожидания или формулу dBm.
+В закреплённом коде есть конкретные дефекты границ массивов и неполный
+внутримодульный restore. Это источник идей, не проверенный готовый драйвер.
+
+1. Наличие в коде не означает включение в штатную сборку
+Makefile:40 задаёт ENABLE_SPECTRUM ?= 0; :44 также выключает SCAN_RANGES.
+app/spectrum.o добавляется только условно (:181–183); define ENABLE_SPECTRUM
+также условный (:310–312). Из этого нельзя делать вывод, что опубликованный
+автором обычный бинарник содержит или проверяет этот спектр.
+Makefile использует Cortex-M0 и DP32G030 (:276–290, :519–529), а наш профиль —
+AT32F423. Даже наличие похожего RF-чипа не делает BSP/тайминги совместимыми.
+Источник:
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/Makefile#L40-L44
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/Makefile#L181-L183
+
+2. Сетка и самостоятельные настройки — полезная часть
+spectrum.h:47–50 содержит 15 шагов в единицах 10 Hz: от 10 Hz до 100 kHz,
+включая 6.25 и код 8.33 kHz. Это представимые значения, не разрешение или
+доказательство разрешающей способности приёмника. StepsCount (:93–98)
+выбирает 128/64/32/16 измерений. GetBW/GetFStart/GetFEnd в spectrum.c:276–295
+рассчитывают окно. Для малых шагов есть отдельная логика «центра».
+UpdateScanStep/ToggleStepsCount пересчитывают перемещение окна как половину
+охвата и перезапускают scan. UP/DOWN меняют окно, а не только курсор;
+1/7 меняют шаг, 4 — число точек, 5 — ввод частоты (:809–867).
+Для нас: SpectrumConfig в RAM отдельно от обычного VFO step; единая явная
+семантика center/start/end, проверенная арифметика и таблица поддержанных
+вариантов. Число точек должно укладываться в текущую ёмкость 81 или отдельный
+доказанный бюджет RAM. Все bins снова проверять через QualifiedRange.
+Источники:
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/spectrum.h#L47-L117
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/spectrum.c#L276-L295
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/spectrum.c#L809-L887
+
+3. Fast tune здесь не совпадает с нашим подтверждённым stock fragment
+SetF (:257–265) пишет частоту, выбирает UV-K5 RX filter path, затем читает
+A30, пишет туда 0 и восстанавливает прежнее значение. Driver SetFrequency
+(:703–707) просто раскладывает переданный код на A38/A39. В этом setter нет
+нашей заводской поправки frequency offset. PickRXFilterPath (:888–906)
+переключает BK GPIO VHF/UHF по порогу 280 MHz; это схема другой платы.
+Наша подтверждённая последовательность включает corrected A38/A39, A37,
+A30=0200/BFF1 и A33 с проверкой PA/TX. Её нельзя заменить этой короткой
+последовательностью ради сходства или предполагаемой скорости.
+Источники:
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/spectrum.c#L257-L265
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/driver/bk4819.c#L703-L707
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/driver/bk4819.c#L888-L906
+
+4. Число scanDelay=3200 не доказывает задержку 3.2 ms/bin
+Поле scanDelay объявлено в header и инициализировано в spectrum.c:72;
+других обращений к нему в прочитанном spectrum.c нет. Scan (:1126–1135)
+вызывает SetF, затем Measure. GetRssi (:314–325) ждёт, пока младшие 8 бит
+A63 перестанут равняться 255, вставляя DelayUs(100). Верхнего лимита нет.
+Если значение остаётся 255, цикл не возвращается к обработке кнопок.
+Закомментированное ожидание 800 us также не выполняется.
+Driver GetRSSI (:1551–1554) читает A67 & 01FF; это настоящий scalar RSSI.
+В driver bitbang есть ожидания 1 us (:135–240), но чужой источник не является
+спецификацией допустимого периода для нашей платы. Фактическая скорость
+этого spectrum source не измерялась и не выводится из наличия поля scanDelay.
+Для нас: сохранять post-write settle и deadline. Дополнительный glitch-ready
+признак можно исследовать отдельно; он не заменяет подтверждение PLL lock
+и никогда не должен превращаться в бесконечный polling.
+Источники:
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/spectrum.c#L314-L325
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/spectrum.c#L1126-L1167
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/driver/bk4819.c#L1551-L1559
+
+5. Listen — отдельный рабочий режим, а не выход из спектра
+UpdateScan после прохода обновляет peak и при превышении порога включает
+ToggleRX/TuneToPeak (:1159–1163). ToggleRX меняет audio/AF DAC/AF bit,
+индикатор, AGC и A43 между scan/listen bandwidth (:340–355).
+UpdateListening (:1180–1209) держит приём счётчиком listenT=1000 с DelayMs(1),
+проверяет сигнал и возвращает scan после его исчезновения. Это около секунды
+плюс прочая работа, не точный монотонный deadline. STILL измеряет одну точку;
+PTT из Spectrum выбирает STILL/peak (:871–874), а в STILL передача только TODO
+(:972–976). EXIT из STILL возвращает обзор (:985–990).
+Переносима архитектура Sweep -> Listen -> Sweep с отдельным временем hold,
+порогом и явным monitor. В нашей версии вход Listen должен выполнить полный
+подтверждённый RX-план выбранного bin. PTT сохраняет нашу семантику остановки,
+release/new edge; чужое назначение PTT не копировать автоматически.
+Источники:
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/spectrum.c#L340-L355
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/spectrum.c#L1126-L1209
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/spectrum.c#L930-L997
+
+6. Gain, bandwidth и подписи dBm переносить нельзя
+RADIO_SetupAGC (:998–1018) различает listeningAM и disable, выбирая штатный
+AGC или AM_fix. Spectrum ToggleRX передаёт в первый параметр именно on,
+а не сравнение текущей modulation с AM; это требует проверки, а не слепого
+повторения. Tick вызывает AM_fix_10ms только в AM при незаблокированном AGC
+(:1211–1219). GetRssi может добавлять gain correction AM_fix.
+Rssi2DBm (:115–116) использует rssi/2-160 и dBmCorrTable другой платы.
+Эти поправки не являются калибровкой UV98. Сохраняем RAW и явно выбранный
+gain profile; шкала может иметь регулируемые RAW min/max без выдуманных dBm.
+Scan bandwidth и listen bandwidth полезно разделить как понятия. Конкретные
+слова A43 и gain tables допускаются только после нашей stock/board проверки.
+Источники:
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/radio.c#L998-L1018
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/spectrum.c#L115-L137
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/driver/bk4819.c#L244-L269
+
+7. Конкретные дефекты/риски закреплённого источника
+А. Таблица scanStepBWRegValues содержит 12 элементов (spectrum.h:52–79),
+а ScanStep/scanStepValues — 15. Getter (:310–311) не проверяет индекс.
+Default S_STEP_25_0kHz имеет индекс 12, уже за пределами массива. Это
+статически видимый выход за границу; сборку с ENABLE_SPECTRUM=1 не проверяли.
+Б. UpdateScan сначала вызывает Scan, лишь затем проверяет i < count
+(:1144–1150). После последней штатной точки i становится count, и следующий
+проход читает rssiHistory[count] перед проверкой. При count=128 это выход за
+массив из 128 элементов; при меньшем count — лишняя точка.
+В. APP_RunSpectrum без scan ranges присваивает initialFreq частоту VFO минус
+половина окна (:1285–1286). DeInitSpectrum ставит именно initialFreq, затем
+восстанавливает семь сохранённых регистров (:224–247, :304–307). Внутри модуля
+это не возврат точной исходной частоты VFO. Последующее поведение внешнего
+caller в данном ограниченном исследовании не проверялось.
+Г. Сохранены A30/A37/A3D/A43/A47/A48/A7E; это не полный snapshot RF/audio/
+gain/modulation и не подтверждённый readback restore. У нас нужны полные
+RxRequest и ticket ACK, а не запись набора чужих прежних слов.
+Д. preventKeypress отключает ввод во время первоначального прохода
+(:1241–1253); GetRssi может ждать бесконечно. Не переносить такую блокировку
+в наш foreground с PTT/EXIT и deadline-защитой.
+Источники:
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/spectrum.h#L47-L117
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/spectrum.c#L1126-L1167
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/spectrum.c#L1241-L1309
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/spectrum.c#L224-L307
+
+ПЛАН АДАПТАЦИИ, БЕЗ КОПИРОВАНИЯ C
+1. no_std SpectrumConfig: center/span либо start/end, step, bins, RAW scale,
+   peak hold/reset, listen selection. Все индексы/границы проверяемые;
+   таблица вариантов хранит step и разрешённую полосу вместе, не параллельно.
+2. Сохранить QualifiedRange и заводской corrected frequency каждого bin.
+   У границы cal/route выдавать понятную причину/допустимое сужение окна.
+3. Добавить Listen/Resume через полноценный RX с ACK. Исправить уже найденный
+   второй полный RX после Scope::Completion::Restored сравнением точного
+   восстановленного RxRequest со свежим desired request.
+4. Измерения и immutable snapshot отделить от painting. Показывать sweep
+   counter, возраст данных, центр/охват/шаг; обновлять изменённые области.
+5. Только после host-проверок измерить на UV98 реальные tune/settle/read,
+   полный sweep и возврат аудио. RF 10 us/settle 10 ms сейчас не сокращать
+   на основании чужих 1 us и неограниченного glitch polling.
+
+ПРОВЕРКИ СЛЕДУЮЩЕГО ЭТАПА
+- Все варианты шага имеют полосу; default и крайние индексы в границах.
+- Ровно N bins, ни одного чтения/записи bin N; N=1 и максимум ёмкости.
+- Арифметика частот без underflow/overflow, единая семантика концов сетки.
+- Unknown/stale не становятся измеренным нулём; peaks очищаются явно.
+- Listen/Stop/Accept/EXIT/PTT на каждом префиксе; запоздалый ACK не побеждает
+  новую отмену. В held PTT нет автоматического TX после restore.
+- Полный RxRequest и исходные калибровки совпадают после отмены; ошибки
+  readback/timeout завершаются безопасным cleanup, не зависшим циклом.
+- Fault/timeout/clock-wrap; ограниченная работа каждого шага scheduler.
+- Измеренный sweep rate и input latency публиковать отдельно от host PASS.
+
+Фиксация прочитанных Git blobs
+app/spectrum.c: be623f527c2a3b52adcddd7277f79cec4006dd17
+app/spectrum.h: 1c1cce52818c660cc9e2205a312c6c9b5e951383
+driver/bk4819.c: 5fb2fd6ec14e83055445488087bbea2d3dfdfd11
+driver/bk4819.h: 25befde5665a8dd6569c450bdeeaed7c9db87600
+radio.c: f16b61b017b7d2a2c6bbea1effa94600cc9bc518
+Makefile: 767589ec6bd971338dbf84990151d55e25db206a
+Copyright spectrum.c/.h указывает fagci, Apache-2.0; этот отчёт пересказывает
+наблюдения и не переносит исходный код. При будущем заимствовании кода
+потребуется отдельно сохранить соответствующие лицензионные уведомления.

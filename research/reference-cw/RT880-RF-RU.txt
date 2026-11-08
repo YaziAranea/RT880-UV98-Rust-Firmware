@@ -1,0 +1,100 @@
+RT880: Si4732, HF/AM/SSB и граница DSP
+Дата: 2026-11-09. Исследование исходников; без COM, Cargo, прошивки и новых тестов.
+
+Приоритетный близкий к нашей аппаратуре источник:
+https://github.com/fagci/rt880-fw/tree/619fa079c657433798cd4475997ecaf476e5cd73
+GitHub fetch_file: src/radio.c полностью и src/driver/si473x.c строки1..560.
+Огромный массив SSB patch не анализировался и не копировался.
+
+1. Подключение действительно существует в коде
+
+src/radio.c: vfos[2] имеет RADIO_SI4732, отдельные frequency/step/modulation.
+Radio_Init вызывает SI47XX_Init, PowerUp и TuneTo. applyVfo направляет Si4732
+в SwitchMode/TuneTo, остальные VFO в BK4819; precise=false пропускает часть
+полного переключения. modToSiMode переводит AM/LSB/USB, остальные режимы в FM.
+applyMute выключает BK AFDAC либо задаёт громкость Si4732; внешний AF_MUTE общий.
+Radio_Update для Si4732 сразу возвращается: здесь нет одинакового с BK squelch.
+https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/radio.c
+
+Следовательно, это не просто неиспользуемый заголовок драйвера. Однако вызовы
+показывают намерение интеграции, а не успешную работу на конкретной UV98 Plus.
+Здесь нельзя считать chip1 назначенным TX во всех вариантах платы только по
+комментарию в radio.c; наша карта трактов остаётся основанной на stock evidence.
+
+2. Что умеет драйвер
+
+si473x.c использует bitbang I2C: 7-bit адрес0x11, PC0 SCL, PC1 SDA;
+PB9 обозначен reset с комментарием adjust to your board. Init держит reset LOW.
+PowerUp поднимает reset, ждёт10ms, отправляет POWER_UP с OUT_ANALOG, ждёт500ms.
+Есть команды volume, FM/AM AGC override, AM channel filter, RSQ и RDS.
+https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/driver/si473x.c#L10-L35
+https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/driver/si473x.c#L175-L304
+
+SSB реализован как загрузка patch в сам Si47xx, SSB properties, BFO и AM tune
+command с USB/LSB flags. TuneTo при небольшом отклонении использует BFO;
+в остальных случаях перестраивает частоту. Это DSP внутри Si47xx, не MCU PCM.
+https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/driver/si473x.c#L307-L430
+
+3. Конкретные причины не переносить драйвер буквально
+
+- PB9 reset прямо помечен как требующий адаптации платы. Для UV98 назначение
+  reset/питания и аудиопереключателя нужно сверять со схемой и stock, особенно
+  с ранее найденными PC5 и GPS/опциональными цепями. Общий AT32 не решает это.
+- i2c_write_byte возвращает ACK, но WriteBuffer/ReadBuffer его игнорируют.
+  waitToSend ограничен10000 итераций, однако sendProperty/PowerDown/Tune и другие
+  callers не проверяют результат. Это не надёжная обработка отсутствующего чипа.
+- PowerUp выставляет isSi4732On=true без успешного GET_REV. CheckChipID отдельно
+  проверяет CTS и PN0x0D, но Radio_Init её не вызывает. Нельзя объявлять chip-ready
+  только по выполнению PowerUp.
+- SwitchMode сначала устанавливает запрошенный mode, затем PatchPowerUp в конце
+  принудительно пишет si4732mode=USB. При первом входе в LSB из не-SSB запрос
+  теряется; в исходнике рядом есть TODO. Это видимая программная проблема.
+- applyVfo вызывает SetAutomaticGainControl(1,0); первый аргумент AGCDIS идёт
+  непосредственно в override. Это отключение AGC, а не доказательство
+  автоматического управления усилением. PowerUp AM делает то же.
+- sendProperty вызывает delay_ms(8), хотя собственный комментарий говорит>=10ms.
+  Это расхождение реализации с комментарием, не самостоятельно проверенная норма.
+- fDiv и VFO defaults используют единицы10Hz, а границы Radio_AutoModulation
+  выглядят как Hz (88..108 миллионов для WFM). Нужна отдельная проверка единиц
+  на всех входах перед использованием auto mode; здесь это найденное подозрение,
+  а не измеренный пользовательский сбой.
+- Чтение tune status выбирает AM только для exact AM, иначе FM. USB/LSB требуют
+  отдельной проверки command family, поэтому эти helpers не считать готовыми.
+https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/driver/si473x.c#L93-L173
+https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/driver/si473x.c#L200-L238
+https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/driver/si473x.c#L335-L438
+https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/driver/si473x.c#L510-L537
+
+4. Что переносимо в наш план
+
+Предложения реализации, не уже работающие функции UV98:
+а) Разделить receiver backend и пользовательские A/B-контексты: BK и Si47
+   имеют разные диапазоны, режимы, метрики и правила готовности.
+б) В Rust сделать типизированные команды/ответы, явный адрес, bounded CTS,
+   проверку ACK/ERR, отдельные состояния Reset/Powered/Identified/Tuned/Fault.
+   Тайм-аут должен отменять операцию и сохранять mute, не продолжать команды.
+в) Сначала подтвердить схемные reset/power/audio pins и GET_REV, затем FM/AM RX;
+   SSB patch и BFO — отдельный этап с проверкой конкретного чипа и происхождения
+   patch. Наличие функции downloadPatch не решает совместимость и лицензию.
+г) Тесты команд должны ловить first-LSB, единицыHz/10Hz/kHz, отсутствие ACK,
+   CTS timeout, переключение аудио, возврат к BK, отмену и повторный вход.
+д) Hardware acceptance: услышанный известный сигнал на выбранном backend,
+   независимые mode/bandwidth/AGC и возвращение к обычному RX без зависания.
+   Качество HF/SSB и покрытие диапазона не подтверждаются одной командой tune.
+
+5. DSP и AM ATIS
+
+OUT_ANALOG, управляющий I2C и свойства внутреннего DSP Si47xx не дают MCU поток
+PCM. В исследованных radio/Si473x путях нет ADC/DMA аудиозахвата, NR/NB или
+выходного PCM/DAC pipeline. Наличие CMSIS DSP в external этого не меняет.
+Root отдельно проверил Makefile: источники CMSIS DSP в сборку не включены.
+Этот драйвер не исправляет наш AM ATIS126.4MHz на основном RF-тракте: нельзя
+перепутать исследование HF-приёмника и диагноз слабой авиационной AM на BK.
+
+6. Лицензия и состояние
+
+Root не обнаружил проектную LICENSE/NOTICE/COPYING вне external в данном
+snapshot. Открытый доступ к C и patch не равен разрешению скопировать их.
+Этот отчёт сохраняет факты интерфейса, замечания и pinned ссылки; C-код/patch
+в UV98 не перенесены. Нужны отдельная лицензионная проверка и аппаратные факты.
+Реестр требований и roadmap этим исследованием не изменялись.

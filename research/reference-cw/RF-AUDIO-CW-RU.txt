@@ -1,0 +1,119 @@
+UV-K5 CW: AM/AGC, аудио и управление — исследование исходников
+Дата: 2026-11-09. Только исследование; код UV98, COM и рация не изменялись.
+
+Источник закреплён:
+https://github.com/briand/uv-k5-firmware-custom-cw/tree/ff2547182e8557de61298c53ef76dfc9870374c4
+Содержимое получено через GitHub connector fetch/fetch_file, а не только README.
+Ни сборка этого проекта, ни его аппаратная проверка здесь не выполнялись.
+CW ниже — предложение команды на будущее, не ранее принятое требование пользователя.
+Пользователь предложил сам репозиторий как референс, включая спектр.
+
+1. Что реально делает AM fix
+
+am_fix.c: AM_fix_init, AM_fix_reset, AM_fix_10ms, AM_fix_enable.
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/am_fix.c#L230-L396
+
+Это управление усилением RF-тракта BK4819, а не обработка аудиосэмплов.
+AM_fix_10ms усредняет текущий и предыдущий RSSI; целевое raw-значение 142.
+При превышении уровня уменьшает усиление, при большом превышении перескакивает
+по таблице. Гистерезис 6 dB, hold 30 вызовов; при штатном вызове каждые 10 ms
+это 300 ms. После hold усиление повышается по одному шагу. Результат пишется
+в BK4819_REG_13. Таблица содержит аппаратные слова LNA/MIXER/PGA и оценки dB.
+Вызов ограничен AM и выполняется из APP_TimeSlice10ms; внутри есть проверки
+настройки, enable, номера VFO и состояния foreground/RX.
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/app.c#L1145-L1159
+
+Связь с аппаратным AGC не спрятана: RADIO_SetupAGC при AM fix вызывает
+BK4819_SetAGC(0); тот меняет REG_7E bit15 и фиксированный индекс 3 в bits14:12.
+Без fix используется аппаратный AGC и BK4819_InitAGC(listeningAM).
+RADIO_SetModulation выбирает AF_AM и отдельно AFC/AF DAC.
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/radio.c#L953-L1018
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/driver/bk4819.c#L244-L310
+
+Полезно для UV98: проверять совместно AF mode, REG_7E, применяемое слово A13,
+реальную периодичность алгоритма, hysteresis/hold и восстановление при смене
+режима. Сравнивать fixed gain / stock AGC / экспериментальный AGC на одинаковом
+сигнале, сохраняя заводские данные. Управление по времени должно быть явно
+отделено от скорости UI и количества проходов main loop.
+
+Это НЕ доказательство причины слабого ATIS на UV98. Код описывает защиту AM
+демодулятора от перегрузки/искажения; слабая разборчивость может иметь другую
+причину. Совпадение raw target142 с нашим stock-derived алгоритмом недостаточно:
+другие таблицы, тракт, усиление, RF-чип/вариант платы и cadence имеют значение.
+Нельзя заменить нашу фабричную таблицу таблицей UV-K5 или объявить AM исправленным
+по наличию функции с именем AM_fix. Нужна сравнительная аппаратная приёмка.
+
+2. CW: реальные алгоритмы и отдельный режим практики
+
+app/cwkeyer.c: CW_HandleState, CW_HandleBugState, ptt_action, CW_UpdateWPM,
+CW_StartMacroPlayback, CW_PlaybackHandleState, CW_CheckKeyerInputs.
+Есть автоматы iambic A/B, Ultimatic, bug и ручной ключ; память противоположного
+плеча, настраиваемая скорость, интервалы элементов/букв/слов, проигрывание макросов.
+Ввод ключом прерывает playback. app/cwmacro.c кодирует/декодирует элементы Morse,
+проверяет длину/контрольную сумму макроса, хранит и показывает набранное.
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/cwkeyer.c
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/cwmacro.c
+
+CW_AppUpdate отделяет local-only sidetone от RF-пути. При практике, записи
+макроса или выключенном break-in генератор тона работает через AF_ALAM и
+REG_70/частотное слово, после чего RF action принудительно становится NONE.
+В RF-ветви есть PrepareTX, resume/suspend и отдельный stuck-key guard:
+7 секунд без паузы минимум в две точки, затем блокировка до отпускания на 1 s.
+Это защита и от бесконечных повторяемых точек, не только от сплошной несущей.
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/cwapp.c#L80-L292
+
+app/cpo.c: CPO_Enter/Exit/Tick/ProcessKeys — отдельный экран практики.
+UP/DOWN меняют 10..45 WPM, STAR переключает подсветку, 4 — световую индикацию
+при включённой сборочной опции. EXIT централизованно выходит через ProcessKey.
+CW_EnunciateStart/Update/Stop воспроизводят текст/частоту азбукой Морзе локально,
+сохраняя и восстанавливая аудиосостояние; это не распознавание принятого CW.
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/cpo.c#L43-L149
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/app.c#L1632-L1648
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/cwenunciate.c
+
+Переносимые предложения: pure Rust keyer FSM с детерминированными тестами;
+сначала локальный тренажёр без RF, общий EXIT, явный владелец аудиопути;
+прерывание макроса любым действием отмены; восстановление RX после выхода.
+CW RF/QSK не следует включать простым использованием нашего FM PTT API:
+нужны отдельные доказанные последовательности, времена ключевания, PA envelope,
+проверка спектра и сохранение общих release/fault/TOT-защит. Это будущие идеи.
+
+3. Кнопки и аппаратные ограничения
+
+CW_ReadKeys использует три последовательных активных отсчёта, фронты dit/dah
+и память последнего плеча; CW_CheckKeyerInputs требует отпущенного входа перед
+сменой режима. Ключ и обычный PTT имеют явное разделение владения.
+Но cwhardware.c меняет UV-K5 PA8 UART RX в землю/ADC, PB11 SWDIO в ring input,
+а в ADC-режиме PC5 PTT становится выходом LOW. Эти пины относятся к UV-K5.
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/cwhardware.c#L253-L385
+
+На UV98 другой MCU и разводка; PC5 уже участвует в другом аудио/RF-пути.
+Нельзя повторять переподключение UART/PTT/SWD, ADC thresholds или pin numbers.
+Физический нижний PTT UV98 по-прежнему требует отдельного подтверждения.
+Сначала определить доступный ввод и собственность пинов, потом адаптировать
+только события FSM. Дребезг лучше задавать временем, а не неизвестным loop rate.
+
+4. Что означает DSP в этом репозитории
+
+BK4819_REG_30_ENABLE_TX_DSP/RX_DSP включает внутренние блоки радиочипа.
+В просмотренных аудио/CW путях MCU посылает команды регистрам и генераторам
+тона. Потока PCM, ADC/DMA захвата приёмного аудио, FFT/NR/NB алгоритма в этом
+пути не обнаружено. Наличие CMSIS в external не доказывает audio DSP pipeline.
+CW RF-ветвь даже отключает MIC_ADC, формируя несущую и отдельно sidetone.
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/driver/bk4819.c#L1189-L1239
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/audio.c
+
+Для нашего NR/NB нужны сначала доказанные вход/выход аудиосэмплов, частота,
+DMA/буферы, запас CPU и измеримая задержка. Внешний ANC и генератор тона нельзя
+выдавать за такую цепочку. Работа CW/USB через AF_BASEBAND2 тоже не доказывает
+качественный SSB или программный DSP на UV98.
+
+5. Граница использования
+
+Makefile по умолчанию ENABLE_AM_FIX=1, ENABLE_CW_MODULATOR=1,
+ENABLE_CW_ENUNCIATE=1, но ENABLE_SPECTRUM=0. Наличие spectrum source отдельно
+исследовано в соседних отчётах; этот default нельзя считать его демонстрацией.
+https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/Makefile#L34-L46
+Исследованные C-файлы имеют заголовки Apache-2.0 и авторство. При будущем
+заимствовании кода требуются сохранение атрибуции и отдельная проверка лицензии
+конкретных файлов. Сейчас сохранены идеи и ссылки, без копирования реализации.

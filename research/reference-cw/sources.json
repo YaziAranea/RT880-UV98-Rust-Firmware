@@ -1,0 +1,126 @@
+{
+  "schema": 1,
+  "research_date_local": "2026-11-09",
+  "timezone": "Asia/Omsk",
+  "scope": "Read-only source research and design documentation. No third-party source, images or firmware patches copied into UV98 sources; no build, flash, RF or COM action.",
+  "references": [
+    {
+      "repository": "briand/uv-k5-firmware-custom-cw",
+      "commit": "ff2547182e8557de61298c53ef76dfc9870374c4",
+      "tree": "423fbb47d0e34ef5f78c862637007d5f443b67a8",
+      "observed_default_spectrum_enabled": false,
+      "license": "Apache-2.0 (top-level LICENSE; file-level attribution still required on a future code port)",
+      "files": [
+        {
+          "path": "Makefile",
+          "git_blob_sha": "767589ec6bd971338dbf84990151d55e25db206a",
+          "url": "https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/Makefile"
+        },
+        {
+          "path": "LICENSE",
+          "git_blob_sha": "261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64",
+          "url": "https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/LICENSE"
+        },
+        {
+          "path": "README.md",
+          "git_blob_sha": "14ebf629fb82f7720105c7ced141425c96fb4c1a",
+          "url": "https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/README.md"
+        },
+        {
+          "path": "app/spectrum.c",
+          "git_blob_sha": "be623f527c2a3b52adcddd7277f79cec4006dd17",
+          "url": "https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/spectrum.c"
+        },
+        {
+          "path": "app/spectrum.h",
+          "git_blob_sha": "1c1cce52818c660cc9e2205a312c6c9b5e951383",
+          "url": "https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/spectrum.h"
+        },
+        {
+          "path": "am_fix.c",
+          "git_blob_sha": "dade2397d83880d93e0b97317be8b548f7f9d14f",
+          "url": "https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/am_fix.c"
+        },
+        {
+          "path": "app/cwapp.c",
+          "git_blob_sha": "7ca058261214d145672a1833a6eb73d0cce8bad3",
+          "url": "https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/cwapp.c"
+        },
+        {
+          "path": "app/cwkeyer.c",
+          "git_blob_sha": "0618539a873e7dbad55e80ecbf16ca81d4b6af09",
+          "url": "https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/cwkeyer.c"
+        },
+        {
+          "path": "app/cwhardware.c",
+          "git_blob_sha": "b26564168e6d09dbf5dba9d5c9dfb9a3d073bceb",
+          "url": "https://github.com/briand/uv-k5-firmware-custom-cw/blob/ff2547182e8557de61298c53ef76dfc9870374c4/app/cwhardware.c"
+        }
+      ]
+    },
+    {
+      "repository": "fagci/rt880-fw",
+      "commit": "619fa079c657433798cd4475997ecaf476e5cd73",
+      "tree": "a34845c2b7cce8621682d0c6d4c8ddebee07dd84",
+      "same_commit_as_existing_board_reference": true,
+      "license": "No project-level LICENSE/NOTICE/COPYING found in inspected tree; vendor licenses are separate",
+      "files": [
+        {
+          "path": "Makefile",
+          "git_blob_sha": "227f3c07e1210781abbea1147546a25994553df8",
+          "url": "https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/Makefile"
+        },
+        {
+          "path": "src/main.c",
+          "git_blob_sha": "253c400e3b6847a2d12e3b8e96275f817c021d58",
+          "url": "https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/main.c"
+        },
+        {
+          "path": "src/modes/mode.c",
+          "git_blob_sha": "bc45a48809a0d68fd84f9de32f3ad4ac062270ea",
+          "url": "https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/modes/mode.c"
+        },
+        {
+          "path": "src/modes/analyser.c",
+          "git_blob_sha": "bbb0ed0720813ed0a6213ebe84b3357f8fcd0bab",
+          "url": "https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/modes/analyser.c"
+        },
+        {
+          "path": "src/ui/spectrum.c",
+          "git_blob_sha": "81f38265e7fa825f3291739cae327e0d9f7cb7bd",
+          "url": "https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/ui/spectrum.c"
+        },
+        {
+          "path": "src/driver/st7789.c",
+          "git_blob_sha": "26473439f04ac936cae208da22bd0cad204ad819",
+          "url": "https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/driver/st7789.c"
+        },
+        {
+          "path": "src/driver/board.c",
+          "git_blob_sha": "60e548689d4deaa75841b8e5d55a16b9692e7f57",
+          "url": "https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/driver/board.c"
+        },
+        {
+          "path": "src/driver/board.h",
+          "git_blob_sha": "e3372c312ea2ec3a90b25619a3e44cbd63eec602",
+          "url": "https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/driver/board.h"
+        },
+        {
+          "path": "src/radio.c",
+          "git_blob_sha": "7042916dc63403c30f7bcca90797b97cd081ab39",
+          "url": "https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/radio.c"
+        },
+        {
+          "path": "src/driver/si473x.c",
+          "git_blob_sha": "633cbbb6902c963366bd76e45255ef912cf8eaaf",
+          "url": "https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/driver/si473x.c"
+        },
+        {
+          "path": "src/driver/bk4819.c",
+          "git_blob_sha": "97b61c8ee0734d5395f997b98d6b17e72e21ed86",
+          "url": "https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/driver/bk4819.c"
+        }
+      ]
+    }
+  ]
+}

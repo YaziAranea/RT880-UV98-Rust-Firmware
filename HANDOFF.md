@@ -55,6 +55,7 @@
 - [Spectrum runtime](research/radio018/SPECTRUM-RUNTIME-AUDIT-RU.txt).
 - [Подтверждённый штатный быстрый обзор и КВ](research/radio018/SPECTRUM-HF-EVIDENCE-RU.txt).
 - [Полный технический handoff](NEXT-SESSION-RU.txt).
+- [Новые референсы владельца: RT880 и CW, план адаптации](research/reference-cw/README-RU.md).
 
 ## Не потерять требования
 

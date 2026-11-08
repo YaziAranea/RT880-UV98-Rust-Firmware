@@ -11,6 +11,7 @@
 3. [Технический handoff следующей сессии](NEXT-SESSION-RU.txt).
 4. [Единый реестр 41 требования](FEATURES-NEXT-RU.txt).
 5. [Аудит реально подключённого функционала](FUNCTIONAL-AUDIT-RU.txt).
+6. [Разбор RT880/CW и план собственного спектра](research/reference-cw/README-RU.md).
 
 ## Текущее состояние
 
