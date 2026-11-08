@@ -1,0 +1,20 @@
+[package]
+name = "uv98-board-diagnostic"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+default = []
+hardware = ["dep:at32f4xx-pac", "uv98-board-at32/hardware", "uv98-lcd-at32/hardware", "uv98-clock-profile/hardware", "uv98-board-pins/hardware"]
+
+[dependencies]
+uv98-diagnostic = { path = "../diagnostic" }
+uv98-display = { path = "../display" }
+uv98-nor-read = { path = "../nor-read" }
+uv98-keys = { path = "../keys" }
+uv98-board-at32 = { path = "../board-at32" }
+uv98-lcd-at32 = { path = "../lcd-at32" }
+uv98-clock-profile = { path = "../clock-profile" }
+uv98-board-pins = { path = "../board-pins" }
+at32f4xx-pac = { version = "=0.4.0", default-features = false, features = ["at32f423"], optional = true }

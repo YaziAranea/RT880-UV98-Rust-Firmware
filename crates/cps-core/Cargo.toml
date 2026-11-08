@@ -1,0 +1,9 @@
+[package]
+name = "uv98-cps-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Atomic in-memory editing and review of saved UV98/RT880 CPS files"
+
+[dependencies]
+uv98-codeplug = { path = "../codeplug" }

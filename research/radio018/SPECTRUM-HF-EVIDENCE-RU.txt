@@ -1,0 +1,45 @@
+Быстрый обзор RX и отдельный КВ-приёмник, 2026-11-09.
+Не live-проверка и не утверждение комплектации пользовательской UV98Plus.
+
+Стоковая sweep-функция08023A00 вызывается249D0 при countdown200011B0=0.
+249C2..249C6 ставит10;21272..21280 уменьшает countdown в nominal1msIRQ.
+23A30 читаетrawA67&01FF через4F40 в начале следующего прохода.
+23C58..23CF8:4B88(corrected frequency) пишетA38,A39, затемA37=1F0F,
+A30=0200,A30=BFF1, свежийA33→(old&FFCC)|rxmask. Ровно6writes+1read.
+НиPF0, ни delay, ниSQL/tones/audio/gain setup здесь нет.
+derive_sweep_evidence.py исполняет originalThumb и сохраняетfast-sweep.csv:
+14частот*4initialA33=56cases, включая границы и синтетическийFFFF,
+демонстрирующий СОХРАНЕНИЕTXbits. FFFF не разрешает liveисполнение.
+
+Предлагаемая интеграция:
+1. ПолныйRX одинраз: PA/gatesoff, mutePF8, фиксированныйgain, AMAGCневызывать.
+2. Заранее проверитьвсеbins: одинаковыйcalibration.band_index, RXroute/PF0;
+   ширина и filters неизменны. На границе сузитьокно/отказатьfastpath.
+3. Выполнитьточныйfastfragment; readback38/39/30/33 подтверждаетрегистры,
+   неPLLlock. Минимум10ms доRSSI — исходный nominalcadence, физический
+   settling надо измерить; не объявлять такой ACK аппаратной PLLпроверкой.
+4. uiсобираетчастичныеbins и обновляетграфик редко/поdirtyrows. 81/101bins
+   при10ms означают теоретически0.8/1s плюсIO/UI; не обещаниечастотыкадров.
+5. PTT/Stop отменяет pendingticket, никакойTX; fullRXrestore исходнойчастоты
+   отдельнымзавершением. HeldPTT не возобновляетsweep.
+Существующий spectrum::Engine имеетticket/deadline/partial/peak semantics,
+но прежнийARMlayout-report даёт7760B: бюджетRAM проверитьпередвключением.
+
+КВ ниже18MHz:
+Основнойselector12A30 знает18..660 и840..1300MHz сразнымиcalbands/routes.
+Заокнами оставляетstaleroute; Rustправильноотказывает. Разблокировать
+его для2..18MHz не является реализацией отдельного КВприёмника.
+RT880 V2.pdf стр.2: HF/800 LNAведёт вA RXRF(primaryBK A). BK B/U400
+имеетотдельныеMOD/AF/TXцепи. НельзяобъявитьBK B аппаратнымКВbelow18.
+
+В локальном исходномнаборе C:/Users/User/Desktop/USB/rt880/si4732sch.jpg
+виден U650 SI4732A10: AMI8,FMI6,RST9,SENB10,SCLK11,SDIO12,RCLK13,
+LOUT1/ROUT16. Рядомssb_patches/ssb_patches/amrx_6_0_1...csg.
+СхемаV2стр.1 имеетдругой U106NC восьминогийFMreceiver+SCK1080/SDA1080;
+онпомеченNC. Имена1080 не доказывают установленныйчип.
+CPS первичныйdecompile SETFMChInfo11871..11918/labels8084 подтверждает
+форматотдельныхFMrecords:64..108MHz,2..30MHz,520..1710kHz,153..279kHz;
+FM/AM/LSB/USB/CW,BFO. См.research/cps/settings/SETTINGS-ZONES-FM.txt.
+Это подтверждаетсемействофункций/данных; комплектацияUV98PlusиответchipID
+пока неизвестны. Следующийотдельныйэтап: stockcontrolbus/reset/audio routing,
+затем boundedидентификацияreceiverбеззаписиNOR/calibration.

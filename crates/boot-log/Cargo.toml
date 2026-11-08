@@ -1,0 +1,13 @@
+[package]
+name = "uv98-boot-log"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+default = []
+hardware = ["dep:at32f4xx-pac", "dep:uv98-board-pins"]
+
+[dependencies]
+at32f4xx-pac = { version = "=0.4.0", default-features = false, features = ["at32f423"], optional = true }
+uv98-board-pins = { path = "../board-pins", features = ["hardware"], optional = true }

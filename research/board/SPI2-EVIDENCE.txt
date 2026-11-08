@@ -1,0 +1,120 @@
+AT32F423 / SPI2 NOR: bounded related-board implementation
+2026-11-08. Offline static analysis and emulated register helpers only.
+
+Identity and source limits
+--------------------------
+Reference: RT-880_Upgrade_V1_16_250915.nicsure.bin, 251904 bytes,
+mapped at 0x08002800, SHA256
+eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc.
+This is the related RT880 image, NOT an exact MCU dump from the user's UV98.
+The user's external 4 MiB NOR backup does not establish MCU/loader identity.
+
+User-provided schematic: C:/Users/User/Desktop/USB/rt880/RT880 V2.pdf,
+page 3. U502 is labelled MCU-64; U509 is W25Q32. U502 pins33/34/35/36
+connect to W25Q-CS/SCK/DO/DI respectively. U509 WP/HOLD are pulled up.
+Local AT32F423 datasheet 2504231454_ARTERY-AT32F423RCT7_C7452165.pdf,
+revision2.03, printed pages28..31: LQFP64 pins33..36 = PB12..PB15.
+Schematic SHA256: b7858c30fbe6eb8bf57967d57d9985b29951ccffa766ca5ac9240796c9fab32a.
+Datasheet SHA256: 6d4a423ff66fe757a2ec19c85a1cbf145d10bb7662ed940298615cfa8aecb269.
+The matching stock GPIOB and SPI2 addresses independently support this mapping.
+This does not prove the user's PCB revision or chip marking. mcu-detail.png is
+a crop rendered from schematic page3, not a photo of the user's board.
+
+Related stock initialization
+----------------------------
+Call chain: app device init0x080145CC calls GPIO init0x08011AC8, ADC init,
+then SPI2 init0x08010C74 at0x080145DE. Broader reset/clock evidence lives in
+research/startup and is not reimplemented by this crate.
+
+0x08010C74..0x08010D3E configures:
+  PB12: output, push-pull, pull-up, drive1 (vendor name STRONGER).
+  PB13/PB14/PB15: mux mode2, AF5, push-pull, pull-up, drive1.
+  Direct CS high store:0x08010CFE -> GPIOB SCR0x40020418, value0x1000.
+  SPI2 base0x40003800: full-duplex, master, divider2, MSB-first, 8-bit,
+  CPOL=1/CPHA=1 (mode3), software NSS with internal NSS high, enabled.
+  From reset register state CTRL1=0x0347, CTRL2=0, I2SCTRL=0.
+The SPI init helper itself neither enables CRM gates nor resets SPI2.
+
+GPIO helper0x08025464 writes per-pin CFGR/OMODE/ODRVR/PULL fields;
+mux helper0x080254F0 updates one MUXL/H nibble. Combined final masked words:
+  CFGR=(old & 00FFFFFF) | A9000000
+  OMODE=old & FFFF0FFF
+  ODRVR=(old & 00FFFFFF) | 55000000
+  PULL=(old & 00FFFFFF) | 55000000
+  MUXH=(old & 000FFFFF) | 55500000
+PB12's unused mux nibble and every other pin's fields remain preserved.
+
+SPI helper0x08025B7E and enable0x08025B3A establish the control words.
+0x08025A4C transfers one byte with received-data and BUSY waits.
+0x08025A94 receives a buffer using dummy0xA5, TDBE bit1, RDBF bit0.
+0x08025D30 sends03h and three big-endian address bytes, with GPIOB CS.
+Status register at+8: RDBF=1,TDBE=2,BUSY=0x80; fault bits3..6.
+The stock buffer receive helper has no final BUSY wait; the new backend adds it.
+
+Clock scope
+-----------
+Parent startup analysis derives HICK input8MHz, PLL NS96/MS1/FR8 plus extra/2:
+SYSCLK/AHB48MHz, APB1=24MHz, APB2=48MHz, stock SPI2 SCK=12MHz.
+These are reference-code calculations, not a clock measurement or confirmation
+of the user's loader state. The backend changes no oscillator/PLL/divider tree.
+Config.divider is explicit (2..256); actual SCK and chip limits are a caller
+precondition. Poll budgets count status reads, not milliseconds/cycles.
+
+Hardware implementation and deliberate differences
+-------------------------------------------------
+crates/board-at32 is no_std; feature hardware is off by default.
+hardware::Spi2Nor::from_quiescent owns SPI2/GPIOB and temporarily borrows CRM.
+Construction is unsafe because exact wiring, clock/timing, bus ownership and
+radio inactivity cannot be checked in software. No default Stage0 hookup.
+It enables only GPIOB gate(AHBEN1 bit1), SPI2 gate(APB1EN bit14), and resets only
+SPI2(APB1RST bit14). No GPIO port reset, RF register write, oscillator or NVIC
+operation. PAC field/register definitions and local vendor headers agree.
+It preloads CS high before pin mode changes; stock sets high afterwards.
+It configures SPI mode3 before exposing SCK/MOSI mux mode. This is intentional,
+not a claim of instruction-identical startup behavior.
+No invented fixed delays. Caller must establish valid NOR power-up and CS
+timing; physical waveform timing remains unverified. No loader handoff assumed.
+
+Only one four-byte03h header with address<4MiB is accepted after select; all
+other command forms fail before any SPI byte. Reads cannot cross4MiB, including
+multiple read calls in one transaction. No write-enable/program/erase/status
+write/recovery or discovery command exists. Each transferred byte waits for
+TDBE/RDBF within NonZeroU32 budget; deselect waits bounded BUSY then raises CS
+even on error. A transport fault poisons the bus; cleanup disables SPI; further
+transactions fail. Invalid API order/header/bounds do not transmit bytes.
+Drop is abortive CS-high/SPI-disable cleanup, not successful read completion.
+
+at32f4xx-pac0.4.0 models DT as16-bit, whereas the local vendor source and stock
+0x08025B4E/25B56 use32-bit accesses. The backend uses one documented unsafe
+volatile32-bit DT access boundary, retaining observed width; other MMIO uses PAC.
+No arbitrary public MMIO or RF API is exposed.
+
+RF/PA evidence and remaining gap
+-------------------------------
+0x08011AC8 sets PC15/PC4/PC5 output, push-pull, no pull, moderate drive2;
+then clears PC15 at0x08011B74, PC4 at11B78, PC5 at11B7C.
+Schematic page3 and AT32 pin table map these to:
+  PC15/pin4 HF-TXPOWER-EN; PC4/pin24 RXTS-SW; PC5/pin25 FM-POWER-EN.
+Those LOW initialization writes are confirmed. They are NOT proof that all
+PA/RF paths are inactive. Schematic page1 has additional RX/TX power/control
+signals driven by BK4819 RF-chip GPIOs; their full inactive sequence has not
+been established here. The backend deliberately does not touch these pins.
+It must not be called as a stand-alone whole-board boot sequence.
+
+Verification and license boundaries
+----------------------------------
+derive_spi_oracle.py runs0x08010C74 with GPIO/SPI helper calls replaced by the
+same stock helpers operating on ordinary emulated RAM. The single direct CS
+store is recorded/skipped. No peripheral address is mapped; no target boot.
+Four seeds cover reset/all-one/mixed unrelated GPIO fields. Fixture CSV and
+oracle-summary.json record outputs/SHA256; Rust compares its words to fixture.
+Host tests also cover command filtering, capacity boundary, receive timeout,
+BUSY cleanup timeout, initial fault and poisoned transport. Build/test results
+are recorded separately by the workspace owner; none implies physical testing.
+
+This Rust implementation is newly written from register semantics and bounded
+reference analysis; no vendor C implementation or firmware bytes are copied
+into source. Local vendor files at32f423_gpio.h/spi.h/spi.c carry Artery's BSP
+copyright notice permitting use with Artery MCUs; retained in original files.
+The optional PAC dependency declares MIT/Apache-2.0. The reference firmware's
+license is not established, and this crate does not distribute that binary.

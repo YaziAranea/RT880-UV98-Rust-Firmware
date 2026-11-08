@@ -1,0 +1,21 @@
+{
+  "reference_sha256": "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc",
+  "selector_cases": 640,
+  "receive_cases": 432,
+  "tx_evidence_cases": 432,
+  "receive_events": 1296,
+  "tx_evidence_events": 1820,
+  "mmio_mapped": false,
+  "hardware_accessed": false,
+  "selector_stop": "0x08012CE0 before calibration I/O",
+  "substitutions": [
+    "A read/write 0x0801E620/0x0801E660",
+    "exact reviewed MCU store instructions"
+  ],
+  "disassembly_generated": true,
+  "sha256": {
+    "crates/band-plan/tests/fixtures/routing.csv": "2116f362d97e6f714eae73ee84cf156681056b2b49a7209c00b1947bc8bc9ad8",
+    "crates/band-plan/tests/fixtures/receive.csv": "2bbe94734e1813b07f1941eafb821a09f3994f36fd46358e3ac72caec4de5347",
+    "research/band-switch/transmit-evidence.csv": "f3d506b76f4f50e8d51239784d6e1a44ec0dce75c4466eb5b62a6615120de776"
+  }
+}

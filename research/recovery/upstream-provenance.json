@@ -1,0 +1,81 @@
+{
+  "checked_date": "2026-11-08",
+  "sources": [
+    {
+      "repository": "nicsure/RT880-FlasherX",
+      "path": "RT880-FlasherX/MainWindow.axaml.cs",
+      "blob_sha": "9a706e86128facd0d6c4f3f79c82b714df967017",
+      "source_url": "https://github.com/nicsure/RT880-FlasherX/blob/915545ae89f4a7547f6cea37408a5ba1d48e21f6/RT880-FlasherX/MainWindow.axaml.cs",
+      "local_static_copy": "work/recovery-analysis/nicsure-RT880-FlasherX-RT880-FlasherX_MainWindow.axaml.cs",
+      "classification": "upstream host-side implementation; not device bootloader",
+      "source_commit": "915545ae89f4a7547f6cea37408a5ba1d48e21f6",
+      "local_sha256": "858b37d09385be73f5ad795aa1867a9416267b3d905ba0a9acf2f71f237a3d31",
+      "local_git_blob_sha1": "9a706e86128facd0d6c4f3f79c82b714df967017",
+      "local_bytes_match_upstream_blob": true
+    },
+    {
+      "repository": "rampa069/RT880-flasher",
+      "path": "main.go",
+      "blob_sha": "4e9a6837b11f291e570050e715d694c069d54765",
+      "source_url": "https://github.com/rampa069/RT880-flasher/blob/6d7531a82356a0f2c057bc5f64bc4c2ad2fab9f5/main.go",
+      "local_static_copy": "work/recovery-analysis/rampa069-RT880-flasher-main.go",
+      "classification": "upstream host-side implementation; not device bootloader",
+      "source_commit": "6d7531a82356a0f2c057bc5f64bc4c2ad2fab9f5",
+      "local_sha256": "61d70b45cb1a508e9852bbb9ceb7f9dae623ee7a6f3f8a4c750b0186101ff6d2",
+      "local_git_blob_sha1": "4e9a6837b11f291e570050e715d694c069d54765",
+      "local_bytes_match_upstream_blob": true
+    },
+    {
+      "repository": "rampa069/RT880-flasher",
+      "path": "hex2bin.go",
+      "blob_sha": "210d466061a71f48c6a4fe39f77f3733d64325a8",
+      "source_url": "https://github.com/rampa069/RT880-flasher/blob/6d7531a82356a0f2c057bc5f64bc4c2ad2fab9f5/hex2bin.go",
+      "local_static_copy": "work/recovery-analysis/rampa069-RT880-flasher-hex2bin.go",
+      "classification": "upstream host-side implementation; not device bootloader",
+      "source_commit": "6d7531a82356a0f2c057bc5f64bc4c2ad2fab9f5",
+      "local_sha256": "ef36f3825b45f2ebe8b0d7a7b6eaea2c4c83df46c60bf3d510b49adb3748ad21",
+      "local_git_blob_sha1": "210d466061a71f48c6a4fe39f77f3733d64325a8",
+      "local_bytes_match_upstream_blob": true
+    },
+    {
+      "repository": "nicsure/RT880-FWFlasher",
+      "path": "RT880-FWFlasher/UI.cs",
+      "blob_sha": "e1c38e2c0979e8cd8d6e2c07df7e3b4ce27982dc",
+      "source_url": "https://github.com/nicsure/RT880-FWFlasher/blob/1436228b57bff33a74a2fe72a777780166c55cbf/RT880-FWFlasher/UI.cs",
+      "local_static_copy": "work/recovery-analysis/nicsure-RT880-FWFlasher-RT880-FWFlasher_UI.cs",
+      "classification": "upstream host-side implementation; not device bootloader",
+      "source_commit": "1436228b57bff33a74a2fe72a777780166c55cbf",
+      "local_sha256": "37bd08b809871a64b27de134241fa063c6b57454a2c8ccb4be6585ea075ffdf9",
+      "local_git_blob_sha1": "e1c38e2c0979e8cd8d6e2c07df7e3b4ce27982dc",
+      "local_bytes_match_upstream_blob": true
+    },
+    {
+      "repository": "fagci/rt880-fw",
+      "path": "flash.py",
+      "blob_sha": "f04d2919e9f3dea80ad73610ff825bb4154809d5",
+      "source_url": "https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/flash.py",
+      "local_static_copy": "work/recovery-analysis/fagci-rt880-fw-flash.py",
+      "classification": "upstream host-side implementation; not device bootloader",
+      "source_commit": "619fa079c657433798cd4475997ecaf476e5cd73",
+      "local_sha256": "37f955742a73064833c49e842720af4ebf41388804de3726e4a3f8723ca49139",
+      "local_git_blob_sha1": "f04d2919e9f3dea80ad73610ff825bb4154809d5",
+      "local_bytes_match_upstream_blob": true
+    },
+    {
+      "repository": "spm81/Multi-UVTools",
+      "path": "js/flash-rt880-ui.js",
+      "blob_sha": "47cee8b9735260be706f66ae101d5a8694cd63f4",
+      "source_url": "https://github.com/spm81/Multi-UVTools/blob/3979b8097af1703762e472f574219cbc2d35c172/js/flash-rt880-ui.js",
+      "local_static_copy": "work/recovery-analysis/spm81-Multi-UVTools-js_flash-rt880-ui.js",
+      "classification": "upstream host-side implementation; not device bootloader",
+      "source_commit": "3979b8097af1703762e472f574219cbc2d35c172",
+      "local_sha256": "339f4907b2a1213331f9f16766b6ada84dc0c9c7d0fa57d3308d3559f781b368",
+      "local_git_blob_sha1": "47cee8b9735260be706f66ae101d5a8694cd63f4",
+      "local_bytes_match_upstream_blob": true
+    }
+  ],
+  "notes": [
+    "Full third-party source caches remain in work/recovery-analysis outside the source package.",
+    "No flasher was built or executed; no COM was opened."
+  ]
+}

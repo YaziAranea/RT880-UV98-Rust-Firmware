@@ -1,0 +1,974 @@
+{
+  "reference_sha256": "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc",
+  "fixture_sha256": "29c24adaa1d1f49ca7f0451e7dc143891ccb6a9653c46c41bada3da1a8dfea31",
+  "output": "crates/board-policy/tests/fixtures/rf-requests.csv",
+  "case_count": 76,
+  "vector_count": 175,
+  "scope": "Register/GPIO request traces only. No physical RF-off assertion. Composite plan is new policy, not a captured stock function.",
+  "cases": [
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 0,
+      "read_registers": [
+        [
+          "A",
+          51,
+          0
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 1,
+      "read_registers": [
+        [
+          "A",
+          51,
+          1
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 2,
+      "read_registers": [
+        [
+          "A",
+          51,
+          2
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 4,
+      "read_registers": [
+        [
+          "A",
+          51,
+          4
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 8,
+      "read_registers": [
+        [
+          "A",
+          51,
+          8
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 12,
+      "read_registers": [
+        [
+          "A",
+          51,
+          12
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 16,
+      "read_registers": [
+        [
+          "A",
+          51,
+          16
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 32,
+      "read_registers": [
+        [
+          "A",
+          51,
+          32
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 51,
+      "read_registers": [
+        [
+          "A",
+          51,
+          51
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 64,
+      "read_registers": [
+        [
+          "A",
+          51,
+          64
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 128,
+      "read_registers": [
+        [
+          "A",
+          51,
+          128
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 255,
+      "read_registers": [
+        [
+          "A",
+          51,
+          255
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 256,
+      "read_registers": [
+        [
+          "A",
+          51,
+          256
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 512,
+      "read_registers": [
+        [
+          "A",
+          51,
+          512
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 1024,
+      "read_registers": [
+        [
+          "A",
+          51,
+          1024
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 2048,
+      "read_registers": [
+        [
+          "A",
+          51,
+          2048
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 4096,
+      "read_registers": [
+        [
+          "A",
+          51,
+          4096
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 8192,
+      "read_registers": [
+        [
+          "A",
+          51,
+          8192
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 16384,
+      "read_registers": [
+        [
+          "A",
+          51,
+          16384
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 23130,
+      "read_registers": [
+        [
+          "A",
+          51,
+          23130
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 32768,
+      "read_registers": [
+        [
+          "A",
+          51,
+          32768
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 42405,
+      "read_registers": [
+        [
+          "A",
+          51,
+          42405
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 65280,
+      "read_registers": [
+        [
+          "A",
+          51,
+          65280
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "tx_gates_a",
+      "entry": "0x8005318",
+      "input": 65535,
+      "read_registers": [
+        [
+          "A",
+          51,
+          65535
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 0,
+      "read_registers": [
+        [
+          "A",
+          51,
+          0
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 1,
+      "read_registers": [
+        [
+          "A",
+          51,
+          1
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 2,
+      "read_registers": [
+        [
+          "A",
+          51,
+          2
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 4,
+      "read_registers": [
+        [
+          "A",
+          51,
+          4
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 8,
+      "read_registers": [
+        [
+          "A",
+          51,
+          8
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 12,
+      "read_registers": [
+        [
+          "A",
+          51,
+          12
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 16,
+      "read_registers": [
+        [
+          "A",
+          51,
+          16
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 32,
+      "read_registers": [
+        [
+          "A",
+          51,
+          32
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 51,
+      "read_registers": [
+        [
+          "A",
+          51,
+          51
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 64,
+      "read_registers": [
+        [
+          "A",
+          51,
+          64
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 128,
+      "read_registers": [
+        [
+          "A",
+          51,
+          128
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 255,
+      "read_registers": [
+        [
+          "A",
+          51,
+          255
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 256,
+      "read_registers": [
+        [
+          "A",
+          51,
+          256
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 512,
+      "read_registers": [
+        [
+          "A",
+          51,
+          512
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 1024,
+      "read_registers": [
+        [
+          "A",
+          51,
+          1024
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 2048,
+      "read_registers": [
+        [
+          "A",
+          51,
+          2048
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 4096,
+      "read_registers": [
+        [
+          "A",
+          51,
+          4096
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 8192,
+      "read_registers": [
+        [
+          "A",
+          51,
+          8192
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 16384,
+      "read_registers": [
+        [
+          "A",
+          51,
+          16384
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 23130,
+      "read_registers": [
+        [
+          "A",
+          51,
+          23130
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 32768,
+      "read_registers": [
+        [
+          "A",
+          51,
+          32768
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 42405,
+      "read_registers": [
+        [
+          "A",
+          51,
+          42405
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 65280,
+      "read_registers": [
+        [
+          "A",
+          51,
+          65280
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "sleep_a",
+      "entry": "0x80052b0",
+      "input": 65535,
+      "read_registers": [
+        [
+          "A",
+          51,
+          65535
+        ]
+      ],
+      "events": 3
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 0,
+      "read_registers": [
+        [
+          "B",
+          51,
+          0
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 1,
+      "read_registers": [
+        [
+          "B",
+          51,
+          1
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 2,
+      "read_registers": [
+        [
+          "B",
+          51,
+          2
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 4,
+      "read_registers": [
+        [
+          "B",
+          51,
+          4
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 8,
+      "read_registers": [
+        [
+          "B",
+          51,
+          8
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 12,
+      "read_registers": [
+        [
+          "B",
+          51,
+          12
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 16,
+      "read_registers": [
+        [
+          "B",
+          51,
+          16
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 32,
+      "read_registers": [
+        [
+          "B",
+          51,
+          32
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 51,
+      "read_registers": [
+        [
+          "B",
+          51,
+          51
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 64,
+      "read_registers": [
+        [
+          "B",
+          51,
+          64
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 128,
+      "read_registers": [
+        [
+          "B",
+          51,
+          128
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 255,
+      "read_registers": [
+        [
+          "B",
+          51,
+          255
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 256,
+      "read_registers": [
+        [
+          "B",
+          51,
+          256
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 512,
+      "read_registers": [
+        [
+          "B",
+          51,
+          512
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 1024,
+      "read_registers": [
+        [
+          "B",
+          51,
+          1024
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 2048,
+      "read_registers": [
+        [
+          "B",
+          51,
+          2048
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 4096,
+      "read_registers": [
+        [
+          "B",
+          51,
+          4096
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 8192,
+      "read_registers": [
+        [
+          "B",
+          51,
+          8192
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 16384,
+      "read_registers": [
+        [
+          "B",
+          51,
+          16384
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 23130,
+      "read_registers": [
+        [
+          "B",
+          51,
+          23130
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 32768,
+      "read_registers": [
+        [
+          "B",
+          51,
+          32768
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 42405,
+      "read_registers": [
+        [
+          "B",
+          51,
+          42405
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 65280,
+      "read_registers": [
+        [
+          "B",
+          51,
+          65280
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "clear_b_gpio",
+      "entry": "0x8003f08",
+      "input": 65535,
+      "read_registers": [
+        [
+          "B",
+          51,
+          65535
+        ]
+      ],
+      "events": 1
+    },
+    {
+      "plan": "sleep_b",
+      "entry": "0x8003ec0",
+      "input": 0,
+      "read_registers": [],
+      "events": 2
+    },
+    {
+      "plan": "zero_a",
+      "entry": "0x8004f0c",
+      "input": 0,
+      "read_registers": [],
+      "events": 1
+    },
+    {
+      "plan": "zero_b",
+      "entry": "0x8003e08",
+      "input": 0,
+      "read_registers": [],
+      "events": 1
+    },
+    {
+      "plan": "boot_levels",
+      "entry": "0x8011b6c",
+      "input": 0,
+      "read_registers": [],
+      "events": 3
+    }
+  ]
+}

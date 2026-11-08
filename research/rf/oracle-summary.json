@@ -1,0 +1,28 @@
+{
+  "reference_sha256": "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc",
+  "fixture_sha256": "57ab5b42a753ea3f8a288ea49ffae29fcab5b08e1d3e1c9e941a4cf1a3ff2813",
+  "vectors": 903,
+  "counts": {
+    "power_helper": 259,
+    "mic_helper": 11,
+    "volume_helper": 374,
+    "compander": 7,
+    "filter": 48,
+    "power_select": 60,
+    "deviation_select": 144
+  },
+  "output": "crates/stock-model/tests/fixtures/rf-oracle.csv",
+  "mmio_mapped": false,
+  "intercepts": [
+    "0801E660/0801E6D4 capture register writes",
+    "0801E620/0801E698 return supplied register read value",
+    "08004F0C/08003E08 capture power argument in selection slices"
+  ],
+  "slice_stops": [
+    "080055BC",
+    "0800416A",
+    "08005530",
+    "080040CA"
+  ],
+  "scope": "Selected pure/basic-block behavior only; not startup or whole-firmware execution"
+}

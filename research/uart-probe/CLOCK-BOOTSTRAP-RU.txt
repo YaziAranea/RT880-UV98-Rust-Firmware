@@ -1,0 +1,101 @@
+UV98 UART probe 0.1.2: минимальная нормализация clock для первого маркера
+2026-11-08. Офлайн-исследование локального stock1.16 и Artery SDK.
+COM не открывался, устройство этим исследованием не изменялось.
+
+Причина нового bootstrap
+-----------------------
+Diagnostic0.1.1 оставался без UART при неподдержанном снимке clocks либо
+семействе MCU. Новый наблюдатель не должен требовать совпадения PID/SER или
+единственного PLL профиля до первого маркера. При этом до marker всё равно
+необходимо получить пригодный источник clocks и настроить физический UART.
+Нет обещания наблюдать fault, возникший раньше самой настройки UART.
+
+Первичные локальные источники
+----------------------------
+Stock: work/reference-firmware/RT-880_Upgrade_V1_16_250915.nicsure.bin
+SHA256 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc
+Этот кандидат уже работал после возврата на пользовательской станции.
+
+SDK база C:/Users/User/Desktop/USB/rt880/fw_lib/libraries/
+cmsis/cm4/device_support/system_at32f423.c:
+  SystemInit, строки76..128; system_core_clock_update, строки144..203.
+drivers/src/at32f423_crm.c:
+  crm_reset47..83; crm_auto_step_mode_enable639..645;
+  crm_hick_divider_select771..789; crm_hick_sclk_frequency_select799..816;
+  crm_clocks_freq_get923..997.
+drivers/inc/at32f423_crm.h:
+  HICK8/48 enum559..565; CTRL591..599; MISC1 битовые поля1140..1148;
+  MISC2 битовые поля1160..1166; auto-step enum495..499.
+
+Внутри стока SystemInit0x08021080:
+0x08021090 вызывает auto-step helper0x08024D74 с1.
+0x08021094..AE включает HICK и ждёт CTRL.HICKSTBL.
+0x080210B0..CE выбирает HICK в CFG.SCLKSEL и ждёт CFG.SCLKSTS=0.
+Только ПОСЛЕ этого0x080210D0..DA выключает PLL/HEXT/CFD и выполняет
+полный reset clock configuration. У UART-пробника нет необходимости повторять
+эти широкие сбросы или reprogram PLL, если он остаётся на HICK8.
+Auto-step helper0x08024D74 меняет только MISC2[5:4]:3=enable,0=disable.
+
+Предлагаемая последовательность
+------------------------------
+CRM base0x40023800. Все изменения — RMW указанных полей, не whole-register reset.
+Перед переходом должны быть остановлены унаследованные DMA/USB и нужные
+shift engines; PA11 совмещён с USB D-. Snapshot исходных CTRL/PLLCFG/CFG/
+MISC1/MISC2 сохранить до изменений, чтобы потом сообщить их отдельно.
+
+1. MISC2(+A4), mask0x30: установить0x30 — auto-step как в stock/SDK.
+2. CTRL(+00): установить bit0 HICKEN; ограниченно ждать bit1 HICKSTBL=1.
+3. MISC2(+A4), mask0x00070000: установить0x00040000 — direct HICK /16.
+   Выполнить минимум40 NOP/core cycles: такой settle есть в SDK перед сменой
+   direct HICK frequency. Это не задержка с измеренной длительностью.
+4. MISC1(+A0): очистить bit14 HICK_TO_SCLK; bit12 HICKDIV сохранить.
+   При bit14=0 SDK прямо определяет fixed8MHz, независимо от bit12.
+   /16 пока остаётся: direct source номинально500kHz. Бит14 относится к
+   direct HICK-to-system path; PLL config и HICKDIV не перенастраиваются.
+5. CFG(+08), mask3: записать0 — выбрать HICK. Ограниченно ждать
+   (CFG & 0xC)==0. Не отключать PLL или HEXT до подтверждённого перехода.
+   Этот вариант вообще не отключает/не перенастраивает PLL/HEXT.
+6. Только после подтверждения HICK очистить AHB divider[7:4] и
+   APB2 divider[15:13], общий mask0xE0F0. APB1 можно оставить унаследованным.
+   Во время этой операции source ещё500kHz, поэтому /1 не открывает высокой
+   частоты на Flash или APB2.
+7. MISC2(+A4), mask0x00070000: очистить — direct HICK /1, номинально8MHz.
+   Выполнить40 NOP/core cycles. Очистить auto-step bits0x30 после перехода.
+8. До выбора baud проверить: CTRL&3==3; CFG&(0xE0F0|0xF)==0;
+   MISC1&0x4000==0; MISC2&0x70000==0. Иначе не выдавать неподтверждённые baud.
+9. Для PCLK2=8MHz: округлённый USART divisor=(8000000+57600)/115200=69.
+   Это около115942baud номинально, ошибка+0.644%; точность HICK не измерена.
+
+Это новый, составленный из документированных операций минимальный путь,
+а не побайтовая копия vendor helper. Vendor crm_hick_sclk_frequency_select
+дополнительно устанавливает HICKDIV=1 через временный HICK_TO_SCLK=1;
+пробник оставляет HICKDIV как есть и использует документированное fixed8MHz.
+Сохранение bit12 избегает лишнего изменения унаследованного HICK/PLL пути.
+
+Что не требуется
+----------------
+Не нужны новый PLL profile, ожидание PLL lock, знание частоты HEXT, запись
+Flash latency/control, PWC, backup domain/RTC, watchdog configuration.
+На известном F423 nominal8MHz является обычным исходным режимом SystemInit.
+Пробник не должен начинать RF/LCD/NOR или считать прочитанные ID разрешением
+продолжить основное приложение. Установка этого наблюдателя использует
+совместимость проверенного стокового MMIO, а не универсальную поддержку MCU.
+
+Границы и проверки
+-----------------
+Устройство с другой memory map всё ещё может fault до первого маркера;
+неисправные clocks, lockPA11, короткий унаследованный WDT тоже могут дать тишину.
+Неподтверждённое состояние входа не становится доказанным из-за отсутствия
+guard. CPUID/CONTROL/IPSR/MCU IDs нужно сообщить как наблюдения, не предположения.
+Предел polling задаётся числом чтений, не гарантированными миллисекундами.
+Уже работающий watchdog может прервать даже этот короткий путь.
+
+Для linked-ASM/MMIO audit важны:
+- initial directHICK8/48 с разными prescalers, произвольный PLL и HEXT;
+- HICK delayed-ready и timeout; source-switch delayed/timeout;
+- запрет уменьшать AHB/APB2 division до подтверждения HICK;
+- итоговый divisor69, сохранение PLLCFG, PLLEN/HEXTEN и HICKDIV;
+- readback failures без продолжения UART с неверным baud;
+- whitelist clock/masters/PA11/USART6 writes; нулевые RF/LCD/NOR/Flash/PWC/WDT writes;
+- первый постоянный marker раньше чтения MCU-specific PID/SER/F_SIZE.
+Эмуляция не измеряет частоту, электрические уровни, работу кабеля или RF.

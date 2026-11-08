@@ -1,0 +1,37 @@
+{
+  "reference_sha256": "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc",
+  "counts": {
+    "cold_prefix": 7,
+    "tone": 4116,
+    "tx_body": 42,
+    "cold_full": 1,
+    "rx_body": 24,
+    "audio": 48,
+    "am_agc": 1161,
+    "tone_status": 1024
+  },
+  "hardware_accessed": false,
+  "mmio_mapped": false,
+  "hooks": [
+    "A register read/write",
+    "NOR read25D30 synthetic112B",
+    "delay8380 nominal argument",
+    "12 exact GPIO stores",
+    "cold stop4E62",
+    "audio stop518E",
+    "AM AGC stop242AC before UI"
+  ],
+  "scope": "Original cold prefix04DC0..04E62 and full04DC0; complete tone4388 including original DCS9920/994C; complete ordinary TX053F0..55C2; RX039C0+4228+4518+full4BF0, width/reset/body order from1F842..1F84A; audio50EA..518E; AM AGC24140..242AC; tone status4444 with acquisition state1125=1. RF register reset not modelled, unused reads seeded55A0; ordinary branch flags zero except named AM/status fixture states.",
+  "hashes": {
+    "cold-prefix.csv": "f047bd32e7ed10f3fbfb405799209a3f51e2b0e6460c67d3ad873c1d7442d836",
+    "tone.csv": "550d90800a644b5f5ef4f549c22eea81102bc8b51f5ab0de43907a66612841d0",
+    "tx-body.csv": "49decbb2c540347f72ea33fd36efb8988b5ea5160aa738c0c618cf65aeef07fc",
+    "cold-full.csv": "4b47aafa203b0e934c52fa684e96fe096e7af437ebdc46ffb02d1994d734283f",
+    "rx-body.csv": "bfa71c7f30bccc5deb63987338c3bd103fb9095fef5b472ffbacdeaa5d11f6d6",
+    "audio.csv": "3475c63b3d497a8cee7e9c8e44ab012dad48362a030f763b4991feb7daac2e14",
+    "am-agc.csv": "93279cb30cba20c17793dcd9df30fd00c0d5abcee0f67d2a3fd23a2b8bd0b824",
+    "am-gain-table.csv": "78284327e83a40b2af11520479c7f118eb7c0219c646b62661eb8d1e8dbb7816",
+    "tone-status.csv": "afc0afeda840cc838a55f3f20711d28bcd0ed66489815c6b2726a522788eb485",
+    "synthetic-calibration.hex": "ef2bc44d65ed1858d2c7aeacb16ea91dec15edeab72888d8d1cd2e94b2d6cafe"
+  }
+}

@@ -1,0 +1,145 @@
+{
+  "reference_sha256": "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc",
+  "hardware_validation": false,
+  "method": "bounded offline Cortex-M4 emulation; no MMIO mapped",
+  "selection_vectors": 694,
+  "correction_vectors": 96,
+  "source_and_cache_checks": [
+    {
+      "source_flag": 0,
+      "reads": [
+        [
+          32,
+          0
+        ]
+      ],
+      "record_sha256": "980d6117e1c74fbbbe9e1081905b9bbc46a4803ffd4847a7398109bf79f276cb"
+    },
+    {
+      "source_flag": 1,
+      "reads": [
+        [
+          4128,
+          0
+        ]
+      ],
+      "record_sha256": "980d6117e1c74fbbbe9e1081905b9bbc46a4803ffd4847a7398109bf79f276cb"
+    },
+    {
+      "source_flag": 2,
+      "reads": [],
+      "record_sha256": "05facb6dfdd747867a89e067e4a21b9fa553f090bf8fa4e291af8776060411e8"
+    },
+    {
+      "source_flag": 3,
+      "reads": [],
+      "record_sha256": "e5a5f600f00f0ba0ddb812289e8156a7e62cc2e4fc698486f2eca3fdaf8dcfb0"
+    }
+  ],
+  "cached_record_reused_without_spi_read": true,
+  "stubbed_functions": {
+    "selector_oracle": [
+      "0x08025D30 SPI read: synthetic RAM record"
+    ],
+    "correction_oracle": [
+      "0x08012A30 selector: no-op",
+      "0x0801E6D4/0x0801E660: capture register arguments"
+    ]
+  },
+  "windows_in_branch_order": [
+    {
+      "lower": 13600000,
+      "upper": 17400000,
+      "index_origin": 13500000,
+      "band_index": 0
+    },
+    {
+      "lower": 40000000,
+      "upper": 48000000,
+      "index_origin": 40000000,
+      "band_index": 1
+    },
+    {
+      "lower": 1800000,
+      "upper": 6400000,
+      "index_origin": 1500000,
+      "band_index": 2
+    },
+    {
+      "lower": 6400000,
+      "upper": 13600000,
+      "index_origin": 6000000,
+      "band_index": 3
+    },
+    {
+      "lower": 17400000,
+      "upper": 24000000,
+      "index_origin": 17000000,
+      "band_index": 4
+    },
+    {
+      "lower": 24000000,
+      "upper": 32000000,
+      "index_origin": 24000000,
+      "band_index": 5
+    },
+    {
+      "lower": 32000000,
+      "upper": 40000000,
+      "index_origin": 32000000,
+      "band_index": 6
+    },
+    {
+      "lower": 48000000,
+      "upper": 56000000,
+      "index_origin": 48000000,
+      "band_index": 7
+    },
+    {
+      "lower": 56000000,
+      "upper": 66000000,
+      "index_origin": 56000000,
+      "band_index": 8
+    },
+    {
+      "lower": 84000000,
+      "upper": 92000000,
+      "index_origin": 84000000,
+      "band_index": 9
+    },
+    {
+      "lower": 92000000,
+      "upper": 100000000,
+      "index_origin": 92000000,
+      "band_index": 10
+    },
+    {
+      "lower": 100000000,
+      "upper": 108000000,
+      "index_origin": 100000000,
+      "band_index": 11
+    },
+    {
+      "lower": 108000000,
+      "upper": 116000000,
+      "index_origin": 108000000,
+      "band_index": 12
+    },
+    {
+      "lower": 116000000,
+      "upper": 124000000,
+      "index_origin": 116000000,
+      "band_index": 13
+    },
+    {
+      "lower": 124000000,
+      "upper": 130000000,
+      "index_origin": 124000000,
+      "band_index": 13
+    }
+  ],
+  "fixture_sha256": {
+    "frequency-selection.csv": "c90f022f244590c1dcb88c71044899b74faed6f31f793f0eec41dbfaa549a01c",
+    "frequency-correction.csv": "b8ef1163ec4d803c40f7ffdf6bb14a0fa4f5cf6005c0bd9b9f36b80951ccf1b9"
+  }
+}

@@ -1,0 +1,27 @@
+Старт связанного RT880 1.16; это не идентификация приложения UV98 Plus.
+SHA256 reference: eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc
+
+Reset 08002AC0 вызывает SystemInit 08021080 и runtime 080029E0.
+SystemInit включает FPU, переходит на HICK, сбрасывает настройки CRM,
+устанавливает VTOR=08000000. Runtime приводит в main 08025908.
+Main: clock configuration 08021124, затем VTOR=08002800, delay constants
+080251EC, общая инициализация 080145CC. Отдельные устройства: NOR SPI2
+08010C74, LCD init 08017E48. Эти адреса взяты из статического разбора.
+
+08021124 вызывает PLL config 08024FFC с r0..r3 = 0,96,1,3.
+По локальному Artery SDK: HICK, NS96, MS1, FR8. Но формула имеет ещё /2!
+08025F6C (stock system_core_clock_update) берет literal 8 MHz, вычисляет
+8MHz*96/(1*8)/2 = 48 MHz и пишет 20001914. AHB /1, APB1 /2, APB2 /1.
+SPI2 /2 даёт расчётные 12 MHz. Это не физическое измерение частот.
+Проверка clock_oracle.py исполняет только calculator с синтетическими
+CRM registers. Она не исполняет startup, не моделирует готовность PLL.
+
+Первичные локальные SDK источники:
+Desktop/USB/rt880/fw_lib/libraries/cmsis/cm4/device_support/system_at32f423.c
+Desktop/USB/rt880/fw_lib/libraries/cmsis/cm4/device_support/at32f423_conf_template.h
+Desktop/USB/rt880/fw_lib/libraries/drivers/inc/at32f423_crm.h
+
+Не переносим целиком board init: в нем есть линии питания и RF, чьи
+начальные/безопасные уровни для конкретной UV98 ещё не подтверждены.
+Точная передача управления из loader, состояние IRQ/DMA и физическая
+ревизия не установлены. Default Stage0 поэтому не меняет clock/GPIO.

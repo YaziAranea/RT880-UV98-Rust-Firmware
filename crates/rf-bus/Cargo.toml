@@ -1,0 +1,8 @@
+[package]
+name = "uv98-rf-bus"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Bounded three-wire RF register transport with no MCU or radio initialization"
+
+[dependencies]

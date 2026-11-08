@@ -1,0 +1,81 @@
+Независимый read-only review RX runtime и RF GPIO backend
+2026-11-08. Исходники просмотрены; Cargo/устройство не запускались.
+
+Проверены crates/receive/src/runtime.rs, executor.rs, tests/runtime.rs,
+crates/rf-at32/src/engine.rs и hardware.rs. Rust-файлы не менялись.
+Блокирующих ошибок исполнения или расхождений с oracle не найдено.
+
+Stock alignment
+---------------
+Volume собирает B000+(gain<<4)+dac, затем использует full reg01 correction
+из original05768. Bounds gain<=63/dac<=15 подтверждены CPS1.10 UI, CFG174/175.
+FM порядок W47=6140/read01/W48 совпадает с slice50EA..518E. Внешнее mute перед
+этим и unmute после — явно новая политика runtime, не полный stock audio.
+RX-start37=1F0F, затем nominal10ms,30=0200,30=BFF1 совпадает с4FA0.
+RSSI A67&01FF; squelch A0C bit1; level0 shortcut без A0C совпадают с oracle
+при software override1120==0. В runtime этот override намеренно отсутствует.
+PF8 mute=true преобразуется в LOW; unmute в HIGH. Нет подмены PB11 как mute.
+Runtime требует подготовленный RF/FM state; холодный init и физическая
+готовность не заявлены. План и runtime не меняют сохранённые калибровки.
+
+Состояния, таймеры и отказы
+-------------------------
+Конструктор/start инертны. Первый исполнительный шаг проверяет interlock
+и A33 TX bits до config-записей. Retune создаёт новый Ticket; старый ACK
+не меняет deadlines и не делает новый результат Listening.
+W37 получает now до синхронного I/O; новый PowerDelay начинает свой minimum
+только на следующем вызове. Поэтому время возможной блокировки W37 не
+засчитывается как post-write delay. Операционный timeout продолжает идти.
+После BFF1 AwaitSettling аналогично начинает minimum/settling-timeout на
+первом post-write наблюдении, предварительно проверив остаток operation timeout.
+Time alone не ACK: нужны текущий Ticket, фаза, внешний ACK и minimum.
+u32 wrap учтён wrapping_sub; скачок >=2^31 отвергается. Equality deadline
+считается timeout. Истечение/clock fault не запускает повтор или восстановление.
+При fault сохраняется исходная причина и отдельная ошибка mute cleanup;
+после terminal нет новых I/O. Отмена не утверждает RF-off или rollback.
+Sampling/audio имеют guard перед действиями; sample также после последнего
+read. Audio не снимает PF8 mute до W47/read01/W48 и промежуточных guard.
+
+Точность описаний — два небольших замечания переданы root:
+1. Явно закрепить fresh monotonic now в ms, частоту вызовов/gap<2^31 и
+   квалификацию источника времени. Эти требования не доказывает сам integer API.
+2. Final guard отклоняет sample, если он ОБНАРУЖИЛ PTT/fault; краткое событие
+   между наблюдениями не устанавливается polling без отдельной защёлки.
+Это уточнения контрактов, не найденные ошибки переходов/формул.
+
+RF GPIO backend
+---------------
+Пины A PA8/PF6/PC9 и B PC7/PC8/PC6 соответствуют primary evidence.
+Маски ограничены пинами; config RMW сохраняет остальные поля. Аппаратный
+constructor требует общей сериализации port RMW даже для disjoint owners.
+SCR/CLR +18/+28 меняют только заданные latch bits, IDT +10 читается один раз.
+Подготовка release DATA -> preload CS HIGH/SCK LOW/DATA LOW -> output last
+явно отличается от stock boot CS LOW и требует уже inactive CS до входа.
+DATA input/output lifecycle согласован с rf-bus A/B; output while selected
+отвергается. PinEngine не выдумывает setup delay после SCK: timing caller-owned.
+PF0/PF8 отдельны от TX/PA controls. HIGH PF8 и relay requests проходят guard;
+LOW PF8 остаётся доступным для cleanup при нарушении receive interlock.
+GPIO clock/power/ownership при этом должны сохраняться: указано в unsafe
+контракте. Физическая тишина, relay position и RF-off не выводятся из latch.
+
+Тестовый адаптер
+---------------
+RSSI CSV: поля0/1 соответствуют read67/result; squelch выбирает flag0 и
+сравнивает также число read0C. FM groups по3, value column7, read01 сохраняется
+полным словом. Ограничение gain63/dac15 отбирает допустимую часть fixtures.
+Fault-prefix тесты проверяют все отмеченные действия, затем только mute
+cleanup; отдельные PTT-after-read случаи не допускают последующий read/write.
+Рекомендован дополнительный timer regression: первый post-write poll через
+400ms всё ещё начинает полный minimum, а не сразу пропускает задержку.
+Это защищает именно новый baseline; тест с тем же now не покрывает long-I/O
+сценарий. Рекомендация передана владельцу tests/runtime.rs.
+
+SHA просмотренной версии до возможного fmt/последующих правок:
+receive/src/runtime.rs
+51d842537529fe1630562df9386821c7e57790764def0eb7141089ae48a30b9c
+rf-at32/src/engine.rs
+56edbb59ae88d99e6f15578e2d92317a76589e4a94493943f751950f731114c7
+rf-at32/src/hardware.rs
+fd315ea8df691f045e51b44f92df0206dcccee1b544df26c4a22d6e3e2f7163a
+
+Review не заменяет build/tests root и не является аппаратной квалификацией.

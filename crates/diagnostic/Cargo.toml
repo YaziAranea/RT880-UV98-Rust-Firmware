@@ -1,0 +1,13 @@
+[package]
+name = "uv98-diagnostic"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+uv98-calibration = { path = "../calibration" }
+uv98-codeplug = { path = "../codeplug" }
+uv98-nor-read = { path = "../nor-read" }
+uv98-display = { path = "../display" }
+uv98-keys = { path = "../keys" }
+

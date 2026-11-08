@@ -1,0 +1,9 @@
+[package]
+name = "uv98-stock-model"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Offline pure model of calibration routines in a pinned related RT880 1.16 image"
+
+[dependencies]
+uv98-calibration = { path = "../calibration" }

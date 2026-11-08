@@ -1,0 +1,21 @@
+[package]
+name = "uv98-radio-runtime"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+hardware = ["dep:at32f4xx-pac", "dep:uv98-board-pins", "dep:uv98-diag-quiesce"]
+
+[dependencies]
+uv98-spectrum = { path = "../spectrum" }
+uv98-calibration = { path = "../calibration" }
+uv98-rf-sequence = { path = "../rf-sequence" }
+at32f4xx-pac = { version = "=0.4.0", default-features = false, features = ["at32f423"], optional = true }
+uv98-board-pins = { path = "../board-pins", optional = true }
+uv98-diag-quiesce = { path = "../diag-quiesce", optional = true }
+
+
+uv98-codeplug = { path = "../codeplug" }
+uv98-handheld-ui = { path = "../handheld-ui" }
+uv98-band-plan = { path = "../band-plan" }

@@ -1,0 +1,89 @@
+Построчный renderer UV98
+=======================
+
+crates/radio-ui (uv98-radio-ui): собственное оформление 320x240, no_std,
+forbid(unsafe_code), без alloc. Состояние получает из uv98-ui-core::View;
+измерения только из уже заполненного uv98-spectrum::Engine. Контроллером,
+измерителем и аппаратным драйвером renderer не является.
+
+API
+---
+render_row(row:u16, out:&mut[u16;320], model:&Model)->Result<(),Error>
+render(display:&mut uv98_display::Display<...>, model:&Model)
+    ->Result<(),RenderError<BusError>>
+
+Model { view, channel:Option<ChannelView>, spectrum:Option<SpectrumView>, demo }.
+ChannelView { name:&[u8], rx_10hz:u32, tx_10hz:u32 }.
+SpectrumView { engine:&Engine, cursor:usize, scale_max:u16 }.
+
+render_row полностью перезаписывает одну строку. Любая ошибка модели/границ
+проверяется до её изменения. Проверяются row<240, размеры/индексы channel view,
+контекст меню/спектра, числовой ввод, scale_max>0 и cursor<bins.len().
+Неиспользуемый spectrum у Channel screen не валидируется. Отсутствующий
+spectrum у Spectrum screen показывает NO MEASUREMENT SOURCE, не нули/шум.
+
+render() сначала проверяет модель, затем открывает Display window320x240,
+передаёт ровно76800 слов и finish_pixels(). Display должен быть заранее
+инициализирован, находиться в исключительном владении вызывающего кода.
+При ошибке транспорта возврат немедленный, без retries; сохранена семантика
+инвалидации Display. Ни GPIO, ни clock, ни init последовательность renderer
+самостоятельно не выполняет.
+
+Буфер пикселей640байт, staging Display64байта; полного framebuffer нет.
+Дополнительно используются ограниченные текстовые буферы по64байта и стек
+форматирования: утверждение640байт относится к строке, не ко всему стеку.
+Цвета — логический RGB565. Реальный panel RGB/BGR порядок не подтверждён
+этим офлайн-рендерингом, как указано в uv98-display.
+
+Оформление
+----------
+Тёмно-синий фон, светлый основной текст, cyan текущая серия, dim blue старая,
+amber пики, white пунктирный курсор. Верхняя строка UV98/название экрана;
+DEMO отображается только при явном model.demo=true. Интеграция обязана
+устанавливать этот флаг для синтетических samples/ACK; renderer не способен
+самостоятельно определить происхождение данных.
+
+Channel: CH 0001/1024, имя, RX STORED крупным5x7 scale3, TX STORED scale2.
+Частота — точные 10Hz units, пять знаков после точки в MHz, без float.
+Проверены представимые0..u32::MAX, без неподтверждённых band limits.
+Режим RX/TX, BW, S-meter или статус аппаратной настройки не выдумываются.
+Имя: максимум16байт, ASCII uppercase, NUL/FF конец, прочие байты '?' без
+изменения оригинала. GBK/Cyrillic font здесь не реализован.
+
+Menu: две крупные строки, selected cyan. Channel context Spectrum/Back;
+Spectrum context ResetPeaks/Back. Menu/Exit/Up/Down footer согласован с
+контроллером. Набор пунктов/Action принадлежит ui-core, renderer выбирает
+только подписи и положение. Для нового пункта нужна подпись здесь и одна
+реализация Action в контроллере, без отдельной host/hardware копии логики.
+
+Spectrum: chart x40..279 (240px), y74..186. Сетка0..scale_max, частоты
+начала/конца, состояние Engine, номер sweep, точный cursor MHz/RAW/peak.
+CURRENT означает latest.sweep==engine.sweep(), а не гарантию реального
+времени/аппаратного приёма. Более старый sweep окрашен dim; cursor readout
+дополнительно помечен OLD. Отсутствующий sample — '--', не ноль.
+Нулевой измеренный sample отображается на baseline.
+
+Пики — сырые числовые максимумы при включённом Engine peak hold. Это имеет
+физический смысл только при монотонной шкале адаптера. Слов dBm/S-units и
+неподтверждённой калибровки нет. Значения выше scale_max обрезаются только
+геометрически; сохранённый Engine/raw numerical readout остаётся точным.
+
+Каждому пикселю chart соответствует bin=floor(column*N/240). Курсор ставится
+в центр именно занимаемого выбранным bin интервала
+[ceil(i*240/N),ceil((i+1)*240/N)), а не округлённого теоретического центра.
+Независимый review нашёл исходное смещение N161/i49; исправление проверяется
+по реальному white pixel для всех28920 комбинаций N1..240, i0..N-1.
+
+Проверки и границы доказательств
+------------------------------
+11 synthetic integration tests подготовлены в tests/render.rs. Cargo запускает
+root; итоговый build/test результат указан в общем отчёте, не подразумевается
+одним наличием этих тестов. Проверяются untouched output при bad model,
+все строки/экраны, deterministic overwrite, явный DEMO, ASCII name policy,
+current/old/peak tags, missing vs zero samples, clipping, все cursor mappings,
+неизменность Engine, exact frame size/MSB-first и остановка при bus failure.
+
+Статический review второго агента выполнялся параллельно. Визуальный QA
+host PNG/native simulator выполняет root; аппаратный LCD/RF этим не проверен.
+Шрифт5x7 — копия собственного crates/diagnostic/src/font.rs; чужие UI assets,
+прошивки, screenshots и шрифты не включались.

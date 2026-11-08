@@ -1,0 +1,31 @@
+{
+  "reference_sha256": "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc",
+  "composition_cases": 432,
+  "composition_events": 3456,
+  "frequency_cases": 72,
+  "width_cases": 256,
+  "rx_start_cases": 2,
+  "mmio_mapped": false,
+  "hardware_accessed": false,
+  "hashes": {
+    "composition.csv": "5777fc7e28319dee1e97d93e806f50e992d5536bb0215f471df65ace08938b45",
+    "frequency.csv": "b0ea5cf8b57dae159a207ffd0e05e10294e7f18525c83c62fcfdcf0d37e09c25",
+    "width.csv": "4db7412a61cc32f54f7f9c2b5b2648d51841be8ec1b33faf4996a88f7b6d1c01",
+    "rx-start.csv": "88aa53e047312b56533098cecd17229cb6fdc2c284a8cefe18f7034b410ab11c",
+    "composition-inputs.json": "36614b5abb0a850ac481cf5eb8cce99c22c6bd6baacbda677286583947bccf09",
+    "synthetic-calibration-0000.hex": "8c461741f542f41a9b711cce17c96fd2c1b3d17b8f6f2a10ffebda55582ce2a6",
+    "synthetic-calibration-8000.hex": "5ae6a8b88fbb4b6d89d9f2688a4a8be83b5be0a47d5b12f0551d5fa6ede3ae0c",
+    "synthetic-calibration-ffff.hex": "e607a779d42a62d29eb32748df4c2599da6db662151737a6ed1b398bbc11fd93"
+  },
+  "composition": "New concatenation: 4228 -> 4B88 -> 4CCA..4D5C ->4FF0; not full stock caller.",
+  "hooks": [
+    "SPI read synthetic record",
+    "RF writes capture",
+    "A33 read supplied seed",
+    "PF0 store PCs507C/5086 skipped",
+    "stop4D5C before AFC",
+    "8380 delay captured for RXstart only"
+  ],
+  "ordinary_noise_path": "RAM11F9=0, channel pointer200010EC->20005000, width[3], config35EC+A4=level",
+  "synthetic_calibration": "4096B FF; marker0=9A;15recordsat32+slot*112; byte[i]=(slot*17+i*3+5)&255;record[0..2]=offsetLE"
+}

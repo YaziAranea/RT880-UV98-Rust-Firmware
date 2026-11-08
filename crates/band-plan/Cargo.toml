@@ -1,0 +1,8 @@
+[package]
+name = "uv98-band-plan"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Pure related-RT880 routing selection and receive-path requests; no hardware executor"
+
+[dependencies]

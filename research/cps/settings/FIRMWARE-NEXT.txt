@@ -1,0 +1,35 @@
+Обновление RX-этапа 2026-11-08
+
+Композиция ниже реализована в crates/receive: primary Plan, FrequencyPlan A/B,
+Executor и Pair с RF-bus; проверены oracle и mock failures. Подробности:
+RECEIVE-STAGE-RU.txt и research/receive-plan/. Следующий milestone:
+GPIOF ownership/physical timing, RX startup и реальные RSSI/settling ответы.
+Stage0 по-прежнему WFI; аппаратная работа и восстановление не квалифицированы.
+
+Исторический план перед RX-этапом:
+
+Фактическая граница готовности firmware после CPS extension
+
+firmware/src/main.rs остаётся build-only Stage0: disable interrupts + WFI loop.
+В entry не подключены board clocks, RF, LCD, keyscan, NOR или UI. Это НЕ полный
+работающий радиоприёмник, несмотря на hostsim и отдельно cross-built crates.
+
+Имеется чистая логика spectrum, sharedUI, codeplug/calibrationviews, частичные
+stock register/calibration models, NORread и opt-in GPIO/SPI/LCD/key backends.
+crates/board-diagnostic соединяет LCD/NOR только через unsafe prepared-board
+контракт; он не выполняет RF-off и не квалифицирует loaderhandoff.
+crates/board-policy содержит requests без executor. PF0 relay и PB11 selector
+должны согласоваться с новой band-path моделью; полный stock RFinit не является
+универсальной последовательностью отключения TX. Ведётся relatedRT880 анализ,
+точный MCU/bootloaderdump пользовательской UV98 ещё не подменён этим BIN.
+
+Ближайший конкретный milestone без прошивки/COM:
+закончить чистую receive-plan composition: validated10Hzfrequency + конкретный
+bandpath + selectedcalibrationrecord + frequencycorrection + RXregisterplan;
+выдавать orderedoperations и явно перечислять missingdependencies. Проверить
+на pinnedstock boundedoracle и fakeRFbus для обеих BK4819, включая ошибки/stop.
+Следующий hardware adapter сможет исполнить этот plan только после полной
+проверки GPIO/bus/reset/clock/PAinactive/loader/recovery preconditions. Host RSSI
+сейчас synthetic; он не служит доказательством работающего аппаратного sweep.
+
+Это список конкретных оставшихся связок, не заявка на прошивку готового образа.

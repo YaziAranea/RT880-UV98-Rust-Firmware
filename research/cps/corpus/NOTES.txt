@@ -1,0 +1,66 @@
+Local saved CPS corpus and document core
+=======================================
+
+Scope
+-----
+Only existing files under C:\Users\User\Desktop\USB were read. No source file
+was modified, no serial port was opened, and no reconstructed CPS file was made
+from the 4 MiB storage capture. Native files remain outside the source package.
+The JSON inventory contains paths, hashes, aggregate counts and comparisons;
+it contains no channel names, frequencies or raw section contents.
+
+Observed corpus
+---------------
+File index 0: base.880dmf
+  Length 221184; SHA256
+  0d5f76c47bb9d830a43671c7306ccf11b48a6f9167c598b549255dd14da3be23
+  Channel section is entirely FF; active marker == 1 count is 0.
+File index 1: 880\мой цпс.880dmf
+  Length 221184; SHA256
+  e6664f47f799ed2fb4fc65966ad594efb56eb1fc56564c0109c3ad07233915f2
+  Active marker == 1 count is 144.
+File index 2: 880\999.880dmf
+  Length 221184; SHA256
+  94b90ced67137d30ade3ee4b3443ee316202eaafd0008cd89f1d858d6c1912de
+  Active marker == 1 count is 144.
+
+The user subsequently identified 999.880dmf as the latest file, saved on
+2026-11-08. This is user-reported provenance; the date is not inferred from
+filesystem metadata. It does not establish that its Time buffer was acquired
+from the radio or is fresh. GUI review should use this latest saved file.
+
+All three Time sections are entirely zero (32768 bytes). This observation is
+not proof of a radio read, source firmware, source model, timestamp or freshness.
+The examined ordinary CPS read does not fill this buffer. A saved file's exact
+length and extension do not provide acquisition provenance.
+
+Native file format evidence, supplied by the parallel CPS source audit
+--------------------------------------------------------------------
+RT880 CPS 1.10 MainForm mbtnOpen_Click line 13515 and mbtnSave_Click line 13539
+concatenate CFG 4096, Channels 49152, FM 4096, Time 32768, Zones 131072 bytes.
+The examined UV98 Plus CPS 1.07 handlers use the same layout with .98pdmf.
+These specific versions are covered; other versions are not established.
+
+Local document model
+--------------------
+work/uv98-rust-stage/crates/cps-core contains uv98-cps-core. Its library is
+in-memory only: exact-length import; immutable original and working views;
+transaction callback over an isolated fixed-size candidate; atomic rejection
+on callback Err; inverse-patch undo; revert to original; changed byte ranges
+grouped by section; export as an independent complete byte vector. No direct
+mutable view of committed/original bytes escapes. No SHA dependency was added.
+Callbacks are responsible for field validation, normally through codeplug APIs.
+Unknown sections and fields are preserved unless explicitly changed.
+Export does not alter the original baseline or reset dirty state.
+
+Eight synthetic tests cover boundaries, invalid lengths, exact preservation,
+grouped changes, transactional errors, undo, no-op history, revert, independent
+export and integration with a valid/invalid channel patch. They embed no user
+file contents. Root owns all Cargo/build execution; this agent did not run it.
+
+The optional verify_document example takes explicit local input paths and
+performs read-only file access outside the library. It checks no-edit byte-exact
+export, an in-memory single-bit channel edit, unchanged Time, and undo restoring
+every byte. It prints booleans and lengths only. It does not write source files.
+The Python inventory script checks structure and hashes, not the Rust API;
+native-files.json explicitly distinguishes those checks.

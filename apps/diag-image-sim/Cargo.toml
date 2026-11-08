@@ -1,0 +1,14 @@
+[package]
+name = "uv98-diag-image-sim"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+uv98-diag-app = { path = "../../crates/diag-app" }
+uv98-display = { path = "../../crates/display" }
+uv98-keys = { path = "../../crates/keys" }
+uv98-nor-read = { path = "../../crates/nor-read" }
+png = "0.18"
+serde_json = "1"
+sha2 = "=0.10.9"

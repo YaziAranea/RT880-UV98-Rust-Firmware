@@ -1,0 +1,32 @@
+{
+  "requirement": "R-09",
+  "reference_function": "080053F0..080055C2",
+  "hardware_accessed": false,
+  "mmio_mapped": false,
+  "events": 24,
+  "channel_index": 1,
+  "label": "EXO Rep",
+  "relay_identity_confirmed": false,
+  "frequency_10hz": 43297500,
+  "corrected_frequency_code": 43297565,
+  "calibration_band": 1,
+  "power_mode": 0,
+  "pa_code": 23,
+  "pa_register": "5CFF",
+  "mic_cfg": 31,
+  "tx_tone_raw": "1302",
+  "tx_ctcss_hz": 77.0,
+  "calibration_sha256": "8906c3d9847eeeefe0ee6aad6aa4302949bd5e5984f3c64ed02edb8cf6fb0ff7",
+  "cps_sha256": "94b90ced67137d30ade3ee4b3443ee316202eaafd0008cd89f1d858d6c1912de",
+  "reference_sha256": "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc",
+  "csv_sha256": "0cce85a125743a0cfc0ce9af000812c5e223a42efda3f300c26899d5120fc03e",
+  "source_snapshot_sha256": {
+    "firmware-diagnostic/src/main.rs": "7d6656895a5d1821b66d5bafc7f5d60d22d52a76374b6b8b4525df33fcd70515",
+    "crates/radio-runtime/src/lib.rs": "41ac21880c3aa31eba6e2fc1be8aa585baf39a64942b30db77b62e12d282b3a8",
+    "crates/radio-runtime/src/ptt.rs": "49143e3ca739aecf8a5376f381327f05135194629d878d7b488fa8130a3af997",
+    "crates/radio-runtime/src/policy.rs": "7b119f7cf1320e1b32c6366c976f6668a7d00a83de41dfb58731a07ca20ed06f",
+    "crates/rf-sequence/src/lib.rs": "d41a83d30840cf1aa7a00424a43f7fac6161dabd1c1b2375bd06970a04e76d2a",
+    "crates/diag-startup/src/pre_init.s": "ed0e8661814caabb70a32753668a853235d1a4a27fed240bc3c3af44e3f205ea"
+  },
+  "limits": "Original Thumb ordinary TX branch with preserved factory/CFG/channel bytes. RF/delay/GPIO are test doubles; input A33=0,A31=55A0. No RF voltage, watts, modulation, relay identity or physical shutdown proof. Rust's additional off-prefix/width/readback must remain separately tested; this CSV does not execute main-loop/PTT/watchdog."
+}

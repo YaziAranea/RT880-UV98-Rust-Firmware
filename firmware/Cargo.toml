@@ -1,0 +1,18 @@
+[package]
+name = "uv98-stage0"
+version = "0.1.0"
+edition = "2021"
+publish = false
+build = "build.rs"
+
+[[bin]]
+name = "uv98-stage0"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+cortex-m = "=0.7.7"
+cortex-m-rt = { version = "=0.7.7", features = ["set-sp", "set-vtor"] }
+at32f4xx-pac = { version = "=0.4.0", default-features = false, features = ["at32f423", "rt"] }
+uv98-calibration = { path = "../crates/calibration" }

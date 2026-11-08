@@ -1,0 +1,8 @@
+[package]
+name = "uv98-keys"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Pure related-RT880 input decoding and explicit UI debounce policy"
+
+[dependencies]

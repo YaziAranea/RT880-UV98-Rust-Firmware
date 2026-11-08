@@ -1,0 +1,5 @@
+current,next,clear_mask,set_mask
+0,1,4,1024
+1,2,2,4
+2,3,1,2
+3,0,1024,1

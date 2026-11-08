@@ -1,0 +1,65 @@
+R-02/U-02: ограниченный аудит задержек RF/UI, 2026-11-09
+
+Факт original delay(10)
+Stock251DC..251E8: B entry; девятьNOP; десять повторов SUBS/UXTB/SUBS/BNE;
+BX return. derive_mic_mux_timing_evidence.py исполняет исходный код:
+51 инструкция PASS. Это счётчик проходов, не микросекундный таймер.
+Отдельная настройка stock SysTick us/ms начинается251EC и сюда не входит.
+
+ARM Cortex-M4 TRM100166_0001_04, секция3.3, zero-wait instruction model:
+https://documentation-service.arm.com/static/5fce431be167456a35b36ade
+Pipeline refillP=1..3. По таблице инструкций для этого тела получается
+62..84 cycles, то есть1.29..1.75us при48MHz, без вызывающего BL/загрузки
+аргумента, задержек flash, GPIO и bus. Это расчёт модели, не измерение платы.
+Физический минимум HIGH/LOW конкретного RF-чипа этим НЕ установлен.
+Локальный primary RF datasheet с timing limits не найден;10→1us не внедрять
+лишь на основании этого подсчёта. ReadHigh delay следует ПОСЛЕ DATA sample,
+поэтому его сокращение отдельно не доказывает правильный момент выборки.
+
+Текущие добавленные задержки
+rf-bus: write48 phases/read49 phases. Main RF Timing вызываетus(10):
+requested minimum480/490us на register transaction, кроме GPIO/CPU/feed.
+CycleDelay задаёт500cycles приCORE_UPPER_HZ50MHz. cortex-m0.7.7
+asm/inline.rs::__delay делает1+cycles/2 итераций SUBS/BNE; поэтому задержка
+обычно больше заданного минимума. Не считатьus(10) точным10us.
+Каждая phase также вызываетfeed_watchdog:5 или6 MMIO reads +WDT_CMD write.
+Перенос reload к границам bounded transaction может убрать сотни обращений
+за цикл, но сохранять проверку WDT и finite transaction; это отдельный патч.
+
+Другие обязательные затраты
+Keyscan::scan делает17 settle по100us: начальныйrelease +2passes×4columns
+×(selected+released). Уже1.7ms requested minimum, плюс loop overhead.
+Main idle.us(1000) добавляет минимум1ms ПОСЛЕ записи max_loop_cycles.
+Телеметрия172 — максимум за окно, не средний период. Она исключает этот
+последнийidle и следующий UARTheartbeat. Нельзя вычислять точный AGC period
+или throughput из одного172 без учёта этого расположения счётчиков.
+
+Steady observe: status0C +RSSI67 =2reads; AM audio-open добавляетwrite13,
+даже если значение не изменилось. Pending IRQ добавляетread0B/write02/read0C.
+Переход audio-open ещё пишет47,читает01,пишет48. Телеметрия175 отдельно
+добавляет5reads, но ограничена квотой/периодом. Control.verify — MMIO,
+не дополнительные24-clock RF transactions.
+AGC hold250 считает вызовы; при фактическом периоде10ms это около2.5s,
+не250ms. Прежний перенос наусловие>=1ms не гарантирует1ms, если весьloop
+длиннее. Измерить отдельныеticks/observe count иDWT duration в следующем
+профиле; catch-up burst с одним старымRSSI не соответствуетstock.
+
+Приоритет оптимизаций без слепого ускорения шины
+1. Bounded RF configuration burst: исключить LCD/UART/idle между шагами,
+   но перед каждым шагом сохранить свежийphysicalPTT, clock/deadline,
+   verify_control/readback; DelayMs остаётся реальным elapsed wait.
+2. Пропускать write13, когда вычисленное слово совпадает с последним успешно
+   записанным. State.index/previous/hold всё равно обновлять по каждому свежему
+   RSSI. Cache сбрасывать при reset/cold/retune/stop/fault/любом внешнемwrite13.
+   Это экономит48phases за steady AM sample. Нельзя пропускать самsample.
+3. Разделить быстрый PB6 release check и полный двупроходный matrix scan,
+   если будет отдельный проверенный API. Нельзя подменять неоднозначную
+   матрицу успешным release или терять верхнююPTT при UI/NOR работе.
+4. Свежие0C/IRQ acknowledgement для SQL/tones и readback TX-control words
+   не кэшировать ради скорости. RSSI UI обновлять реже AGC, как уже сделано.
+5. Только после этих измерений выбирать меньшую phase delay отдельного
+   кандидата, проверять тот же fixed register vector многократно безTX,
+   затем readback и сохранность калибровок. Электрические timing limits
+   требуют datasheet либо измерения, а не ссылки на соседнюю модель рации.
+
+Этот аудит не изменял RF Timing, register sequence, Calibration/NOR или COM.

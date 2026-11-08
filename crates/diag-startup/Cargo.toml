@@ -1,0 +1,13 @@
+[package]
+name = "uv98-diag-startup"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+default = []
+hardware = ["dep:cortex-m"]
+
+[dependencies]
+uv98-clock-profile = { path = "../clock-profile" }
+cortex-m = { version = "=0.7.7", optional = true }

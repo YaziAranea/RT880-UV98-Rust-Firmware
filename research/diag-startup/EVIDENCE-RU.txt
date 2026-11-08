@@ -1,0 +1,150 @@
+ИСТОРИЧЕСКАЯ БАЗА 0.1.0, 2026-11-08
+Текущие изменения 0.1.1 описаны в EARLY-LOG-0.1.1-RU.txt рядом с этим файлом:
+ранний USART6, family gate до exact RF guards и stackless UART branch graph.
+Утверждения ниже про отсутствие UART и peripheral writes до exact PID относятся
+к 0.1.0. Результат первой аппаратной попытки и успешного возврата стока см.
+FIRST-LIVE-TEST-RU.txt в корне проекта. Журнал 0.1.1 на железе ещё не проверен.
+
+Диагностический AT32 startup, 2026-11-08
+
+Область работ
+crates/diag-startup содержит исполняемый ARM адаптер и модель последовательности
+регистров. Аппаратный запуск, COM, прошивка, NOR/MCU write/erase не выполнялись.
+Связанный профиль RT880 остаётся предположением для конкретной UV98 Plus.
+PID идентифицирует вариант MCU; не плату, разводку, состояние RF или загрузчик.
+
+Первичные локальные источники и адреса
+База SDK: C:/Users/User/Desktop/USB/rt880/fw_lib/libraries/
+  cmsis/cm4/device_support/at32f423.h:
+    CRM 0x40023800, GPIOA/B/C/F 0x40020000/20400/20800/21400,
+    WDT 0x40003000, WWDT 0x40002C00, PWC 0x40007000.
+  drivers/inc/at32f423_crm.h:
+    DMA1/2 AHBEN1/AHBRST1 биты22/24; OTG AHBEN2/AHBRST2 бит7;
+    SPI2/3 APB1EN/APB1RST биты14/15; PWC APB1EN бит28;
+    BPDC+0x70 LEXTEN бит0; MISC1+0xA0, MISC2+0xA4.
+  drivers/src/at32f423_crm.c, crm_hick_sclk_frequency_select:
+    HICK direct divider /16, 40 NOP, HICK_TO_SCLK=1, HICKDIV=1,
+    HICK_TO_SCLK=target, восстановление direct divider.
+    Наш код держит /16 до подтверждённого перехода на HICK и остановки PLL;
+    Cortex delay(40)+DSB даёт минимум 40 core cycles до смены HICK режима.
+  drivers/inc/at32f423_pwc.h: LDOOV+0x10, значение3 =1.3V,
+    VREXLPEN бит4; startup снимает extra-low-power и задаёт1.3V.
+  drivers/inc/at32f423_flash.h: PSR+0x00; маска0x157, stock0x154.
+    Меняются latency/prefetch; ключи, CTRL, USD/option/protection не пишутся.
+  drivers/inc/at32f423_wdt.h: CMD+0, DIV+4, RLD+8, STS+12, WIN+16;
+    0xAAAA reload, 0xCCCC enable, 0x5555 unlock. Последние два не используются.
+  drivers/inc/at32f423_wwdt.h: CTRL enable бит7.
+
+MCU allowlist взят из официального AT32F423 RM V2.03,
+https://www.arterychip.com/download/RM/RM_AT32F423_EN_V2.03.pdf
+и локального work/board-identification/readback-evidence.txt:
+  DEBUG_IDCODE/PID 0xE0042000 =0x700A3243 или0x700A3246;
+  DEBUG_SER_ID 0xE0042020 &0xFF07 =0x1200 (F423, Revision A);
+  F_SIZE halfword0x1FFFF7E0 =256KiB.
+Другой PID/revision/Flash отвергается до peripheral/GPIO writes.
+Это ожидаемые значения, не прочитанная идентификация пользовательской станции.
+
+Состав исходников
+  src/pre_init.s — реальный __pre_init и __diag_terminal_fail_stop.
+  src/hardware.rs — MMIO binding после RAM init; global_asm включает .s.
+  src/lib.rs — чистая последовательность для повторного takeover/readback,
+    watchdog policy, clock setup и CycleMillis.
+  src/tests.rs — 13 host cases: identity/context, IRQ/master gates, GPIO masks
+    и порядок latch→mode, LEXT и locks, watchdog rejection, clock ordering/
+    timeout, 4 проверки cycle-counter arithmetic.
+Тесты здесь не объявлены аппаратной проверкой. Итоговые build/test/emulation
+логи сохраняет root integration; автор этого crate Cargo/build не запускал.
+
+Почему __pre_init написан в assembler
+Локальный cortex-m-rt0.7.7 src/lib.rs, строки305–308 и915–920, запрещает
+Rust до RAM initialization: rvalue static promotion может обращаться к
+статике даже без явного static в функции. Поэтому deprecated #[pre_init]
+не используется и не подавляется. Cortex-m-rt Reset вызывает наш leaf ASM,
+инициализирует .bss/.data, затем main вызывает Rust early_quiesce/initialize.
+ASM использует только r0–r3, literal constants во Flash, MMIO; нет SP/RAM
+доступов, push/pop, BL или вызовов Rust. LR сохраняется для bx lr.
+Единственный обычный цикл ограничен 1..8 NVIC banks. Failure — WFI loop.
+Core exception vectors должны прямо перейти в __diag_terminal_fail_stop,
+без промежуточного Rust, поскольку fault/NMI возможны до .bss initialization.
+
+Порядок ASM __pre_init
+1. PRIMASK=1; IPSR=0 и CONTROL[1:0]=0 обязательны. Не пытаемся исправить
+   exception/unprivileged/PSP entry. Валидный MSP обязан предоставить loader.
+2. PID/series/revision/Flash allowlist. Нет GPIO на неподходящем PID.
+3. SysTick CTRL/RELOAD/CURRENT=0; NVIC ICER/ICPR по ICTR (не более8 banks);
+   clear PendSV/SysTick; VTOR=0x08002800; SLEEPONEXIT/SLEEPDEEP сняты.
+4. DMA1/2 и OTG clocks gated, reset asserted. Каналы не включаются ради чтения.
+   Это не GPIO reset; чужие GPIO поля и backup domain не сбрасываются.
+5. LEXTEN=1 -> stop. PC14/PC15 могут принадлежать LEXT независимо от CFGR;
+   выключения LEXT, backup reset или настройки ERTC здесь нет.
+6. Только выбранные GPIO clocks. Проверка LOCK. Latch preload перед mode:
+   PC15/PC4/PC5 LOW, PB11 LOW, PF8 LOW, PA4 LOW;
+   PA8/PA15/PB12/PC7 HIGH (RF-A/LCD/NOR/RF-B CS), PC14 HIGH (LCD reset);
+   PB0/1/2/10 HIGH open-drain (keyboard release).
+   Push-pull outputs, no pull, drive2; все не принадлежащие маске bits сохранены.
+   PF0 antenna relay не меняется. GPIO readback не является RF-off proof.
+7. Только после CS HIGH SPI2/3 clocks gated/reset asserted. Их reset снимается
+   Rust initialize после проверки clock profile, clocks остаются gated.
+   Оба existing constructors также сбрасывают только свой SPI после clock enable.
+8. DSB/ISB и return в cortex-m-rt для RAM initialization. Watchdog в ASM не
+   меняется и не кормится; очень короткий inherited deadline может истечь здесь.
+
+Терминальный ASM путь
+__diag_terminal_fail_stop разрешён из handler mode: IPSR не проверяется.
+PRIMASK, MCU allowlist, DMA/OTG gate+reset, LEXT/LOCK guards, те же четыре LOW
+группы включая backlight. Никаких Rust/stack/.bss, затем WFI без reload WDT.
+Нельзя возобновлять владельцев GPIO после этого пути. При ошибке identity,
+LEXT или LOCK часть/все low requests могут не выполниться; не утверждаем off.
+Неизвестная memory map может fault уже на чтении PID; это не универсальная
+защита для произвольного MCU. PRIMASK не маскирует NMI/HardFault.
+
+Clock profile после RAM initialization
+Связанный stock1.16 SHA256:
+  eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc
+Основание: research/startup/EVIDENCE-RU.txt, clock-config.asm, clock_oracle.py.
+HICK8MHz → PLL NS96/MS1/FR8/fixed2 =48MHz; AHB/1, APB1/2, APB2/1.
+До switch выставлены stock FLASH_PSR0x154 и PWC1.3V. Auto-step включён,
+HICK readiness проверена, direct HICK /16 + vendor settling, HICK selected
+и подтверждён status; только затем PLL stopped, параметры PLL заменены,
+PLL ready, switch PLL и подтверждение. Ни один readiness poll не бесконечный:
+100000 iterations максимум на ожидание, watchdog reload каждые256 iterations.
+В конце clock-profile crate проверяет registers; nominal 48/24/48 — расчёт,
+не измерение генератора, питания, SCK или достаточности timings на этой PCB.
+CORE_UPPER_HZ=50000000 — явное экспериментальное допущение для delay,
+не подтверждённый предел частоты и не паспортная гарантия.
+
+Watchdog policy после RAM initialization
+Никаких enable/unlock/reconfigure. Активный WWDT при включённом peripheral
+clock отвергается: слепой reload неизвестного окна может сам вызвать reset.
+WDT разрешён reload0xAAAA только при STS[2:0]=0, WIN=0xFFF, DIV<=6 и
+(4<<DIV)*(RLD+1)>=4096 LICK ticks. Windowed/updating/tiny profiles отвергаются.
+4096 ticks — счётный бюджет, не измеренное время. Reload не спасёт deadline,
+истёкший до первого вызова. WDT hardware/option enable state не изменяется.
+В integration feeds должны быть в bounded LCD/NOR chunks и sliced delays.
+
+CycleMillis
+Nominal DWT CYCCNT→u32 milliseconds, дробная часть сохраняется в u64.
+Delta>=2^31 отвергается без изменения состояния. Caller обязан sampling
+чаще2^31 core cycles (~44.7s при48MHz); несколько пропущенных оборотов
+распознать невозможно. Частоты<1000Hz отвергаются. Output wraps как обычный
+u32 deadline counter. Достаточно для UI, не для измерения частоты или RF.
+
+Оставшиеся аппаратные ограничения
+Не установлены фактическая PCB/MCU identity, loader handoff, protection,
+RF/PA level/effect, питание/LCD interface straps, GPIO mode override,
+истинная частота, timing margins и возможность возврата полного стока.
+Startup задаёт цифровые requests и ограниченные последовательности; собственно
+RF bus shutdown выполняется отдельным diag-quiesce executor. Ни startup,
+ни host/emulator success не разрешают TX или не доказывают physical RF-off.
+Не прошивать этот этап автоматически. Образ должен быть обозримым кандидатом
+для последующей отдельной проверки recovery/loader и физического запуска.
+
+SHA256 первичных SDK файлов (2026-11-08)
+at32f423.h          251d3214bf556a14d3ea51b4db3f2763c2d3e2f9dc4ca39cf031be2e7103a14a
+system_at32f423.c   7d09f32bde1b179b6a9078868b5362816a6de9ef0153bb89f63c224ea3ec92ba
+at32f423_crm.h      dd511bc24964a55232bde4a9a6850277405128e92ff7915be47f2acc37952e0a
+at32f423_crm.c      eecbb8249ff0db0c0eba662da791c035d8bceed5b153b0091560b78be2eb8b2f
+at32f423_wdt.h      33d1c1e82678d5fb9943b9495f59f36496da8bbb89a8c9b43e47370e28ce8c20
+at32f423_wwdt.h     01f6aa830487a4ad6395828ca0f89ad0262ad4acab9de7e2c54e3ff669f16a64
+at32f423_pwc.h      fdbefc8ac25ab5945f6eb464c87724dc04ee206a52015ff050dcdfe46784c3f8
+at32f423_flash.h    383d47992921f583515d4e3879a7a1771b4b51e707ac8d57c657802db1a426ef

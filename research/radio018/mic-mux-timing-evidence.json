@@ -1,0 +1,65 @@
+{
+  "hardware_accessed": false,
+  "mmio_mapped": false,
+  "reference_sha256": "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc",
+  "gpio_boot_excerpt": "08011C08..08011C36",
+  "gpio_boot_events": [
+    {
+      "kind": "configure",
+      "port": "40020800",
+      "bytes": [
+        200,
+        3,
+        0,
+        0,
+        0,
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "kind": "clear",
+      "address": "40020828",
+      "mask": 8
+    }
+  ],
+  "pc3_normal_mode": "output, push-pull, no pull, drive2, LOW",
+  "pc3_stores": [
+    {
+      "start": "08010338",
+      "store_pc": "08010340",
+      "address": "40020828",
+      "value": 8,
+      "meaning": "TX-stop/tail prefix LOW"
+    },
+    {
+      "start": "08021858",
+      "store_pc": "0802185C",
+      "address": "40020818",
+      "value": 8,
+      "meaning": "digital backend HIGH"
+    },
+    {
+      "start": "080218A2",
+      "store_pc": "080218A8",
+      "address": "40020828",
+      "value": 8,
+      "meaning": "digital backend restores LOW"
+    }
+  ],
+  "delay_function": "080251DC..080251E8",
+  "delay_argument": 10,
+  "instruction_counts": {
+    "080251DC": 1,
+    "080251E0": 10,
+    "080251E2": 10,
+    "080251E4": 10,
+    "080251E6": 10,
+    "080251DE": 9,
+    "080251E8": 1
+  },
+  "instructions_executed": 51,
+  "delay_physical_microseconds_measured": false,
+  "limits": "Selected original Thumb fragments only; no complete boot/TX controller execution. PC3 mux function is derived separately from RT880 V2 schematic page3, not these GPIO events. No measurement of actual PC3/analog switch/microphone voltage. Instruction counts do not give physical cycles without a pipeline/flash/bus timing model. Not evidence that a new 1us bus delay is qualified."
+}

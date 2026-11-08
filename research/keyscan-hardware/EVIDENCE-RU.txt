@@ -1,0 +1,121 @@
+Сканер клавиатуры: экспериментальный AT32F423 backend
+2026-11-08. Только offline reverse-engineering, модель и сборка.
+Ни COM, ни рация, ни flash не использовались.
+
+Результат и API
+--------------
+Создан no_std crate uv98-keyscan-at32, hardware feature выключена по умолчанию.
+Он сканирует только цифровую матрицу4x4 и независимый вход PTT PB6.
+ADC, энкодер, side-button названия, TX/RF команды не добавлялись.
+  unsafe hardware::KeyScanner<T:ScanTiming>::from_quiescent(
+      KeyscanPins,&mut CRM,T) -> Self
+  scan() -> Result<Scan,Error>
+  Scan::matrix_raw(),matrix_state(),ptt_high(),ptt_pressed()
+  ScanTiming::settle(SettlePhase::{Released,Selected})
+  MatrixState::{Released,Single(Key),Ambiguous}
+Ожидания задаёт вызывающий код; default/no-op timing нет. Сканер не реализует
+InputSource из uv98-keys с обязательным auxiliary_adc: вымышленный ADC sample
+мог бы превратиться в ложную вспомогательную кнопку.
+
+Подтверждённые пины
+------------------
+Columns в логическом порядке0..3: PB10,PB2,PB1,PB0; маски0400,0004,0002,0001.
+Rows0..3: PC10,PC11,PC12,PD2; low означает замкнутую клавишу.
+Raw bit=column*4+row. PTT: отдельный PB6, low означает asserted input.
+Ownership masks: A=0,B=0447,C=1C00,D=0004. PB4 не принадлежит scanner.
+LCD: PA15/PB3/PB5/PC13/PC14; NOR: PB12..15. Пересечения отсутствуют.
+KeyscanPins не копируется, не Send/Sync. Это не защита от unsafe aliases/IRQ:
+shared GPIO register RMW при конфигурации должен быть сериализован с LCD/NOR.
+
+Первичные свидетельства
+-----------------------
+Связанный RT-880_Upgrade_V1_16_250915.nicsure.bin, base08002800,
+SHA256 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc.
+https://raw.githubusercontent.com/nicsure/RT880-FlasherX/master/RT-880_Upgrade_V1_16_250915.bin
+Это не MCU dump пользовательской UV98 Plus и не идентификация её платы.
+Схема RT880 V2.pdf p3, SHA256
+b7858c30fbe6eb8bf57967d57d9985b29951ccffa766ca5ac9240796c9fab32a,
+имеет KEYOUT1..4/KEYIN1..4/PTTKEY. Полный PDF и BIN сюда не копируются.
+Предшествующие bounded extracts и all-u16 decoder oracle находятся в
+research/keys. Этот этап использует доказанное соответствие raw bits/клавиш.
+
+Stock row sampler0x0801FA9C читает PC10/11/12 и PD2 через0x080254DE.
+Stock scan step0x0801FBA0 сначала читает текущую колонку, затем опускает
+следующую и поднимает предыдущую; current index хранится20001132.
+Stock init0x08011C7E..11CEA: columns PB mask0407 output push-pull, drive2,
+no pull; PC rows1C00 и PD2 input/pull-up. Прямые stores11CAC/B0/B4/B8
+поднимают все четыре колонных выхода. Инициализация PTT видна в11BCC..11BE2:
+PB mask0050 input/pull-up (stock одновременно затрагивает PB4, наш scanner нет).
+Там output type0/drive2 унаследованы из явных stores11B80/11B86.
+
+derive_oracle.py выполняет только два этих ограниченных init slices и
+column-step. GPIO helper25464 исполняется на обычной RAM. MMIO не mapped;
+конкретные GPIO stores проверены поPC/address/value и пропущены. Границы
+slices останавливают эмуляцию до соседнего кода питания/RF. PTT seed bytes
+перечислены в oracle.json, не выдаются за независимо найденные reset defaults.
+Сохранены4 начальных шаблона GPIO registers и4 stock column transitions.
+
+Намеренные отличия и защита от неоднозначных комбинаций
+------------------------------------------------------
+Stock columns push-pull. Новый backend использует open-drain: high освобождает
+колонку, low выбирает одну. Это исключает активный high-vs-low конфликт между
+колонками пассивной матрицы при нескольких кнопках. Совместимость конкретной
+платы с open-drain и row pull-ups — условие unsafe constructor, не догадка о
+физическом устройстве. GPIO drive2 сохранён, остальные не принадлежащие scanner
+поля регистров не меняются. Mux registers, RF, backlight и ADC не трогаются.
+
+Алгоритм scan:
+1. Освободить все колонки, выждать Released, убедиться, что все rows high.
+2. Считать исходный PTT. Пройти columns0,1,2,3: выбрать ровно одну low,
+   выждать Selected, проверить PTT, считать rows, снова проверить PTT;
+   освободить все columns, выждать Released, проверить idle rows и PTT.
+3. Повторить columns3,2,1,0. Raw matrices должны совпасть. Всего25 PTT samples
+   должны совпасть; изменение любого из них приводит к UnstablePtt.
+4. Освободить колонки перед возвратом. На всех error paths также release;
+   Drop освобождает только колонки, не пишет в PTT.
+
+Это фиксированное количество GPIO операций, без MMIO polling loops.
+ScanTiming обязан завершаться и не менять пины/clock; конкретные settling
+интервалы должны учитывать RC цепи, synchronizers, частоту CPU и её допуск.
+Одинаковые проходы не доказывают непрерывную стабильность между samples.
+Debounce остаётся отдельной политикой приложения, не копией stock timing.
+
+Raw0 -> Released; ровно один observed bit -> Single(Key); остальные -> Ambiguous.
+В частности, stock aliases1111->Star и8888->Hash здесь НЕ принимаются.
+Up=2000 иDown=4000 принимаются только как одиночные биты согласованного scan.
+Ни один matrix pattern не становится PTT: этот факт получается только из PB6.
+Стабильный PTT при Ambiguous matrix остаётся raw input fact, не разрешением TX.
+
+Ошибка/ambiguity не равна release. UI должен отменить текущего кандидата и
+заблокировать новые действия до подтверждённого полного release; иначе после
+отпускания части нескольких клавиш оставшаяся может стать новым Pressed.
+Backend возвращает различимые состояния, но не скрывает их внутри debounce.
+
+Границы гарантии ghosting
+------------------------
+Host test перебирает все65536 замыканий идеальной пассивной матрицы без диодов.
+Для каждой выбранной open-drain column вычисляется связная компонента rows/
+columns. Фантомные углы могут добавлять observed bits, но не удалять реальные.
+Поэтому все multiple-key и ghost patterns получают Ambiguous, никогда Single.
+Проверяется также concrete three-key rectangle0013->observed0033.
+Это доказательство для указанной электрической модели. Оно не диагностирует
+повреждённую плату, короткое замыкание как отдельную кнопку, активный key IC,
+периодическую помеху или неизвестные diode/wiring схемы. Реальная ревизия и
+сигналы не измерялись. PTT может быть физически зажат/замкнут; scanner не имеет
+оснований объявлять такой устойчивый low ложным или разрешать передачу.
+
+Воспроизведение
+---------------
+  python research/keyscan-hardware/derive_oracle.py
+Используются research/stock_emu.py, unicorn2.1.4 и внешний matching BIN через
+UV98_STOCK_REFERENCE. UV98_RUST_PROJECT задаёт альтернативный корень проекта.
+Fixture SHA256 находятся в oracle.json. Без reference/emulator Rust tests
+используют сохранённые CSV и отдельную модель электрической матрицы.
+  cargo test -p uv98-keyscan-at32
+  cargo check -p uv98-keyscan-at32 --features hardware --target thumbv7em-none-eabi
+
+Tests покрывают oracle GPIO/columns, все16 single keys, сохранение чужих
+GPIO fields, break-before-make/settling order, mismatch проходов, изменение
+PTT в каждой позиции, idle row faults, release/Drop и exhaustive ghost model.
+Результаты общей сборки сохраняет родительский build. Hardware qualification
+остаётся false; автоматического старта сканера на станции нет.

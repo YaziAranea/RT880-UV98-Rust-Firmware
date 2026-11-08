@@ -1,0 +1,198 @@
+{
+  "schema": 2,
+  "elf_sha256": "df20f932b3350d522f97cde9ae5868ab840a46a1f44d86c137a8e2400aed4a02",
+  "bin_sha256": "bde124a26b800352b9c75b073548f114186241f7e57024dcb5f22c3786ed5307",
+  "main_symbol": "_RNvCsczmu5rZjmr0_18uv98_diag_firmware18___cortex_m_rt_main",
+  "main_address": "0x080136CC",
+  "main_symbol_bytes": 30166,
+  "entry_push_bytes": 16,
+  "fixed_local_frame_bytes": 14336,
+  "total_main_fixed_stack_bytes": 14352,
+  "bytes_above_static_ram": 39360,
+  "remaining_below_fixed_main_frame": 25008,
+  "method": "Read the allocated linked Thumb main symbol and decode entry prologue with Capstone; push {r4,r5,r7,lr} is 16 bytes and sub.w sp,sp,#0x3800 is 14336 bytes. Subtract only that fixed frame from checked ELF initial-MSP/static-RAM margin.",
+  "main_prologue": [
+    {
+      "address": "0x080136CC",
+      "bytes": "b0b5",
+      "instruction": "push {r4, r5, r7, lr}"
+    },
+    {
+      "address": "0x080136CE",
+      "bytes": "02af",
+      "instruction": "add r7, sp, #8"
+    },
+    {
+      "address": "0x080136D0",
+      "bytes": "adf5605d",
+      "instruction": "sub.w sp, sp, #0x3800"
+    }
+  ],
+  "linked_release_policy": {
+    "symbol": "UV98_RELEASE_POLICY",
+    "address": "0x08030560",
+    "words": [
+      "0x00000108",
+      "0x00000001",
+      "0xFFFFFFFF",
+      "0x464D5431"
+    ],
+    "sha256": "0c2b46104a9a633a409353c0610381953b58c8daa9279786beeca2197bb91df0"
+  },
+  "linked_tx_policy_calls": [
+    {
+      "call_address": "0x080150B2",
+      "target_address": "0x0802D12A",
+      "symbol": "_RNvNtCsi1d3LLXC30C_18uv98_radio_runtime9tx_policy9authorize"
+    },
+    {
+      "call_address": "0x0801522A",
+      "target_address": "0x0802D004",
+      "symbol": "_RNvMNtCsi1d3LLXC30C_18uv98_radio_runtime9tx_policyNtB2_13Authorization10still_held"
+    },
+    {
+      "call_address": "0x080154FA",
+      "target_address": "0x0802D12A",
+      "symbol": "_RNvNtCsi1d3LLXC30C_18uv98_radio_runtime9tx_policy9authorize"
+    },
+    {
+      "call_address": "0x080155FA",
+      "target_address": "0x0802D004",
+      "symbol": "_RNvMNtCsi1d3LLXC30C_18uv98_radio_runtime9tx_policyNtB2_13Authorization10still_held"
+    },
+    {
+      "call_address": "0x08017980",
+      "target_address": "0x0802D12A",
+      "symbol": "_RNvNtCsi1d3LLXC30C_18uv98_radio_runtime9tx_policy9authorize"
+    },
+    {
+      "call_address": "0x08019B68",
+      "target_address": "0x0802D12A",
+      "symbol": "_RNvNtCsi1d3LLXC30C_18uv98_radio_runtime9tx_policy9authorize"
+    }
+  ],
+  "hold_deadline_review": {
+    "max_held_ms": 30000,
+    "method": "Both main-loop and configuration-burst hold guards subtract the recorded start from current time, compare unsigned elapsed with 29999 (0x752F), and reject values above it. The surrounding paths call linked tx_policy::authorize and Authorization::still_held.",
+    "foreground": [
+      {
+        "address": "0x0801504E",
+        "bytes": "b798",
+        "instruction": "ldr r0, [sp, #0x2dc]"
+      },
+      {
+        "address": "0x08015050",
+        "bytes": "47f22f51",
+        "instruction": "movw r1, #0x752f"
+      },
+      {
+        "address": "0x08015054",
+        "bytes": "a9eb0000",
+        "instruction": "sub.w r0, sb, r0"
+      },
+      {
+        "address": "0x08015058",
+        "bytes": "8842",
+        "instruction": "cmp r0, r1"
+      },
+      {
+        "address": "0x0801505A",
+        "bytes": "00f2eb80",
+        "instruction": "bhi.w #0x8015234"
+      }
+    ],
+    "configuration_burst": [
+      {
+        "address": "0x08015488",
+        "bytes": "b798",
+        "instruction": "ldr r0, [sp, #0x2dc]"
+      },
+      {
+        "address": "0x0801548A",
+        "bytes": "47f22f51",
+        "instruction": "movw r1, #0x752f"
+      },
+      {
+        "address": "0x0801548E",
+        "bytes": "aaeb0000",
+        "instruction": "sub.w r0, sl, r0"
+      },
+      {
+        "address": "0x08015492",
+        "bytes": "8842",
+        "instruction": "cmp r0, r1"
+      },
+      {
+        "address": "0x08015494",
+        "bytes": "4ff00000",
+        "instruction": "mov.w r0, #0"
+      },
+      {
+        "address": "0x08015498",
+        "bytes": "88bf",
+        "instruction": "it hi"
+      },
+      {
+        "address": "0x0801549A",
+        "bytes": "0120",
+        "instruction": "movhi r0, #1"
+      },
+      {
+        "address": "0x0801549C",
+        "bytes": "022c",
+        "instruction": "cmp r4, #2"
+      },
+      {
+        "address": "0x0801549E",
+        "bytes": "00f0af80",
+        "instruction": "beq.w #0x8015600"
+      },
+      {
+        "address": "0x080154A2",
+        "bytes": "ba99",
+        "instruction": "ldr r1, [sp, #0x2e8]"
+      },
+      {
+        "address": "0x080154A4",
+        "bytes": "0843",
+        "instruction": "orrs r0, r1"
+      },
+      {
+        "address": "0x080154A6",
+        "bytes": "c007",
+        "instruction": "lsls r0, r0, #0x1f"
+      },
+      {
+        "address": "0x080154A8",
+        "bytes": "40f0aa80",
+        "instruction": "bne.w #0x8015600"
+      }
+    ],
+    "legacy_trial_symbols_found": [],
+    "five_thousand_immediates_are_not_trial_evidence": [
+      {
+        "address": "0x08018826",
+        "role": "backlight timeout choice table includes 5/10/20/30/60 seconds"
+      },
+      {
+        "address": "0x08018884",
+        "role": "independent second backlight timeout choice table"
+      },
+      {
+        "address": "0x08018C3C",
+        "role": "5000 core cycles passed to __delay after feed, not 5000 ms TX hold"
+      }
+    ],
+    "authorize_review": "Linked authorize at 0x0802D12A (402 bytes) checks dynamic binding/context, FM, transmit request, power <=2, mic gain <=31, tone/option validity, frequency intervals and select_routes; inspected body has no CH002/432.975MHz/CT77/LOW-only comparison. This does not establish every caller/control-flow path."
+  },
+  "nested_stack_high_water_measured": false,
+  "maximum_runtime_stack_measured": false,
+  "full_control_flow_proof": false,
+  "hardware_qualified": false,
+  "device_accessed": false,
+  "limitations": [
+    "Remaining bytes exclude nested callees, exception frames and dynamic worst-case usage.",
+    "Linear function disassembly can include embedded Thumb jump-table data; only explicitly quoted instruction windows and direct call sites are used as evidence.",
+    "No RF output, timing, spectrum coverage or new hardware behavior is established."
+  ]
+}

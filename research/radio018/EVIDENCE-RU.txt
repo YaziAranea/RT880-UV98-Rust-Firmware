@@ -1,0 +1,120 @@
+RF018: полный обычный FM TX, FM/AM RX и начальная настройка RF A
+2026-11-09. Offline Thumb oracle; COM и физическая радиостанция не использованы.
+
+Источник
+RT-880_Upgrade_V1_16_250915.nicsure.bin, base08002800,251904B.
+SHA256 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc.
+Это родственный образ; идентичность MCU приложения UV98 не предполагается.
+Новые файлы не меняют сохранённые NOR,DMF,calibration fixture и старые outputs.
+
+Oracle
+python research/radio018/derive_oracle.py
+Только Flash RX/RAM RW; MMIO отсутствует. Реальный исходный Thumb исполняет
+выбор частотных калибровок, формулы, ветвления, последовательность регистров,
+DCS кодирование09920/0994C. Заменены RF read/write,NOR read25D30 и delay8380.
+12 точных GPIO-store PC сверяют адрес/маску и записывают событие вместо MMIO.
+RF read использует согласованный register map; неизвестные чтения seed55A0.
+Reset register00 не моделирует физический reset RF; delay фиксирует только
+номинальный аргумент, а не время. --skip-tones переиспользует готовый tone.csv.
+
+Наборы:7cold-prefix,1full-cold,4116tone,42completeTX,24completeRX,48audio,
+1161AM-AGC,1024tone-status. Таблица AMgain97entries отдельно сравнивается.
+Хеши CSV/fixture в oracle-summary.json. Исходная фабричная калибровка в эти
+CSV не попадает: calibration синтетическая, её генератор и hex сохранены.
+10 Rust integration tests сравнивают порядок/значения с CSV; этот агент Cargo
+не запускает. Факт запуска/результат тестов фиксирует интеграционная сборка.
+
+Crate API
+crates/rf-sequence: no_std,forbid unsafe,no heap,immutable Plan максимум64Step.
+WriteA,UpdateA,DelayMs,Mute,AntennaPf0,TxGates — запросы, не backend.
+UpdateA=(fresh_read&keep_mask)|value; всегда повторное чтение перед записью.
+TxGates(0..5) точно повторяет05354: PC15LOW,PB11LOW,read33&FFF3,
+route1 PC15HIGH/PB11LOW;2 PC15HIGH/PB11HIGH;3 bit3;4/5 bit2;write33 last.
+Реле PF0 этот helper не переключает. Root executor отдельно владеет GPIO,
+PTT,временем,watchdog,снятием TX при ошибке и проверками readback.
+
+Cold initialization
+Точный префикс04DC0..04E62:00=8000,delay10,00=0,37=1D0F;
+gain039C0:13=03BE,12=037B,11=027B,10=007A,14=0019,49=2A38,7B=8420;
+33=0,34=0,35=0,1E=4C58,1F=A656,3E=A037,7D=E950,26=13A0;
+Rx3k,Rx300,Tx3k,Tx300 фильтры по исходным general[11,10,9,8], без UI mask7.
+Новая композиция окружает это mute/gatesoff/36=007F/30=0.
+Из полного хвоста перенесены71=0;70=(fresh&00FF)|4000;05218(0);47=6040.
+30=C1FE из полного stock init намеренно не исполняется в cold plan;
+конец36=007F,30=0,37=1D00. Это cold подготовка без включения RX/TX.
+
+RX
+После mute/gatesoff/36off/30off/47mute —20ms, gain039C0,ширина4228,
+compander-reset4518 (свежий31&FFF7,28=6B38,29=AB40),
+частота04B88/селектор12A30 с поправкой выбранного band,tones4388,
+4D=A000+lookup[CFG.B2%11],4E=6F00+lookup[CFG.B2%11];lookup20,30,40,50,
+60,70,100,120,160,200,255. Factorynoise/squelch4F/78 через существующийPlan.
+AFC5274(1) clear73bit4 общий FM/AM. Option05218/фильтрRx3k из50B8..50EA.
+37=1F0F,delay10,30=0200,30=BFF1;маршрут33/PF0 из4FF0.
+Это новая композиция полных проверенных блоков; не один неизменённый caller.
+Все распознанные selector диапазоны поддерживаются:18..660 и840..1300MHz;
+это поведение исходного селектора, не измеренная чувствительность/полоса.
+Передача и внешний AF gate не включаются RX plan.
+
+FM/AM audio
+050EA..518E с channel[0]=0 вызывает38AC(1),A47=6140 и gain/DAC CFG.AE/AF.
+channel[0]=1 вызывает38AC(7),A47=6740 и отдельную пару CFG.B0/B1.
+Оба формируют48=B000+(gain<<4)+DAC с исходной16bit арифметикой, затем
+05768 корректирует по полному freshA01. Функции audio_mode_word и
+audio_volume_word сравниваются с48полными исходными slice executions.
+PF8 открывает внешний runtime после настройки/settling/squelch policy.
+AM software AGC024140..0242AC перенесён вam_agc::State::sample:
+RSSI67,история,target142,gainindex1..96,250tickdecay,таблица3B,
+write13 at02428A. Точный init02E50/02E5C:index90,previous0,hold0.
+1161переходов сравнены с оригинальнымARM,включаявсе512RSSIисходаindex90.
+State::sample возвращаетrequest register13 и новыйState; executorисполняет
+его только вAM с активным AF/RXstate2. Timer/dispatcher теперь проверен:
+номинальный1ms countdown, не чаще1sample/foregroundпроход. 250 означает
+числоAGCвызовов, НЕточныеms при задержкахUI. См.AM-RUNTIME-AUDIT-RU.txt
+и runtime-evidence.json: IRQ/dispatcher/gates проверены отдельно.
+ИзмереннаяAMустойчивостьнаживомжелезеэтимнеподтверждается.
+
+RX tone gate
+PB4проверяетсяstockboot03542..3558 послеinit+100ms→RAM11FCvariantflag.
+ЕгоruntimeactivelevelкакCTdetectorнеподтверждён; аппаратныйbackendPB4не нужен.
+Stock04444 получаетfreshA0C:bit11→status4;дляrawtype0/1 любыеbits12/13→4;
+иначеbit10→1,bit14→2,bit15→3,иначе0. Original076BA..76FA ожидаетtype1/status1,
+type2/status2,type3/status3;globalmonitor1120 отдельноразрешаетbypass.
+Puretone_status сравнен с1024originalcase; tone_matches сохраняетполярность
+и дополнительноотвергаетpendingIRQbit0. Unknownrawtonesнепревращаютсяnone.
+МинимальныйanalogIRQackпрефикс1D990:read0B,write02=0;04466повторяетread0C.
+Runtimeможетсделатьровноодинack/одноповторноечтение,приоставшемсяbit0не
+считатьтонподтверждённым. FSKFIFOветвиоставшейся1D990неперенесены.
+
+TX
+Полный original053F0..055C2 ordinary branch, RAM1121=111F=11FA=0:
+clear RX33&FFCC;47=6140;TXfreq04B88;PF0 поTXroute;tones4388;
+05218(channel19&15) ->71/31;TX3k filter general9 либоconstant4 еслиoption;
+7D=E940+CFG.AD (band MIC bytes НЕ подставляются);
+40=full16bitband wide/narrow deviation, -200 толькоoption!=0 иraw>200;
+37=1D0F,delay10,52=028F,30=0200,30=C1FE;
+TXgates05354,затем36 поfactoryselectedpoint low/average/high05552/04F0C.
+Новый safe prefix mute/gatesoff/36off/30off/47mute +width4228 перед body.
+PA код сохраняет stock маску6bits, это не мощность в ваттах.
+HF/U8 маршруты представлены в pure plan; hardware qualification отдельно.
+
+Subtones
+None raw0:51=0. CT raw1xxx:51=9041,07=floor(payload*413/200)&1FFF.
+DCS raw2000..21FF /3000..31FF:51=802C/A02C,07=0AD7,08lower12 затем
+08=8000+upper. Оригинальный09920/0994C выполнен для всех512code,обеих
+полярностей,4toneMode. toneMode1/3 выбирает alternateGolay, не polarity.
+Неподтверждённые rawtypes/modes>=4 отвергаются, не превращаются вnone.
+Band CT/DCS deviation bytes сохраняются; их потребление здесь не доказано,
+поэтому вместо stock immediate не используются.
+
+Интеграционные требования
+PTT release-to-arm;каждый переход ограничен временем;TOT независим от UI;
+TXfreq/tone берутся из TXполовины канала,Reverse меняет ОБЕ пары RX/TX.
+На отпускание/error/TOT сначалаPC15/PB11/PF8LOW иboundedA33off/A36=007F/
+A30=0 (при terminal можноA33=0 без небезопасного read ожидания),затемRX.
+RX::stop старой crate толькоmute и не заменяет TXshutdown.
+Никакая ошибка шины не должна оставлять firmwareвбесконечномпитанииWDT
+при возможномактивномTX. Watchdog recovery требует earlyoff доRF/UI.
+Проверять every-prefixfault,PTTнакаждомшаге,stuckPTT,TOT,clockwrap/reversal,
+retuneотмену,переходRX/TXмеждудиапазонами,повторныйrelease,recoveryboot.
+Backend/логика shutdown/таймеры принадлежат root; этот pureplan их не создаёт.

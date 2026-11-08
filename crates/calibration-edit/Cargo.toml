@@ -1,0 +1,9 @@
+[package]
+name = "uv98-calibration-edit"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Lossless offline editing of confirmed tuning-block fields"
+
+[dependencies]
+uv98-calibration = { path = "../calibration" }

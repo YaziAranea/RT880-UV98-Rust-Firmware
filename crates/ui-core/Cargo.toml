@@ -1,0 +1,10 @@
+[package]
+name = "uv98-ui-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Pure channel/menu/spectrum UI state and explicit button policy"
+
+[dependencies]
+uv98-keys = { path = "../keys" }
+uv98-codeplug = { path = "../codeplug" }

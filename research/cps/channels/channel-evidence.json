@@ -1,0 +1,186 @@
+{
+  "target_exe": "RT-880 CPS_V1_10_250806.exe",
+  "target_exe_sha256": "b2533229c783c86150a4230a8a51c5ee274092e9f1b036bbb7a5b511c34dabd6",
+  "rt880_source_sha256": "1096b3c280d1d279b321f504c936ffb3fc5553123ecd110d4505a7e77bd7234c",
+  "uv98_source_sha256": "3824d89a091a2915ff0ca523fb6fad6371187bafea8d68d3adde95fa5e32a3e3",
+  "target_executed": false,
+  "device_accessed": false,
+  "hardware_qualified": false,
+  "method": "static comparison of ILSpy 8.2 decompiled source text",
+  "channel_section_bytes": 49152,
+  "channel_count": 1024,
+  "record_bytes": 48,
+  "fields": [
+    {
+      "name": "modulation_raw",
+      "offset": 0,
+      "bytes": 1,
+      "patch_supported": false
+    },
+    {
+      "name": "operation_mode",
+      "offset": 1,
+      "bytes": 1,
+      "codes": {
+        "0": "R+T",
+        "1": "RX",
+        "2": "TX"
+      }
+    },
+    {
+      "name": "active_marker",
+      "offset": 2,
+      "bytes": 1,
+      "active_when": 1,
+      "patch_supported": false
+    },
+    {
+      "name": "bandwidth",
+      "offset": 3,
+      "bytes": 1,
+      "codes": {
+        "0": "Wide",
+        "1": "Narrow"
+      }
+    },
+    {
+      "name": "rx_tone",
+      "offset": 4,
+      "bytes": 2,
+      "endian": "little"
+    },
+    {
+      "name": "rx_frequency_code",
+      "offset": 6,
+      "bytes": 4,
+      "endian": "little",
+      "ordinary_ui_mhz_divisor": 100000
+    },
+    {
+      "name": "tx_frequency_code",
+      "offset": 10,
+      "bytes": 4,
+      "endian": "little",
+      "ordinary_ui_mhz_divisor": 100000
+    },
+    {
+      "name": "tx_tone",
+      "offset": 14,
+      "bytes": 2,
+      "endian": "little"
+    },
+    {
+      "name": "power",
+      "offset": 16,
+      "bytes": 1,
+      "codes": {
+        "0": "Low",
+        "1": "Medium",
+        "2": "High"
+      }
+    },
+    {
+      "name": "tx_priority",
+      "offset": 17,
+      "bytes": 1,
+      "patch_supported": false
+    },
+    {
+      "name": "tot_ctdc",
+      "offset": 18,
+      "bytes": 1,
+      "patch_supported": false
+    },
+    {
+      "name": "scan_remove",
+      "offset": 19,
+      "mask": 128,
+      "other_bits_preserved": true
+    },
+    {
+      "name": "mute_codes",
+      "offset": 20,
+      "bytes": 12,
+      "patch_supported": false
+    },
+    {
+      "name": "name_raw",
+      "offset": 32,
+      "bytes": 16,
+      "encoding": "GBK",
+      "padding": 255
+    }
+  ],
+  "method_comparison": {
+    "CopyArrayToString": {
+      "rt880_line": 10779,
+      "uv98_line": 10802,
+      "same_decompiled_body": true,
+      "rt880_method_sha256": "b81bb732c6b28672dcc8ad6e66b1515ed62ab40d60030f7777348f6ef202c7c1",
+      "uv98_method_sha256": "b81bb732c6b28672dcc8ad6e66b1515ed62ab40d60030f7777348f6ef202c7c1"
+    },
+    "SaveCHName": {
+      "rt880_line": 10944,
+      "uv98_line": 10967,
+      "same_decompiled_body": true,
+      "rt880_method_sha256": "46c41281ad79f190c5bac7e3d89586aab3dcb1f95e00662b0e753ecdef9f9727",
+      "uv98_method_sha256": "46c41281ad79f190c5bac7e3d89586aab3dcb1f95e00662b0e753ecdef9f9727"
+    },
+    "ClearSingleCH": {
+      "rt880_line": 11206,
+      "uv98_line": 11229,
+      "same_decompiled_body": true,
+      "rt880_method_sha256": "73adce0e9cb5ca58ccf444f38edd33f27422051f6bea6ade4a40b79f4bfa5af2",
+      "uv98_method_sha256": "73adce0e9cb5ca58ccf444f38edd33f27422051f6bea6ade4a40b79f4bfa5af2"
+    },
+    "SaveSingle": {
+      "rt880_line": 11214,
+      "uv98_line": 11237,
+      "same_decompiled_body": true,
+      "rt880_method_sha256": "f62dc84fb4a477925d1730bfc482cf30312b51a262428e6c0332c43a4bc9f77e",
+      "uv98_method_sha256": "f62dc84fb4a477925d1730bfc482cf30312b51a262428e6c0332c43a4bc9f77e"
+    },
+    "CheckFreq": {
+      "rt880_line": 11493,
+      "uv98_line": 11516,
+      "same_decompiled_body": true,
+      "rt880_method_sha256": "40a523ca10e3f054d11e1d7059a51ca2565aa6d8385e4ed08b963d59999e3f4a",
+      "uv98_method_sha256": "40a523ca10e3f054d11e1d7059a51ca2565aa6d8385e4ed08b963d59999e3f4a"
+    },
+    "SaveSubaudio": {
+      "rt880_line": 11729,
+      "uv98_line": 11752,
+      "same_decompiled_body": true,
+      "rt880_method_sha256": "7f637fa0188950fa7dd141119a762929660b3cef7e2e64686a48ae595de54634",
+      "uv98_method_sha256": "7f637fa0188950fa7dd141119a762929660b3cef7e2e64686a48ae595de54634"
+    },
+    "SetSubaudio": {
+      "rt880_line": 11754,
+      "uv98_line": 11777,
+      "same_decompiled_body": true,
+      "rt880_method_sha256": "18ae8094dab27ccb2ca03933f16ff55f3be1afafd87efb43330005c9081c39c6",
+      "uv98_method_sha256": "18ae8094dab27ccb2ca03933f16ff55f3be1afafd87efb43330005c9081c39c6"
+    },
+    "SetChInfo": {
+      "rt880_line": 11784,
+      "uv98_line": 11807,
+      "same_decompiled_body": true,
+      "rt880_method_sha256": "741bbe0a85456f4705e1b8f52220988aba59cea0fc68ee8ebfc1411a2579fb08",
+      "uv98_method_sha256": "741bbe0a85456f4705e1b8f52220988aba59cea0fc68ee8ebfc1411a2579fb08"
+    }
+  },
+  "canonical_tone_words": {
+    "None": "0x0000",
+    "CTCSS": "0x1000 | tenths_hz (0..4095)",
+    "DCS normal": "0x2000 | octal_numeric_code (0..511)",
+    "DCS inverted": "0x3000 | octal_numeric_code (0..511)"
+  },
+  "limitations": [
+    "Static source evidence, not CPS runtime or RF hardware validation.",
+    "CPS SetChInfo uses signed Int32 arithmetic; codec retains the unsigned raw 32-bit frequency code.",
+    "No TX-frequency disabled sentinel is established; CPS RX-only is separate byte1=1.",
+    "Tone decoder recognizes canonical encodings only; malformed words remain raw.",
+    "GBK text conversion belongs to host UI; core name helper copies bytes only.",
+    "Stock SaveSingle can erase records on exceptions; lossless patch intentionally does not reproduce this."
+  ]
+}

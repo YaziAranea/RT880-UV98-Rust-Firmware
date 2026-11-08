@@ -1,0 +1,145 @@
+LCD hardware: SPI3, конфигурация и границы доказанного
+2026-11-08. Только статический разбор, эмуляция отдельных функций и сборка.
+Никаких COM, записи прошивки или обращения к физической рации.
+
+Главный результат
+-----------------
+Создан opt-in no_std backend uv98-lcd-at32 с PAC AT32F423: SPI3, PA15 CS,
+PB3 SCK, PB5 MOSI, PC13 D/C, PC14 RESET. Он реализует uv98_display::DisplayBus.
+GPIO-владение разделено через uv98-board-pins::LcdPins; LCD и NOR могут
+сосуществовать без копирования GPIOB token. Backlight PA4 и RF не затрагиваются.
+Backend не подключён к Stage0/reset entry и не является готовой к прошивке BSP.
+
+Исправление предыдущего вывода: 0x40003C00 — SPI3, не SPI1. В связанном stock
+используется AF6. Fagci выбирает SPI1/AF5 на тех же выводах; это другой профиль.
+Старый display evidence исправлен; управляющие байты LCD и размеры320x240
+остаются прежними, машинный oracle управляющего потока не изменился.
+
+Источники
+---------
+Связанный RT8801.16 BIN, 251904 bytes, base0x08002800:
+SHA256 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc.
+https://raw.githubusercontent.com/nicsure/RT880-FlasherX/master/RT-880_Upgrade_V1_16_250915.bin
+Это не MCU dump пользовательской UV98 Plus. Совпадение внешнего NOR этого
+не доказывает. Исследуемый BIN не запускается на радио или нативно на ПК.
+
+Локальные первичные файлы пользователя:
+Desktop/USB/rt880/fw_lib/libraries/cmsis/cm4/device_support/at32f423.h
+SHA256 251d3214bf556a14d3ea51b4db3f2763c2d3e2f9dc4ca39cf031be2e7103a14a.
+Строка391: SPI3_BASE = APB1PERIPH_BASE+0x3C00; SPI1 находится на APB2+0x3000.
+Desktop/USB/rt880/fw_lib/libraries/drivers/inc/at32f423_spi.h
+SHA256 ba029379d01f1b18ac33e9eb46723124d1a7f0a046626effcd985851cd592b8f.
+Enums подтверждают half-duplex TX=3, CPOL high=1, phase first edge=0,
+hardware CS=0. PAC at32f4xx-pac0.4.0/at32f423 повторяет эти адреса/поля.
+
+RT880 V2.pdf p3, SHA256
+b7858c30fbe6eb8bf57967d57d9985b29951ccffa766ca5ac9240796c9fab32a:
+LCD500 отмечен как XMZ024B063A0; выводы1GND,2RESET,3SCK,4D/CX,5CS,6SDA,
+7SDO (на схеме не подключён),8GND,9VDD3.3V,10..14 подсветка. Схема не
+раскрывает IM-перемычки внутри модуля и не идентифицирует пользовательский PCB.
+
+ST7789.pdf: визуально Sitronix ST7789VW v1.0,2017/09,317 страниц;
+SHA256 7c5b0c471d53f6d9381186e5989019307a12b1b9379704b05118e0d6d4c4a8e3.
+Сверены таблицы/схемы p50,55..57,62..63,305. Старые metadata ST7889 неверны.
+Полные PDF, извлечённые страницы и SDK не копируются в этот каталог.
+
+Stock SPI/GPIO: точный ограниченный разбор
+-----------------------------------------
+Общий init0x080145CC вызывает LCD transport init0x08018064 при0x080145E2,
+затем LCD command init0x08017E48 при0x080145FE.
+0x08018064..0x0801814A:
+  PA15: mux mode2, AF6, push-pull, drive1, no pull.
+  PC13/PC14: output mode1, push-pull, drive1, no pull.
+  PB3/PB5: mux mode2, AF6, push-pull, drive1, no pull.
+  Direct stores0x080180C4/C8: GPIOC CLR0x40020828,0x4000/0x2000.
+  SPI3 params0301000000010000: half-duplex TX, master, divisor2,
+  MSB-first,8-bit, CPOL1/CPHA0 (mode2), hardware NSS.
+  spi_cs_output_enable helper0x08025B44 sets CTRL2 bit2.
+  enable helper0x08025B3A sets CTRL1 bit6.
+Из reset register state получается CTRL1=C046,CTRL2=4,I2SCTRL=0.
+PA15 в аппаратном NSS-режиме; stock LCD command/data routines CS не переключают.
+
+GPIO helpers0x08025464 и0x080254F0 и SPI helper0x08025B7E выполнены в
+обычной эмулируемой RAM для4 начальных шаблонов регистров. Все MMIO остаются
+unmapped. Внешние вызовы helper перенаправлены в RAM, два прямых stores
+проверены по PC/адресу/значению и пропущены. Подмена перечислена в oracle.json.
+Результат crates/lcd-at32/tests/fixtures/stock-lcd-init.csv; чужие биты
+проверяются отдельно. Это проверка семантики stock кода, не модели GPIO/SPI.
+
+0x08018184 опускает PC13, вызывает data8, поднимает PC13.
+0x080181A8 передаёт8bit через0x08025B56 (32-bit store DT+0x0C), затем ждёт
+TDBE. У stock нет финального BUSY wait перед сменой DC. Наш backend добавляет
+TDBE+BUSY, чтобы возврат DisplayBus означал завершение последнего бита.
+RX не используется: half-duplex TX не должен ожидать RDBF.
+По stock clock profile APB1 nominal24MHz и divider2 дают nominal12MHz SCK;
+это расчёт для связанного BIN, не измерение пользовательской станции.
+
+E7=10: что установлено
+----------------------
+Даташит p305: SPI2EN bit4 включает режим двух линий данных. Однако p50/62
+также требуют IM[3:0]=0101. В этом режиме clock идёт на DCX, данные на SDA
+и WRX; p63 описывает9-bit команды с D/C внутри потока, SRAM использует оба
+data pin. Для4-line8-bit таблицы p50/55 задают IM=0110 либо1110; отдельная
+линия D/C обслуживает8-bit байты (p56).
+
+Связанный stock устанавливает8-bit SPI и отдельный D/C на PC13; его data8
+не формирует9-й управляющий бит, data16 использует только MOSI/SDA. Схема
+также показывает отдельные D/CX и SCK. Поэтому E7=10 само по себе не означает,
+что этот stock тракт стал двухлинейным. Код соответствует4-line byte protocol.
+Физические IM внутри модуля и silicon revision неизвестны. Мы не утверждаем,
+что datasheet-команда игнорируется на любом4-line контроллере, и не заменяем
+её на другое значение без подтверждения. Backend условно применим к модулю,
+который поддерживает наблюдаемый stock byte protocol и эту последовательность.
+
+Дополнительное нерешённое соответствие waveform: stock oracle даёт mode2,
+а ST7789VW p56 указывает sampling SDA на rising SCL. Названия фаз/слова
+конфигурации подтверждены SDK, но электрическая форма сигнала не измерена.
+Backend сохраняет stock mode2; переход на mode0 из fagci не сделан молча.
+Совместимость реального LCD с этим waveform — явное условие конструктора.
+
+Реализация и отличия от stock
+-----------------------------
+hardware feature по умолчанию выключена. API:
+  unsafe Spi3Lcd<T:BusTiming>::from_quiescent(
+      SPI3,LcdPins,&mut CRM,Config,T) -> Self
+  Config { divider:Divider,poll_budget:NonZeroU32 }
+  BusTiming::wait(TimingPhase::{Setup,Hold,Inactive})
+Без default/no-op timing. Caller обеспечивает минимальные интервалы при
+известной верхней границе core clock и требованиях своего panel. Отдельный
+Display::Delay отвечает за миллисекундные RESET/sleep delays.
+
+Manual CS: PA15 output заменяет AF6, software NSS high вместо hardware NSS;
+CTRL1=C346 приdivider2,CTRL2=0. MOSI/SCK остаются AF6. ST7789VW p57 Figure14
+показывает допустимый CS-high между целыми командами/параметрами. Наш backend
+переключает CS только по границам целых byte slices. Это намеренное отличие,
+обеспечивающее явные CS setup/hold/inactive и очистку после ошибки.
+
+Нормальная транзакция: idle wait; DC; CS low; Setup; каждый byte послеTDBE;
+финальныеTDBE+BUSY; Hold; CS high; DC high; Inactive. Каждый wait ограничен
+poll_budget чтениямиSTS. Любой error: CS high, SPI disable, DC high, Inactive,
+terminal Poisoned. После ошибки нет скрытого retry/clocking/reset. Reset не
+лечит poisoned transport. Drop прекращает обмен и освобождает CS без RESET.
+При abort последний byte может быть обрезан; успешной передачей это не считается.
+
+Конструктор включает только GPIOA/B/C и SPI3 gates, reset только SPI3;
+clock tree, backlight, RF/PA и ключи не меняет. CS/DC/RESET preloaded high
+перед output mode; unsafe caller уже обязан обеспечить CS inactive/RESET high.
+Shared port registers требуют serialized RMW; LcdPins не Send/Sync, но это
+не защита от raw aliases, IRQ или unsafe stealing. Пока backends живы,
+whole-port reset и конфликтующие CRM/GPIO изменения запрещены контрактом.
+
+Проверка и воспроизведение
+-------------------------
+derive_lcd_oracle.py повторно создаёт4 seed cases и oracle.json.
+Python требует unicorn2.1.4 и matching external BIN в UV98_STOCK_REFERENCE;
+UV98_RUST_PROJECT при необходимости задаёт каталог проекта. No MMIO mapped.
+  python research/lcd-hardware/derive_lcd_oracle.py
+  cargo test -p uv98-lcd-at32
+  cargo check -p uv98-lcd-at32 --features hardware --target thumbv7em-none-eabi
+
+12 host tests пройдены в родительской интеграционной сборке; hardware backend
+прошёл crossbuild внутри uv98-board-diagnostic. Тесты покрывают oracle/masks,
+ordering DC/CS/timing, finite waits, errors/poisoning, reset и Drop cleanup.
+Состояние hardware_qualified=false сохраняется. Пины, E7/IM, mode2 waveform,
+clock tolerance, power state и реальные LCD timing должны быть подтверждены
+до подключения этого backend к загрузочной точке конкретной станции.

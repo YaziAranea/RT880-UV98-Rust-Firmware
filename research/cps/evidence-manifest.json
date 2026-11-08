@@ -1,0 +1,81 @@
+{
+  "schema": 1,
+  "files": [
+    {
+      "source_relative_to_workspace": "work/cps-analysis/triage.py",
+      "packaged_relative_to_research_cps": "triage.py",
+      "bytes": 3900,
+      "sha256": "aea7473ea555119ef497976180b4422eb4cf022240f2c4abf22ee57d0e29e2d9"
+    },
+    {
+      "source_relative_to_workspace": "work/cps-analysis/triage.json",
+      "packaged_relative_to_research_cps": "triage.json",
+      "bytes": 6493,
+      "sha256": "6c723090d35ee24eb0897b6209b09bccf5c887073d428041b9bfdccb16a308e2"
+    },
+    {
+      "source_relative_to_workspace": "work/cps-analysis/CPS-PLAN-RU.txt",
+      "packaged_relative_to_research_cps": "CPS-PLAN-RU.txt",
+      "bytes": 10556,
+      "sha256": "eb07f05c9b07a0af8051b13a858dbac015db86dcc1f58769f400791de29f0d4d"
+    },
+    {
+      "source_relative_to_workspace": "work/cps-analysis/channels/EVIDENCE-RU.txt",
+      "packaged_relative_to_research_cps": "channels/EVIDENCE-RU.txt",
+      "bytes": 6547,
+      "sha256": "5e528496c55b93ba9fdc483dc9183798e1b0d71b39e9ec9c99e5bd7164360f3a"
+    },
+    {
+      "source_relative_to_workspace": "work/cps-analysis/channels/derive_channels.py",
+      "packaged_relative_to_research_cps": "channels/derive_channels.py",
+      "bytes": 5302,
+      "sha256": "e7e6b15077a5917c70543203b61c02f4927ac176fc95fdf3f24b90da983eab2e"
+    },
+    {
+      "source_relative_to_workspace": "work/cps-analysis/channels/channel-evidence.json",
+      "packaged_relative_to_research_cps": "channels/channel-evidence.json",
+      "bytes": 5853,
+      "sha256": "2616f0238dd7ebba151e8e09414329e3c3a1d796752ba47a9ace578e56f21916"
+    },
+    {
+      "source_relative_to_workspace": "work/cps-analysis/channels/source-excerpts.cs.txt",
+      "packaged_relative_to_research_cps": "channels/source-excerpts.cs.txt",
+      "bytes": 11779,
+      "sha256": "16b35f1571d5d84eec996d36ca839e8ecad19f5af4ba88b499b31a775847746e"
+    },
+    {
+      "source_relative_to_workspace": "work/cps-analysis/settings/SETTINGS-ZONES-FM.txt",
+      "packaged_relative_to_research_cps": "settings/SETTINGS-ZONES-FM.txt",
+      "bytes": 7446,
+      "sha256": "8e00fa7ff5061f28e365a2fb69171776b5c3843c7dfa3d4fe9f6c9b6c9a2464b"
+    },
+    {
+      "source_relative_to_workspace": "work/cps-analysis/settings/source-refs.txt",
+      "packaged_relative_to_research_cps": "settings/source-refs.txt",
+      "bytes": 19259,
+      "sha256": "daf5ff001590aa954e908e9d969f8ee77b79a54c9571c86ed613139997872359"
+    },
+    {
+      "source_relative_to_workspace": "work/cps-analysis/corpus/NOTES.txt",
+      "packaged_relative_to_research_cps": "corpus/NOTES.txt",
+      "bytes": 3543,
+      "sha256": "24b190c9a9419bb4a98959ab3a7cd133ddb538ddbb4c1673a99159908c43097e"
+    },
+    {
+      "source_relative_to_workspace": "work/cps-analysis/corpus/native-files.json",
+      "packaged_relative_to_research_cps": "corpus/native-files.json",
+      "bytes": 6348,
+      "sha256": "d3a497085154e7d4cc316ec5c3d9a603de5d289fd38e4434aed90922ffc01a08"
+    },
+    {
+      "source_relative_to_workspace": "work/cps-analysis/corpus/inspect_corpus.py",
+      "packaged_relative_to_research_cps": "corpus/inspect_corpus.py",
+      "bytes": 3316,
+      "sha256": "b7505604b3f9394e38eae0226c63665dec1ffe7343eecae9141e9e88da460118"
+    }
+  ],
+  "full_decompiled_sources_included": false,
+  "cps_executables_included": false,
+  "native_cps_file_contents_included": false,
+  "bounded_static_source_excerpts_included": true
+}

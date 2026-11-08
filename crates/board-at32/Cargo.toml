@@ -1,0 +1,15 @@
+[package]
+name = "uv98-board-at32"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Opt-in SPI2 read-only NOR backend for the related AT32F423 board profile"
+
+[features]
+default = []
+hardware = ["dep:at32f4xx-pac", "uv98-board-pins/hardware"]
+
+[dependencies]
+uv98-nor-read = { path = "../nor-read" }
+uv98-board-pins = { path = "../board-pins" }
+at32f4xx-pac = { version = "=0.4.0", default-features = false, features = ["at32f423"], optional = true }

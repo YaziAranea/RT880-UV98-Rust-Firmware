@@ -1,0 +1,72 @@
+{
+  "requirement": "R-02",
+  "hardware_accessed": false,
+  "mmio_mapped": false,
+  "calibration_sha256": "8906c3d9847eeeefe0ee6aad6aa4302949bd5e5984f3c64ed02edb8cf6fb0ff7",
+  "cps_sha256": "94b90ced67137d30ade3ee4b3443ee316202eaafd0008cd89f1d858d6c1912de",
+  "reference_sha256": "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc",
+  "frequency_10hz": 12640000,
+  "corrected_frequency_code": 12640000,
+  "calibration_band": 3,
+  "modulation": "AM",
+  "width": "Wide",
+  "reg01_input": 6,
+  "am_volume_cfg": [
+    50,
+    12
+  ],
+  "expected_write_words": {
+    "33": "0010",
+    "38": "DF00",
+    "39": "00C0",
+    "43": "3028",
+    "47": "6740",
+    "48": "B329",
+    "13": "03BE",
+    "37": "1F0F",
+    "30": "BFF1",
+    "28": "6B38",
+    "29": "AB40"
+  },
+  "trace_events": 31,
+  "csv_sha256": "dab570f11d358dba8a731e93fcdb5a6d21f65fc0c62900660b823bb87abb65a6",
+  "pc4_cases": [
+    {
+      "cfg77": 0,
+      "cfg107": 0,
+      "pc4_high": false,
+      "helpers": []
+    },
+    {
+      "cfg77": 0,
+      "cfg107": 1,
+      "pc4_high": false,
+      "helpers": []
+    },
+    {
+      "cfg77": 1,
+      "cfg107": 0,
+      "pc4_high": true,
+      "helpers": [
+        [
+          "0x801e2bc",
+          4
+        ]
+      ]
+    },
+    {
+      "cfg77": 1,
+      "cfg107": 1,
+      "pc4_high": false,
+      "helpers": [
+        [
+          "0x801fc70",
+          4
+        ]
+      ]
+    }
+  ],
+  "actual_cfg77": 0,
+  "actual_cfg107": 0,
+  "limits": "Original Thumb requests only. AIR record constructed in emulator RAM; actual preserved factory/CFG input unchanged. No MMIO, COM, signal, audio or observed register readback. A01 seed6 affects A48; A31 and unrelated reads use setup's55A0. PC4 fragment stops before unrelated application logic and intercepts named GPIO/helper calls. No full stock boot emulation."
+}

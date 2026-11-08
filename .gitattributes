@@ -1,0 +1,4 @@
+# Preserve the exact source/evidence snapshot, including existing line endings.
+* -text
+*.png binary
+*.bin binary

@@ -1,0 +1,98 @@
+[
+  {
+    "clock_input_hz": 24000000,
+    "us_scale": 24,
+    "ms_scale": 24000,
+    "delay_argument": 10,
+    "events": [
+      [
+        "clock_source_arg",
+        4
+      ],
+      [
+        "load",
+        240000
+      ],
+      [
+        "val",
+        0
+      ],
+      [
+        "ctrl",
+        5
+      ],
+      [
+        "ctrl",
+        4
+      ],
+      [
+        "val",
+        0
+      ]
+    ]
+  },
+  {
+    "clock_input_hz": 48000000,
+    "us_scale": 48,
+    "ms_scale": 48000,
+    "delay_argument": 10,
+    "events": [
+      [
+        "clock_source_arg",
+        4
+      ],
+      [
+        "load",
+        480000
+      ],
+      [
+        "val",
+        0
+      ],
+      [
+        "ctrl",
+        5
+      ],
+      [
+        "ctrl",
+        4
+      ],
+      [
+        "val",
+        0
+      ]
+    ]
+  },
+  {
+    "clock_input_hz": 96000000,
+    "us_scale": 96,
+    "ms_scale": 96000,
+    "delay_argument": 10,
+    "events": [
+      [
+        "clock_source_arg",
+        4
+      ],
+      [
+        "load",
+        960000
+      ],
+      [
+        "val",
+        0
+      ],
+      [
+        "ctrl",
+        5
+      ],
+      [
+        "ctrl",
+        4
+      ],
+      [
+        "val",
+        0
+      ]
+    ]
+  }
+]

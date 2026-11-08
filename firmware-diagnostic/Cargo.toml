@@ -1,0 +1,47 @@
+[package]
+name = "uv98-diag-firmware"
+version = "0.1.8"
+edition = "2021"
+publish = false
+build = "build.rs"
+description = "Experimental radio diagnostic image for the related UV98/RT880 board profile"
+
+[features]
+default = []
+upper-exo-tx-trial = []
+channel-tx = []
+
+[[bin]]
+name = "uv98-diag-firmware"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+uv98-spectrum = { path = "../crates/spectrum" }
+cortex-m = { version = "=0.7.7", features = ["critical-section-single-core"] }
+cortex-m-rt = { version = "=0.7.7", features = ["set-sp", "set-vtor"] }
+at32f4xx-pac = { version = "=0.4.0", default-features = false, features = ["at32f423", "rt", "critical-section"] }
+uv98-diag-startup = { path = "../crates/diag-startup", features = ["hardware"] }
+uv98-diag-quiesce = { path = "../crates/diag-quiesce", features = ["hardware"] }
+uv98-diag-app = { path = "../crates/diag-app" }
+uv98-board-pins = { path = "../crates/board-pins", features = ["hardware"] }
+uv98-board-at32 = { path = "../crates/board-at32", features = ["hardware"] }
+uv98-lcd-at32 = { path = "../crates/lcd-at32", features = ["hardware"] }
+uv98-keyscan-at32 = { path = "../crates/keyscan-at32", features = ["hardware"] }
+uv98-rf-at32 = { path = "../crates/rf-at32", features = ["hardware"] }
+uv98-rf-bus = { path = "../crates/rf-bus" }
+uv98-clock-profile = { path = "../crates/clock-profile", features = ["hardware"] }
+uv98-display = { path = "../crates/display" }
+uv98-nor-read = { path = "../crates/nor-read" }
+uv98-keys = { path = "../crates/keys" }
+
+uv98-boot-log = { path = "../crates/boot-log", features = ["hardware"] }
+
+uv98-handheld-app = { path = "../crates/handheld-app" }
+
+uv98-radio-runtime = { path = "../crates/radio-runtime", features = ["hardware"] }
+uv98-sidekeys-at32 = { path = "../crates/sidekeys-at32", features = ["hardware"] }
+uv98-rf-sequence = { path = "../crates/rf-sequence" }
+uv98-handheld-ui = { path = "../crates/handheld-ui" }
+uv98-codeplug = { path = "../crates/codeplug" }

@@ -1,0 +1,129 @@
+RF three-wire transport: A/B register transactions
+2026-11-08. Offline only; no COM, MCU MMIO, flash or radio operation.
+
+Источник и область
+
+RT-880_Upgrade_V1_16_250915.nicsure.bin, 251904 bytes, base08002800.
+SHA256 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc.
+https://raw.githubusercontent.com/nicsure/RT880-FlasherX/master/RT-880_Upgrade_V1_16_250915.bin
+Это связанный RT880 image, не exact MCU readback пользовательской UV98.
+Полные bounded listings уже сохранены в research/rf-startup:
+  rf-bitbang.asm, rf-bus-select.asm.
+Rust реализован по перечисленным ниже инструкциям; чужой C driver не копировался.
+
+RF A/U201:
+  CS PA8, SCK PF6, DATA PC9 (related schematic);
+  read0801E620, write0801E660, byte0801D8E8,
+  readword0801D83C, direction0801D894.
+RF B/U400:
+  CS PC7, SCK PC8, DATA PC6;
+  read0801E698, write0801E6D4, byte0801D7EC,
+  readword0801D740, direction0801D79C.
+Одна Bus владеет одной Pins-инстанцией для одного чипа. Это не общий SPI2
+NOR и не LCD SPI3. Автоматического выбора общего активного чипа нет.
+
+Успешная write transaction
+
+  A: предполагается DATA output из квалифицированного предыдущего состояния.
+  B: перед началом явно DATA output.
+  SCK LOW; CS LOW;
+  8бит register; 8бит word>>8; 8бит word&FF, каждый байт MSB first;
+  CS HIGH. Конечный SCK остаётся HIGH.
+Для каждого передаваемого бита:
+  SCK LOW; DATA level; delay(10); SCK HIGH; delay(10).
+Ровно24 risingclockrequests и48 вызововDelay.
+
+Успешная read transaction
+
+  A: DATA output — precondition; B: сначала явно DATA output.
+  SCK LOW; CS LOW; 8бит register|80h тем же bytehelper;
+  delay(10); DATA input; SCK LOW;
+  16раз: SCK HIGH; sampleDATA; delay(10); SCK LOW; delay(10).
+  CS HIGH;
+  A: DATA output; B: оставить DATA input.
+Ровно24 risingclockrequests,16samples,49Delaycalls; результат MSB first.
+РазличиеA/B сохранено. Bwrite/Bread всегда восстанавливают output в начале.
+
+Неоднозначность physical timing
+
+Stock вызывает080251DC с аргументом10. В crate это НЕ объявлено10us,
+10cycles или измеренной скоростью шины. Delay::wait(Phase) — контракт
+caller с доказанными задержками для реального coreclock/board/interrupts.
+Все traitmethods обязаны завершаться за заданное конечное время и не panic.
+Нет poll-loop и аппаратного ACK: транспорт ограничен числом операций,
+но wall-clock timeout нельзя обещать для произвольного зависающего Pins/Delay.
+
+В read sample идёт сразу ПОСЛЕ SCKHIGH и ДО ReadHighDelay. Отдельной
+setupdelay между фронтом и выборкой в исследованном коде нет. Поэтому
+Pins::clock/read_data должны обеспечивать валидную выборку с учётом GPIO,
+частотыCPU и задержекраспространения. Нельзя считать ReadHighDelay
+задержкой доsample. TurnaroundDelay стоит ДО смены направленияDATA.
+Дополнительные CS setup/hold/inactive delays и конкретная электрическая
+временная диаграмма этой моделью не выдумываются и на UV98 не измерены.
+
+Реализованная обработка ошибок — новая политика
+
+Pins fallible. Любая ошибка в операции, включая финальныйCS или возврат
+DATAoutput, прекращает нормальный обмен. Затем в фиксированном порядке:
+  1. poisoned=true;
+  2. попытатьсяCSHIGH;
+  3. попытатьсяDATAinput даже при ошибкеCScleanup.
+После fault новые clockrequests запрещены. Error::Pin содержит исходную
+ошибку и обе optionalcleanuperrors; частичный readword не возвращается.
+CS cleanup success означает только успешный результат adaptercall,
+не проверенное физическое напряжениеCS. Частичная registerwrite возможна.
+Повторной передачи, retry/recovery/reset и гарантииRFoff нет.
+Все последующие read/write возвращаютPoisoned без Pins/Delay I/O.
+
+Drop после использования best-effort повторяетCSHIGH+DATAinput, без clocks;
+ошибкиDrop сообщить нельзя. Неиспользованный Bus, включая invalidaddresses,
+имеет inertDrop. Послеfault реконструкция Bus требует внешней повторной
+квалификации; сама по себе новая Rustинстанция не восстанавливаетжелезо.
+
+API / ограничения
+
+crates/rf-bus, uv98-rf-bus, no_std/forbid unsafe, без dependencies/heap.
+  Bus<P: Pins,D: Delay>::new(pins,delay,Profile::{A,B}) — inert;
+  read(register:u8)->Result<u16,Error<P::Error>>;
+  write(register:u8,word:u16)->Result<(),Error<P::Error>>;
+  is_poisoned(), profile().
+register>=80h отвергается доI/O, не poison: старшийбит зарезервирован
+подread flag. Это явная валидация API, а не утверждение о stock caller.
+Начальный CS HIGH, DATA output дляA, clocks/pinmux/power, exclusivepins,
+отсутствие конкурирующих IRQ/DMA и пригодностьtiming — preconditionscaller.
+Constructor ни одного из этихусловий сам не устанавливает.
+
+Транспорт не знает смысла registerwords и не проверяетRFpolicy. Он способен
+передать любое16битслово в разрешённый7битадрес; поэтому будущий executor
+должен отдельно применять политикуRX/TX/calibration/relay. Нет автоматического
+stockinit, boardpower, RXon, PAon или bindings к board-pins/PAC/Stage0.
+Текущий entry этой crate не вызывает. Пользовательская рация не затронута.
+
+Проверка
+
+derive_oracle.py: Unicorn2.1.4, толькоRXFlash/RWRAM. ВсеMMIO unmapped.
+Интерцепты: DATA directionhelpers; GPIOsample254DE; delay251DC.
+26точныхGPIOstorePC проверяются наадрес/маску и записываютсявжурнал;
+другие обращениякпериферии вызываютошибку. Полныйstockboot не выполнялся.
+80сценариев =2profiles*2operations*4registers*5words,10020ordered events.
+Fixtures содержат фактические событияThumbcode, а не вычисленныйRustожидатель.
+Hashes и переченьPC: oracle-summary.json.
+
+8hosttests прошли isolatedrustc1.99.1; thumbv7em-none-eabi no_std compile
+прошёл отдельно. Cargo workspace integration выполняетroot.
+  - полное совпадение всех80orderedtraces;
+  - ровно24risingclockrequests,48/49delays;
+  - fault injection наКАЖДОЙpin-operation обоихprofiles/read/write;
+  - отказCScleanup не пропускаетDATArelease, обеошибкисохраняются;
+  - terminalpoison безпоследующегоI/O;
+  - inertconstructor/drop и все128недопустимыхregisteraddresses;
+  - подрядread/write/read с правильнымA/Bturnaround;
+  - все16одиночныхбитовreceiveword;
+  - точное положениеReadHigh/Turnarounddelays иDropcleanup.
+Это проверкиsoftwaretransport, не electrical/receiver/physicalRF evidence.
+
+Воспроизведение:
+  UV98_STOCK_REFERENCE — путькBIN с закреплённымSHA;
+  UV98_RUST_PROJECT — кореньпроекта;
+  python research/rf-bus/derive_oracle.py
+  cargo test --locked -p uv98-rf-bus --target x86_64-pc-windows-gnullvm

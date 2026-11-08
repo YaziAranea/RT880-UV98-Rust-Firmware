@@ -1,0 +1,8 @@
+[package]
+name = "uv98-gps-nmea"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Bounded no_std NMEA observation parser; no UART or radio operations"
+
+[dependencies]

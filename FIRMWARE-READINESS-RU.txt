@@ -1,0 +1,108 @@
+Исторический аудит Stage0 и восстановления UV-98 Plus
+Актуальный диагностический образ: DIAGNOSTIC-IMAGE-RU.txt, firmware-diagnostic/.
+Описанный ниже WFI относится к старому firmware/uv98-stage0; это не новый образ.
+2026-11-08. Локальный статический аудит; COM и устройство не использовались.
+
+Вывод
+
+Существующий Stage 0 — проверенный по структуре ELF пример startup, а не
+работающая прошивка радио. Готовность восстановления точной пользовательской
+UV98 Plus 1.16 не доказана. Есть устойчивый бэкап основной внешней SPI-памяти
+и калибровок; внутренний MCU и штатный загрузчик им не покрыты.
+
+1. Что реально делает Stage 0
+
+work/uv98-rust-stage/firmware/src/main.rs:14..21:
+  main -> disable IRQ -> бесконечный WFI.
+  panic handler делает то же самое.
+Нет GPIO, часов, watchdog, SysTick, DMA, питания, дисплея, кнопок,
+SPI/UART, обработки каналов, приёма или передачи.
+Зависимость uv98-calibration объявлена в firmware/Cargo.toml:18, но её
+вызовов в main.rs нет. Factory calibration пока не читается и
+не применяется. stock-model/codeplug не входят в зависимости firmware.
+
+Текущий ELF:
+  work/uv98-rust-stage/target/thumbv7em-none-eabi/release/uv98-stage0
+  SHA256 0f6db043e95ab836b806dff3e730a8c3fa449fd61ea11624cbdd1667adc3edbb
+Hash независимо совпал с validation/elf-layout.json и build-summary.json.
+ELF занимает 252280 байт с отладочной информацией, но его загрузочные сегменты
+содержат лишь 436 байт векторов и 152 байта кода, суммарно 588 байт.
+Vector 0x08002800, reset 0x080029B5, MSP 0x2000C000; layout valid=true,
+hardware_qualified=false, flash_performed=false.
+Размер ELF-файла нельзя считать размером реализованной радио-прошивки.
+
+2. Что известно и не известно о startup
+
+firmware/memory.x задаёт FLASH 0x08002800..0x0803FFFF и RAM 0x20000000..0x2000BFFF.
+AT32F423 PAC 0.4.0 даёт векторы, cortex-m-rt 0.7.7 включает set-sp/set-vtor.
+Это подтверждено firmware/Cargo.toml и текущим ELF.
+Физическая ревизия платы, маркировка MCU и RAM именно этой рации не сверены;
+карта основана на связанных RT880/vendor источниках (HARDWARE-EVIDENCE.txt).
+
+CONTROL, NVIC, SysTick, DMA, watchdog, clocks и GPIO после перехода из
+штатного загрузчика не приведены к известному состоянию. Маскирование IRQ
+в main происходит после cortex-m-rt startup. Состояние RF/PA-пинов и питания,
+унаследованное от загрузчика, не доказано. Отсутствие TX-кода не устанавливает
+электрические уровни этих выводов.
+
+Локальный vendor пример:
+C:/Users/User/Desktop/USB/rt880/fw_lib/libraries/cmsis/cm4/device_support/system_at32f423.c
+  :58 прямо требует вызова SystemInit только после reset.
+  :80..97 переключает/сбрасывает clock tree.
+  :107 устанавливает VTOR=FLASH_BASE+VECT_TAB_OFFSET, где offset=0.
+Его нельзя просто скопировать как контракт входа из radio bootloader:
+текущие векторы приложения находятся по 0x08002800, а не 0x08000000.
+
+3. Реальный охват бэкапа
+
+outputs/uv98-backup-2026-11-08/audit.json:
+  два прохода по 4194304 байта, 4096 подтверждённых ответов в каждом;
+  одинаковый SHA256
+  1e8f4c5c5373392a08a041da9132e22d21ad0dba4fca97b9bb4f21ade77c55a3;
+  первая 4096-байтная область совпадает с отдельным calibration backup;
+  исходящие кадры не содержат явных команд erase/program.
+provenance.json прямо отмечает MCU/bootloader not acquired.
+
+work/hardware_readback/rt880-116-read-mapping-evidence.txt:
+  в связанном RT880 1.16 handler 0x0801BDC8, READ branch 0x0801BDE2;
+  index<<10 по 0x0801BDF0, длина 1024, вызов 0x08025D30;
+  helper отправляет SPI opcode 0x03 и 24-битный адрес через SPI2, CS=PB12.
+  Это основная внешняя NOR-область, не MCU Flash и не loader.
+work/hardware_readback/coverage-verdict.txt перечисляет также непокрытые
+SPI OTP/security/ID, защитные/системные bytes MCU и отдельные GPS/APRS modules.
+RT880 V2.pdf page 3 подтверждает W25Q32/PB12..PB15 для той схемы,
+но не устанавливает физическую комплектацию пользовательской платы.
+
+4. Чего нет для доказанного восстановления
+
+Единственный BIN в исследованном work/reference-firmware —
+RT-880_Upgrade_V1_16_250915.nicsure.bin, 251904 байта, SHA256
+eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc.
+source.json сохраняет авторский nicsure/RT880-FlasherX URL и ограничение:
+RT880-labelled reference, не точный пользовательский UV98Plus image.
+Он начинается с app 0x08002800 и не содержит первые 0x2800 байт загрузчика.
+Точная идентичность пользовательскому MCU-коду не проверена.
+Загрузчик и его контракт перехода/стирания/возврата не исследованы этим BIN.
+Процедура восстановления с неисправным приложением на устройстве не проверена.
+Заблокированный Defender UV98 updater не восстанавливался и не обходился.
+
+work/hardware_readback/rt880-116-session-end-flags.txt:
+  CONNECT не обнуляет dirty_guard/backup_kind; READ их не меняет.
+  END при имеющемся dirty state может вызвать копирование резервных областей
+  с erase/program внешней SPI. Равные дампы не доказывают отсутствие физических
+  циклов записи. Не объявлять завершение любой сессии универсально zero-write.
+
+5. Обновление после диагностического этапа
+
+NOR READ03 и опциональный PAC backend SPI2 реализованы отдельно от Stage0.
+Добавлены потоковый LCD320x240, decoder клавиш и диагностическая связка:
+калибровки + один канал + экран + навигация. Hostsim проверен на сохранённом
+4MiB дампе. Сборка Cortex-M4 проходит с включённым hardware feature backend.
+Затем добавлены PAC LCD/SPI3, disjoint GPIO ownership, clock preflight,
+общая Session и чистая модель RF shutdown. Аудит BIN/HEX не доказал recovery.
+Подробности: HARDWARE-STAGE-RU.txt и research/.
+
+Текущий Stage0 и его SHA256 не изменились. Библиотеки из main не вызываются.
+Для следующего запуска всё ещё требуются проверенный профиль платы/входа,
+полный RF-off, LCD bus (включая E7/SPI2EN) и доказанный путь восстановления.
+Симуляция и компиляция не закрывают эти аппаратные вопросы.

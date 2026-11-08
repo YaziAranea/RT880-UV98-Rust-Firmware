@@ -1,0 +1,179 @@
+Переключение диапазонов: реле, RF GPIO и чистый план
+2026-11-08. Только статический разбор, RAM-only oracle и host-тесты.
+
+1. Что действительно установлено
+
+В связанной схеме RT880 V2 есть настоящее механическое реле K200:
+G6K-2F-Y(5V), двухполюсное переключающее, без фиксации. Это не только
+электронный RF switch. Одновременно на плате есть транзисторная/диодная
+коммутация трактов и аналоговые переключатели питающих/bias цепей.
+Точный монтаж пользовательской UV98 Plus по этой схеме не установлен.
+
+Первичные материалы:
+  Desktop/USB/rt880/RT880 V2.pdf, страницы 1,2,3;
+  SHA256 b7858c30fbe6eb8bf57967d57d9985b29951ccffa766ca5ac9240796c9fab32a.
+  RT-880_Upgrade_V1_16_250915.nicsure.bin, 251904 bytes, base08002800;
+  SHA256 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc.
+  https://raw.githubusercontent.com/nicsure/RT880-FlasherX/master/RT-880_Upgrade_V1_16_250915.bin
+Это публичный RT880 image, а не считанный MCU пользовательской UV98 1.16.
+
+Реле, схема стр.1, верхний левый узел:
+  UV/HF ANT-SW -> Q119 DTC114EE -> R585 22R -> K200 coil7.
+  Coil8 питается от5RT черезL200 1uH; D201 1SS400 стоит параллельно цепи.
+  ANT черезC283100P -> common4, throws6(NC),5(HF-ANT черезC2850R).
+  ANT черезC284100P -> common1, throws3(mainfilter),2(800M-ANT).
+  Высокий вход Q119 запрашивает ток катушки при наличии питания5RT.
+  Положение контактов, фактическое напряжение и время на UV98 не измерены.
+На стр.3 U502 pin5 = UV/HF ANT-SW; AT32F423 LQFP64 pin5 = PF0.
+GPIOF base40021400, SCR+18h, CLR+28h подтверждены локальным SDK/PAC.
+
+Официальный datasheet семейства G6K:
+  https://omronfs.omron.com/en_US/ecb/products/pdf/en-g6k.pdf
+  Стр.1..2: модель без U — single-side stable, 2pole/DPDT; -Y, DC5 есть.
+  Стр.3: operating/release time по3ms max при указанных условиях.
+Эти паспортные числа не становятся автоматически безопасным RF settling
+time платы: питание, защитный диод, дребезг, RF-PLL и аналоговые цепи требуют
+отдельного обоснования. В библиотеку задержка3ms не вставлена.
+
+2. Электронные тракты и исправление прежней подписи
+
+Схема стр.1, U201/RF A, register33:
+  bit0 GPIO6 pin2 = HF-RXPOWER-EN
+  bit1 GPIO5 pin1 = U8-RXPOWER-EN
+  bit4 GPIO2 pin30 = V-RXPOWER-EN
+  bit5 GPIO1 pin29 = U-RXPOWER-EN
+  bit3 GPIO3 pin31 = V-TXPOWER-EN
+  bit2 GPIO4 pin32 = U-TXPOWER-EN
+GPIO-номера согласованы с ранее проверенным source автора RT880 и stock.
+RF A write0801E660/read0801E620; он не является MCU GPIO-портом.
+
+Схема стр.2: U401/U402 BL1551 и U403 BL1555 коммутируют цепи5T50M,
+5T29A/B,5THF,5TU/5TV и5TUA/B/5TVA/B. Это не означает, что их контакты
+непосредственно несут антенный RF. Диоды BA592/BA892 также присутствуют
+в RF-цепях; их точный PIN-тип не выводится из одного схемного символа.
+HF-RXPOWER-EN связан с Q403 UMC4N/5RHF; HF-TXPOWER-EN с Q400/Q402/5THF.
+
+ВАЖНО: увеличенная сверка MCU-страницы исправила прежнее имя в rf-startup:
+  physical29 = PB10 = KEYOUT1 (колонка клавиатуры);
+  physical30 = PB11 = TX29/50M-SW;
+  physical31 = PF8  = AF MUTE.
+Следовательно PB11/mask0800 — переключатель TX29/50M, НЕ audio mute.
+Старый адрес и наблюдавшиеся запросы LOW были верны, семантическая подпись
+Pb11AudioMute была ошибочна. Root/соседний review исправляют board-policy
+на Pb11Tx29_50mSwitch; новых пинов/токенов эта crate не выдаёт.
+PC15 physical4 = HF-TXPOWER-EN. Конфликта PB10 с keyscan нет.
+
+3. Точный RX helper и порядок
+
+Stock08004FF0..08005088:
+  read A33;
+  value = (previous & FFCC) | rx_mask(route_ram20000839);
+  write A33 at08005064;
+  PF0 LOW for route3/4 at0800507C, HIGH otherwise at08005086.
+Это одна запись register33, затем MCU level. Внутри нет delay,
+readback-check, отдельного промежуточного all-RX-off, rollback или PA-off.
+
+  raw route    rx_mask    net                 PF0
+    0          0000      none                 HIGH
+    1          0001      HF-RXPOWER-EN         HIGH
+    2          0001      HF-RXPOWER-EN         HIGH
+    3          0010      V-RXPOWER-EN          LOW
+    4          0020      U-RXPOWER-EN          LOW
+    5          0002      U8-RXPOWER-EN         HIGH
+    6..255     0000      none                 HIGH
+
+Сохранены все биты вне0033, ВКЛЮЧАЯ TX bits3/2. Поэтому receive_plan
+не гарантирует отключение передачи: предыдущий регистр обязан быть fresh,
+а quiescence/PA gating обеспечивает отдельная проверенная интеграция.
+Stock caller08004BF0 задаётRX-frequency через04B88, затем другие RX-параметры,
+в конце04FA0 (RX internal enable),04FF0. Он снимаетTX-gates через05318
+лишь в веткеRAM20001125==3. Нельзя переносить04FF0 как универсальный
+безопасный takeover из неизвестного loader/текущегоTX состояния.
+
+4. Частоты и раздельные routing bytes
+
+Selector08012A30: input в codeplug units10Hz. RX RAM20000839; TX20000838.
+Первый аргумент частота, второй0(primary) илиnonzero(secondary context).
+Это контекст чипа/вызова, НЕ тип модуляции и НЕ разрешение передачи.
+Перенос сохраняет byte writes; калибровочные slot/index исследованы отдельно.
+
+Для primary(mode0), пределы ниже буквально по stock branch order:
+  MHz range               RXcode TXcode RXnet PF0
+  18 <= f <32                1      1    HF    HIGH
+  32 <= f <45                1      3    HF    HIGH
+  45 <= f <=64               2      3    HF    HIGH
+  64 <  f <260               3      3    V     LOW
+  260 <=f <=660              4      4    U     LOW
+  840 <=f <=1300             5      5    U8    HIGH
+За пределами этих окон, включая660<f<840, stock оставляет routing bytes
+старыми. Новый pure API возвращаетNone; stale route не подставляет.
+Верхние частоты — поведение селектора, не доказательство физической полосы.
+
+45MHz меняетRXcode1->2, но не меняет указанные RX outputs/реле.
+32MHz меняетTXcode1->3 независимо отRXcode. TXcode2 существует в TX helper,
+но этот частотный selector его не назначает.
+260MHz меняетV->U RF GPIO, сохраняяPF0 LOW: не каждое изменение диапазона
+требует движения реле. PF0 меняется между HF/U8 и V/U группами.
+
+Secondary(mode!=0): TXcode обновляется для всех распознанных окон;
+RXcode обычно НЕ меняется. Исключение400..480MHz включительно: ветка
+08012A62..12A86 пишетRXcode4 без проверкиmode. Pure API сохраняет эту
+асимметрию: RoutingUpdate.rx_code()==None значит "не обновлять".
+
+5. TX evidence — без реализации передачи
+
+Helper08005354 сначалаPC15LOW,PB11LOW, затемreadA33 и clear bits3/2 вRAM.
+Далее выбор поRAM20000838 и финальнаяwriteA33 в080053DA:
+  route0/6..255: дополнительныхMCU requests нет, TXbits00;
+  route1: PC15HIGH, PB11LOW, TXbits00;
+  route2: PC15HIGH, PB11HIGH, TXbits00;
+  route3: TXbit3 (0008), PC15/PB11 остаютсяLOW;
+  route4/5: TXbit2 (0004), PC15/PB11 остаютсяLOW.
+ДругиеA33 bits сохраняются. Внутри этого helper нетPF0 и ожиданий.
+Это не полныйTX transition: PA bias/control36, modulation, frequency,
+порядок другихhelpers и возвращениеRX требуют отдельной интеграции.
+CSV transmit-evidence.csv документирует события, TX executor не написан.
+
+6. Реализованный Rust API
+
+crates/band-plan — no_std, forbid unsafe, без dependencies/heap/I/O:
+  select_routes(freq_10hz, SelectorMode)->Option<RoutingUpdate>
+    getters tx_code()->u8, rx_code()->Option<u8>;
+  stock_receive_requests(raw_route, fresh_reg33)->[Request;2];
+  receive_plan(freq_10hz, fresh_reg33)->Option<[Request;2]>.
+Request = PrimaryGpioRegister{value} затем AntennaSwitchPf0{high}.
+Это immutable план, не доказательство успешной аппаратной операции.
+Stage0 entry, board-pins, clocks, RF backend и simulator этим не меняются.
+
+Ещё не подключено: PF0 ownership/pinmux, RF A/B executor с fresh readback,
+relay settlement, изменившийсяpath cache с отказомприошибке, PLL/tune,
+receiver measurement и end-to-end scanner hardware. Ни COM, ни GPIO,
+ни flash, ни радиопередача в этой задаче не использовались.
+
+7. Проверка и воспроизводимость
+
+derive_oracle.py: Unicorn bounded machine oracle, FlashRX/RAMRW only,
+всяMMIO unmapped. Selector останавливается при08012CE0 ДО calibrationIO;
+RF helpers заменены журналом, 8 точных MCU-storePC проверяются и пропускаются.
+Результаты прочитаны из реального Thumb-исполнения, не из Pythonформулы:
+  640selectorcases,432RXcases/1296events,432TXevidencecases/1820events.
+Cases: границы+/-1code, deterministicrandom, mode0/1/2/255; всеrawroutebytes,
+0/FFFF/alternatingwords и каждый отдельныйbit предыдущегоregister33.
+Hashes в oracle-summary.json; bounded-disassembly.txt содержит литералы.
+
+7 Rustтестов прошли isolated rustc1.99.1 hostbuild+execution; noCargo used.
+Отдельный compile no_std дляthumbv7em-none-eabi прошёл. Артефакты проверки
+в scratchwork/ram-analysis/band-plan-check, не firmware image.
+Тесты сравнивают весь ordered trace и исчерпывающе проверяют сохранение
+непринадлежащихбитов для65536registerwords/8routecodes. Root выполняет
+workspaceCargointegration. Эти проверки не являются electrical/RF testing.
+
+Повторение: Python3, Unicorn2.1.4, optionalCapstone5.0.7.
+UV98_STOCK_REFERENCE указывает BIN, UV98_RUST_PROJECT — корень проекта.
+python research/band-switch/derive_oracle.py
+cargo test --locked -p uv98-band-plan --target x86_64-pc-windows-gnullvm
+
+Сравнение с community firmware:
+https://github.com/fagci/rt880-fw/blob/main/src/driver/bk4819.c
+Источник проверен2026-11-08: getBand использует30/240/800MHz. Эти thresholds
+отличаются от stock и не перенесены. Код автора не копировался.

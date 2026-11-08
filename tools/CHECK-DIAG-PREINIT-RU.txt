@@ -1,0 +1,44 @@
+Offline-аудит startup ASM диагностического образа
+
+Запуск из корня Rust workspace ПОСЛЕ окончательной сборки ELF:
+python tools/check_diag_preinit.py target/thumbv7em-none-eabi/release/uv98-diag-firmware --report validation/diag-preinit-emulation.json
+
+Инструмент читает фактически слинкованный ELF32 ARM, его symtab и PT_LOAD.
+SHA256 файла попадает в JSON: после пересборки проверку требуется повторить.
+ELF parsing — Python stdlib. Уже имеющиеся зависимости читаются из соседних
+work/calibration-analysis/deps (Unicorn) и work/hardware_readback/deps (Capstone).
+Ничего не устанавливается, COM и аппаратные интерфейсы не открываются.
+
+Отдельно проверяется Reset vector и короткий linked Reset prefix: первая BL
+ведёт в __pre_init, до неё разрешены только Flash literal loads, установка
+MSP из первого vector word и явная запись VTOR=0x08002800. SRAM accesses
+до вызова отвергаются. Новая неизвестная форма инструкции требует review;
+полный cortex-m-rt runtime и последующая RAM initialization не эмулируются.
+
+Capstone проверяет полный машинный код __pre_init и terminal: нет BL/BLX,
+push/pop, обращений к SP, использования r4-r12 и записи LR. Unicorn исполняет эти
+инструкции в Thumb MCLASS/Cortex-M4 с моделью MMIO. SRAM намеренно не mapped:
+обращение к стеку/RAM завершает тест ошибкой. Literal loads из Flash разрешены.
+
+Сценарии __pre_init: оба допустимых PID; 1/4/8 IRQ banks; отказ при другом
+PID/series/Flash; LEXT active; GPIOC/GPIOB locks; 9/16 IRQ banks; IPSR=3,
+CONTROL=1/2. Успех обязан вернуться через LR, отказ — достигнуть WFI.
+Проверяются отсутствие GPIO/MMIO writes до допустимой identity, ограниченные
+ICER/ICPR writes, модель LOW/HIGH latch, сохранение PF0, DMA/OTG/SPI reset/gate.
+
+Сценарии terminal: thread/HardFault mode, неподходящий PID, LEXT, lock.
+Проверяются direct ASM branches HardFault и DefaultHandler в terminal,
+NMI alias/vector и HardFault vector. CONTROL/IPSR задаются непосредственно;
+автоматический вход в exception и аппаратный exception stack не эмулируются.
+Поведение привилегированных инструкций зависит от Unicorn; отказ по CONTROL
+не подтверждает физические свойства unprivileged CPU execution.
+
+WFI перехватывается до исполнения. Watchdog, асинхронные IRQ, питание,
+реальные периферийные устройства и электрические GPIO/RF не моделируются.
+PASS относится к перечисленным путям linked machine code с mockMMIO.
+Это не физическая проверка станции и не полное формальное доказательство.
+
+JSON содержит disassembly, отдельные сценарии, write trace, версии emulator/
+disassembler и пределы проверки. Код возврата0 означает PASS;1 — FAIL.
+При FAIL подробная причина есть в stdout и JSON. Отчёт перезаписывается,
+исходный ELF и бэкапы инструмент не меняет.

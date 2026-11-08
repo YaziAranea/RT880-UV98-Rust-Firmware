@@ -1,0 +1,10 @@
+[package]
+name = "uv98-handheld-ui"
+version = "0.1.0"
+edition = "2021"
+publish = false
+[dependencies]
+uv98-spectrum = { path = "../spectrum" }
+uv98-keys = { path = "../keys" }
+uv98-display = { path = "../display" }
+uv98-codeplug = { path = "../codeplug" }

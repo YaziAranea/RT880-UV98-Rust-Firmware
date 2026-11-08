@@ -1,0 +1,161 @@
+RF calibration consumption and pure models: bounded related-stock analysis
+
+Reference: RT-880_Upgrade_V1_16_250915.nicsure.bin, 251904 bytes.
+SHA256 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc
+Thumb application mapped at 0x08002800. It is RT880-labelled, not an exact
+readback of this user's UV98 Plus application. Addresses below refer to this
+one reference image. No radio, serial port, bootloader or physical RF operation
+was used. Results are register codes; no physical RF units inferred.
+
+Relevant RAM layout
+-------------------
+General tuning bytes: 0x20003044..0x20003063.
+Selected 112-byte band record: 0x20003064..0x200030D3. This is a cache filled
+by selector 0x08012A30, not an in-RAM array of all 15 records.
+Selected high/low power points: 0x2000081B / 0x2000081C.
+Current channel pointer: word at 0x200010EC.
+Other channel records: 0x20003AEC + 48*index.
+Separate configuration base used below: 0x200035EC.
+
+Register call conventions verified statically
+---------------------------------------------
+0x0801E660: r0 register number, r1 word; address followed by high then low byte.
+0x0801E6D4: same convention, different physical interface/select path.
+Reads are 0x0801E620 / 0x0801E698. They are intercepted in the offline oracle.
+No physical RF-chip identity is needed by the pure model, which outputs words.
+
+Consumption map (offsets refer to on-disk tuning block / selected record)
+-----------------------------------------------------------------------
+Band +0..1: frequency correction. Traced by separate frequency analysis.
+
+Band +2/+9, wide/narrow MIC gain:
+  Parsed and retained; consumption of these calibration bytes NOT established.
+  Reviewed TX caller 0x080054C2..0x080054C8 instead reads separate configuration
+  [0x200035EC+0xAD], then calls 0x08004E90. The helper is ported independently.
+
+Band +3..4/+10..11, wide/narrow deviation:
+  CONFIRMED reads at 0x080054E0/54FA and 0x08005512/5528.
+  Channel byte +3 == 0 selects wide, any other value selects narrow.
+  The FULL little-endian u16, including upper four bits, is used.
+  At 0x080054CC..0x08005530, if (channel[0x13]&15)!=0 and raw>200,
+  the word is raw-200; otherwise raw. Compare is signed BLE but input is
+  zero-extended u16, so >200 is equivalent to unsigned comparison here.
+  Helper 0x08004996 sends this directly to register 0x40.
+  Other-record path 0x080040A8..0x080040CA selects the same +3/+10 words,
+  then 0x08003CBC sends the full word to register 0x40 WITHOUT subtraction.
+  The physical meaning of channel byte +3 / option nibble is not inferred.
+
+Band +5/+12, CTCSS deviation; +6/+13, DCS deviation:
+  Parsed and retained; consumption of these calibration bytes NOT established.
+  Reviewed tone setup 0x0800544A..0x08005474 obtains type/value from channel
+  +0x0E/+0x0F and mode from channel+0x12, then calls 0x08004388.
+  That helper uses constants and tone arguments (e.g. reg0x51=0x9041 for one
+  branch; other branches use 0x802C/0xA02C and reg0x07=0x0AD7), not a proven
+  read of the selected band's CTCSS/DCS deviation bytes. It is not claimed as
+  a calibrated tone-deviation implementation and is not ported as one.
+
+Band +7..8/+14..15, wide/narrow volume words:
+  Parsed and retained; consumption of these calibration words NOT established.
+  Reviewed receive path 0x080050EA..0x0800518A instead uses configuration
+  +0xAE/+0xAF for channel[0]==0, or +0xB0/+0xB1 for cases1/2/3, assembling
+  u16(0xB000+(gain_byte<<4)+dac_byte), then calls 0x08005768.
+  The helper's register-word correction is ported independently; this does
+  not connect the band's volume calibration to the RX data path.
+
+Band +16..31/high-power row; +32..47/low-power row:
+  CONFIRMED selected points copied by 0x08012D40..0x08012D52 to RAM81B/81C.
+  Selector/point indexing is owned by the frequency analysis. These callers
+  use a single selected point, not interpolation between frequency points.
+  Ordinary power paths below consume those RAM points. Averaging high/low
+  for a middle setting is a separate operation, not frequency interpolation.
+
+General +2..3, register 0x3E word:
+  Parsed and retained; consumption of this stored word NOT established.
+  Reviewed initialization instead hardcodes reg0x3E=0xA037 at 0x08003D88..3D8E
+  and 0x08004E14..4E1A.
+
+General +4..5/+6..7, expander/compressor:
+  Parsed and retained; consumption of these stored words NOT established.
+  Reset helpers 0x08004518 and mirror0x08003C20 read reg0x31, clear bit3,
+  then write reg0x28=0x6B38 and reg0x29=0xAB40 from immediate constants.
+  Pure model reflects those constants; it does not silently read or substitute
+  values from the calibration block.
+
+General +8/+9/+10/+11, TX300/TX3k/RX300/RX3k filter indices:
+  CONFIRMED direct LDRB reads at 0x08004E32..0x08004E5E, passed to helper
+  0x080038D0. Mirror initialization 0x08003DA6..0x08003DD2 calls0x08003A2C.
+  Neither reviewed caller nor helper masks the stored byte with 7.
+  Tuning UI's display mask must NOT be reused as the RF application's input.
+  TX caller0x0800549E..54BE and RX caller0x080050C6..50E6 override the 3k
+  index with constant4 when (channel[0x13]&15)!=0; otherwise they read +9/+11.
+  This conditional override is documented, not automatically applied inside
+  filter_registers(), whose input is the already-selected raw index.
+
+"Not established" is a bounded evidence status for the reviewed paths, not a
+proof that no alias, diagnostic mode or other path anywhere uses that field.
+Preserve all original calibration bytes regardless of consumption status.
+
+Pure formulas and branch context
+--------------------------------
+power_code_at_05552(mode,H,L): mode2->H; mode1->floor((H+L)/2); else->L.
+  Assumes ordinary branch with byte RAM[0x200011FA]==0. Mode is channel+0x10.
+power_code_at_040dc(mode,H,L): mode2->H; mode0->floor((H+L)/2); else->L.
+  Same override flag; mode is from the other selected channel record.
+  The different encodings are retained; they are not collapsed into a generic
+  named HIGH/MEDIUM/LOW enum.
+
+power_register_04f0c(code):
+  reg0x36 = ((code&0x3F)<<10) | 0x007F | (code!=0 ? 0x0080 : 0).
+  Source0x08004F16..4F34; mirror0x08003E12..3E30.
+  Truncation, not saturation. code64 gives0x00FF, code0 gives0x007F.
+  Override branch at0x08005592..55B8 /0x08004140..4166 is OUTSIDE this model:
+  it writes ((config[0xB7+selected_band] as u16)<<8)|0x00FF directly to reg0x36.
+
+mic_register_04e90(input): reg0x7D = (0xE940+input) mod65536.
+  Source0x08004E94..4EA4; mirror0x08003DEC..3DFC.
+  0xFFFF input gives0xE93F. This is not a calibration-band MIC-selection rule.
+
+volume_register_05768(input,reg1):
+  If full reg1 is exactly2,3,6,7 AND (input&15)>3: reg0x48=input-3.
+  Else reg0x48=input. Source jump table0x08005782..5789 and5790..57B6.
+  Full reg1 comparison matters: e.g.10 does not behave like2.
+
+compander_reset_04518(reg31):
+  [(0x31,reg31&~8),(0x28,0x6B38),(0x29,0xAB40)].
+
+filter_registers(field,index), helpers038D0/03A2C:
+  TX300 writes44/45; RX300 writes54/55; TX3k writes74; RX3k writes75.
+  3k index0..4: E61C,DF22,D42D,CC35,FA02; all other byte values:F50B.
+  300 index0..6 paired coefficients:
+    8BD7/3507,8AED/35E1,8A96/3606,8908/3779,8DDE/335A,8EB3/32BA,8F88/3201.
+  All other byte values:8BE3/352D. Raw0xF0 is a fallback index, not index0.
+  Constants are instruction immediates, confirmed by bounded execution.
+
+Verification and reproducibility
+-------------------------------
+oracle_rf.py uses the shared StockArm harness, pinned by SHA256 above.
+It generates903 independently captured machine-code vectors:
+  power259, MIC11, volume374, compander7, filters48,
+  power selection60, deviation selection144.
+Helpers and their mirror functions are compared when present.
+
+Only emulated Flash and RAM are mapped. MMIO access would fail. The register
+write functions are test doubles capturing (register,value), read functions
+return explicit supplied words. Power-selection slices intercept the callee
+argument before the actual power helper. Slices stop at055BC,0416A,05530,040CA
+before the enclosing function's epilogue. Consequently the oracle establishes
+those bounded arithmetic/control-flow segments, not complete-function startup.
+All substitutions and vector counts are recorded in oracle-summary.json.
+
+Fixture: crates/stock-model/tests/fixtures/rf-oracle.csv.
+Pure Rust: crates/stock-model/src/rf.rs; tests: tests/rf.rs.
+The host generator supports UV98_RUST_PROJECT for its output project; the
+shared harness supports UV98_STOCK_REFERENCE for the separately supplied image.
+No Cargo commands were executed by this RF-analysis task; root owns Rust tests.
+
+Remaining limits
+----------------
+No actual register write, calibration restore, TX, deviation/power measurement
+or UV98 hardware validation was performed. No proof of exact application-binary
+identity between this RT880 reference and the user's UV98 firmware exists.
+Do not describe this partial model as all stock calibration algorithms ported.

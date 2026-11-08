@@ -1,0 +1,78 @@
+Расширение lossless CFG настроек; 2026-11-08
+
+Источник: локально декомпилированный RT880 CPS1.10 MainForm.cs:
+work/cps-analysis/rt880-v110-decompiled/DM550_NOLCD/MainForm.cs.
+SHA2561096b3c280d1d279b321f504c936ffb3fc5553123ecd110d4505a7e77bd7234c.
+DataToPanel читает array[offset]; SaveData записывает выбранный индекс/число
+в тот же bufCFG[offset]. Все перечисленные поля занимают ЦЕЛЫЙ byte.
+Маскирование не нужно: неизвестные соседние bytes остаются без изменений.
+Это CPS layout evidence связанного RT880, не обещание одинакового поведения
+всех функций на каждой ревизии UV98. Ничего не записывалось в радио.
+
+Новые поля и подтверждённые ограничения записи
+Field                 offset  max   CPS control
+VoicePrompt              92     1   cboxVoicePrompt
+KeyBeep                  93     1   cboxKeyBeep
+KeyLock                  94     1   cboxKeyLock
+AutoLockDelay            95    42   cboxLockTimer
+KeypadLight              96     1   cboxKeyLed
+BacklightLevel           97     4   cboxLight
+BacklightDelay           98    42   cboxLEDTimer
+MenuExitDelay           101    42   cboxMenuTimer
+TuningStep              120    13   cboxStep
+ScanDirection           156     1   cboxScanDir
+ScanMode                157     2   cboxScanMode
+ScanReturn              158     1   cboxScanReturn
+ScanDwell               159    30   cboxScanDwell
+RxSpeaker               174    63   numRXSPK
+RxDac                   175    15   numRXDAC
+RxSpeakerAm             176    63   numRXSPK_AM
+RxDacAm                 177    15   numRXDAC_AM
+FmStandby               261     1   cboxFMStandby
+
+Прежние шесть полей сохранены: SaverMode99<=3, SaverStart100<=42,
+Squelch164<=10, Vox167<=1, VoxThreshold168<=255, VoxDelay169<=10.
+
+Точные enum choices
+VoicePrompt/KeyBeep/KeypadLight/FmStandby:0Off,1On.
+KeyLock:0Unlock,1Lock.
+ScanDirection:0Up,1Down.
+ScanMode:0CO(载波模式),1TO(时间模式),2SE(搜索模式). Это подписи CPS, не перенесённый
+алгоритм удержания/возобновления сканирования. Не смешивать с новым spectrum core.
+ScanReturn:0Original CH,1Current CH.
+TuningStep0..13:0.25K,1.25K,2.5K,5K,6.25K,10K,12.5K,20K,25K,50K,100K,
+500K,1M,5M. TuningStep::units_10hz даёт25,125,250,500,625,1000,1250,2000,
+2500,5000,10000,50000,100000,500000. Это conversion надписи, не RFqualification.
+ScanDwell: надписи0..30. Яркость:0..4. Аудио: raw целочисленные gain codes,
+не dB/вольты/проценты. LabelsFM/AM подтверждены CPS label34/35 и рядом SPKlabels.
+
+Таймеры и единицы
+LockTimer,LEDTimer,MenuTimer:0Off, затем5,10,15,30,45,...585,600 (43choices).
+SaverStart имеет ту же числовую сетку, но label0="0". Код не равен числу
+надписи. Key Lock Timer/LCD Timer/Menu Exit Timer/Save Start Timer не содержат
+доказанной единицы; поэтому choice_label/timer_value НЕ добавляют секунды.
+VOXDelay отдельно имеет явную надпись"VOX Delay (S)" и choices0,0.5,...5.
+Секунды отображаются только для этого уже существующего поля.
+
+API и сохранность
+Field::ALL содержит24поля, label_ru/group_ru/choice_label не выделяют память.
+choice_label возвращаетNone для unknown кода либо обычного numericcontrol.
+Settings::code всегда возвращает исходный byte, в т.ч.0xF0/0xFF.
+Typed decode ScanDirection/ScanMode/ScanReturn/TuningStep -> Option; unknown
+не заменяется Off/default. Typed setters меняют только свой конкретный byte.
+set_code проверяет диапазон до записи; ошибки сохраняют весь CFG.
+Стоковый SaveData целиком НЕ переносился: он перезаписывает многочисленные
+байты/defaults/GBKstrings и посторонние блоки. Наши patches адресные и lossless.
+TX power/калибровочные таблицы, RF defaults, passwords, APOmulti-byte timers,
+DTMF/APRS и создание каналов этим расширением не добавлены.
+
+Локальные source anchor lines
+Choices/labels:4715,4901,4918,4936..5086,5566..5670,5966..5988,6056,
+6104..6114,6517,6644..6660,8197; language enums1877..1885,13757..13795.
+Read:12154..12163,12215,12273..12288,12293..12296,12353.
+Save:12691..12700,12750,12797..12811,12816..12819,12866.
+source-excerpts.txt сохраняет небольшие адресованные выдержки этих функций.
+
+Тесты проверяют literaloffsets, unique24fields, allu8codes, invalideditatomicity,
+typedunknownhandling, точнуюfrequencygrid иtimercaptions безвыдуманных единиц.
+Build/GUI/device проверки сообщаются отдельно; этот файл их не утверждает.

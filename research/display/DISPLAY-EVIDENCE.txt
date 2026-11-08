@@ -1,0 +1,143 @@
+LCD: related RT880 stock profile, streaming Rust driver
+2026-11-08. Offline analysis only. Hardware qualification: false.
+
+Identity and source boundary
+----------------------------
+Reference RT-880_Upgrade_V1_16_250915.nicsure.bin, 251904 bytes, mapped at
+0x08002800, SHA256 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc.
+Source: https://raw.githubusercontent.com/nicsure/RT880-FlasherX/master/RT-880_Upgrade_V1_16_250915.bin
+This is a related RT880 image. It is not an MCU dump from the user's UV98 Plus.
+Neither controller silicon ID nor the user's PCB/panel revision was read.
+
+Local ST7789.pdf is visibly Sitronix ST7789VW, version1.0, 2017/09, 317 pages;
+the stale PDF metadata says ST7889, which is not the cover identification.
+SHA256 7c5b0c471d53f6d9381186e5989019307a12b1b9379704b05118e0d6d4c4a8e3.
+User-provided RT880 V2.pdf, page3, shows LCD500 and LCD-CS/RESET/D-CX/SCK/SDA
+nets. It does not name the controller silicon. Its SHA256 is
+b7858c30fbe6eb8bf57967d57d9985b29951ccffa766ca5ac9240796c9fab32a.
+Source files were supplied under Desktop/USB/rt880. Full PDFs and extracted
+page/text copies are not redistributed in this research folder.
+
+Independent corroboration: fagci/rt880-fw, commit
+619fa079c657433798cd4475997ecaf476e5cd73:
+https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/driver/st7789.c
+https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/driver/st7789.h
+https://github.com/fagci/rt880-fw/blob/619fa079c657433798cd4475997ecaf476e5cd73/src/driver/board.h
+Git blob identifiers respectively:
+26473439f04ac936cae208da22bd0cad204ad819
+bd55e9cbefc73df4020988d5a86507663f04d746
+e3372c312ea2ec3a90b25619a3e44cbd63eec602
+These name ST7789 and map DC=PC13, RESET=PC14, CS=PA15, BL=PA4,
+SCK=PB3, MOSI=PB5, SPI1/AF5. Their portrait240x320/MADCTL00 and short
+initialization differ from stock. They were not copied into this driver.
+
+Controller conclusion: ST7789-family-compatible command profile is supported
+by stock commands, matching datasheet and independent board source. Exact
+ST7789VW silicon on the user's device remains unconfirmed.
+
+Stock functions and geometry
+----------------------------
+0x08017E48..0x08018052: LCD initialization.
+0x08018184: command byte; PC13 low, data8 call, PC13 high.
+0x080181A8: data byte through SPI3 base0x40003C00; then wait flag2/TDBE.
+Correction from the later hardware analysis: an earlier revision named this
+SPI1 incorrectly. Vendor at32f423.h and stock AF6 establish SPI3; see
+research/lcd-hardware/EVIDENCE-RU.txt. The byte-stream oracle is unchanged.
+0x080181FA: word write, high byte before low byte.
+0x080181E2: repeat word r0, count r1.
+0x0801815C: cursor(row=r0,column=r1); partial two-byte start addresses only,
+then RAMWR2C. This is not a normal complete four-byte window sequence.
+0x08017DF0: fill inclusive y0,y1,x0,x1 in r0..3, color at incoming SP+0.
+0x08017E2E: full clear, count0x12C00=76800 pixels.
+
+Explicit stock window at0x08018010..0x08018048:
+2A 00 00 01 3F -> columns0..319
+2B 00 00 00 EF -> rows0..239
+Together with MADCTL=A8 this establishes the logical stock320x240 profile.
+Datasheet pages198/200 specify four address bytes, inclusive end; page215
+defines MY/MX/MV/BGR. A8 sets MY, MV and BGR. Page224 defines COLMOD low
+three bits=5 as16bpp. The driver sends raw16-bit565 words unchanged; no claim
+that F800 physically appears red on the user's panel has been verified.
+
+Stock reset and observed control prefix
+---------------------------------------
+PC14 high, delay1; low, delay1; high, delay120.
+The three direct GPIOC stores occur at0x08017E66/76/84 and use value0x4000
+with SCR0x40020818, CLR0x40020828, SCR0x40020818 respectively.
+Delay helper0x08008380 delegates these short values to0x08025224. The delay
+initialization0x080251EC divides a clock value by1,000,000, stores that scale,
+then multiplies by1000 for0x200010E0 used by0x08025224: nominal milliseconds.
+Actual timing still depends on correct clock setup; no physical measurement.
+
+11; delay120
+36 A8
+3A 05
+B2 0C 0C 00 33 33
+B7 35
+BB 2B
+C0 2C
+C2 01
+C3 23
+C4 20
+C6 0F
+D0 A4 A1
+E0 D0 00 05 0E 15 0D 37 43 47 09 15 12 16 19
+E1 D0 00 05 0D 0C 06 2D 44 40 0E 1C 18 16 19
+E7 10
+
+Stock then clears with per-row partial cursor writes, sends DisplayOn29,
+sets the explicit complete window above, and clears again with a partial
+cursor0,0 and76800 repeated black words.
+
+E7 detail, updated by the hardware analysis: page305 labels bit4 SPI2EN;
+pages50/62 require IM[3:0]=0101 for two-data-lane mode. That mode uses9-bit
+commands and two data pins (page63), whereas the related stock sets8-bit SPI3
+and separate PC13 D/C. Thus E7=10 alone does not prove dual-lane operation.
+The byte-stream driver preserves E7=10. An experimental opt-in transport now
+exists in crates/lcd-at32; actual module IM wiring, revision and waveform
+compatibility remain constructor preconditions, not physical qualifications.
+
+Rust implementation and deliberate differences
+-----------------------------------------------
+crates/display (uv98-display) is no_std, forbids unsafe, has no dependencies,
+allocation, framebuffer, GPIO/PAC binding, RF control or device discovery.
+DisplayBus supplies synchronous reset/command/data; Delay supplies delay_ms.
+WIDTH320, HEIGHT240; all rectangles nonempty and bounded before bus I/O.
+Pixels are MSB-first in a64-byte stack staging buffer. Streaming requires the
+exact declared pixel count. Incomplete/overrun requests fail without new I/O.
+Any bus error invalidates initialization; recovery requires explicit reset
+through initialize. No retry or extra command is hidden in the error path.
+
+initialize preserves the entire observed reset/delay/control prefix through
+E7, then sends one complete four-byte CASET/RASET window, RAMWR, one full black
+clear, and DisplayOn29. It omits stock partial cursor writes and second clear.
+Therefore this is NOT an exact reproduction of the entire stock init trace.
+Ordinary begin_window/fill_rect also use complete windows. A successful bus
+call must mean bytes finished before DC/CS change; async DMA cannot retain
+the temporary byte buffer after returning.
+
+Reproducible evidence and test limits
+-------------------------------------
+derive_oracle.py uses hash-pinned reference bytes and research/stock_emu.py.
+It executes only the selected functions in Unicorn2.1.4, with RX flash and RW
+RAM mapped. No MMIO, COM, executable host program or radio is accessed.
+LCD command/data and delay callees are intercepts. Two expensive clear callees
+are recorded by parameters, not executed. Three reset-store instructions are
+allowlisted, checked for exact address/value, then skipped; all other MMIO
+would fail. oracle.json lists every interception and includes67 prefix events,
+the explicit full window and10 independently executed word-write vectors.
+
+Run from project root with Python plus unicorn2.1.4 available:
+  Set UV98_STOCK_REFERENCE to the externally supplied matching BIN path.
+  python research/display/derive_oracle.py
+Optional UV98_RUST_PROJECT overrides the project output root.
+The BIN itself is not part of the display crate. Tests require no emulator or
+BIN: fixtures were generated from the above bounded execution.
+  cargo test -p uv98-display
+
+Tests separately compare stock prefix, explicit window and pixel word vectors;
+check the deliberately canonical clear; exercise rectangle extremes, chunk
+boundaries, stream accounting, and injected bus errors/reinitialization.
+Host tests and diagnostic preview establish software behavior only. They do
+not establish reset pulse timing, SPI electrical behavior, display orientation,
+colors, backlight operation, or safe boot/RF state on any physical radio.

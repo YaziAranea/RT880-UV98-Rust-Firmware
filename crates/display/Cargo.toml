@@ -1,0 +1,8 @@
+[package]
+name = "uv98-display"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Allocation-free LCD byte-stream profile derived from related RT880 stock firmware"
+
+[dependencies]

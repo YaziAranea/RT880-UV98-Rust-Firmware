@@ -1,0 +1,612 @@
+#![no_std]
+#![deny(unsafe_op_in_unsafe_fn)]
+//! Bounded foreground radio sequencing. Timers are elapsed time, not PLL-lock
+//! claims. A caller must provide fresh physical PTT, validated channel policy,
+//! independent terminal shutdown, and a watchdog before enabling live TX.
+
+use uv98_calibration::Calibration;
+use uv98_rf_sequence::{self as sequence, Modulation, Plan, RxRequest, Step, TxRequest};
+
+pub mod lighting;
+pub mod policy;
+pub mod ptt;
+pub mod scan;
+pub mod scope;
+pub mod sweep;
+pub mod tx_policy;
+pub mod tx_trial;
+
+pub const CONFIG_TIMEOUT_MS: u32 = 3000;
+pub const RECEIVE_SETTLE_MS: u32 = 10;
+pub const TX_TIMEOUT_MS: u32 = 30_000;
+
+#[cfg(any(feature = "hardware", test))]
+mod gpio_control;
+#[cfg(feature = "hardware")]
+pub mod hardware;
+
+pub trait Io {
+    type Error;
+    fn read(&mut self, register: u8) -> Result<u16, Self::Error>;
+    fn write(&mut self, register: u8, value: u16) -> Result<(), Self::Error>;
+    fn mute(&mut self, muted: bool) -> Result<(), Self::Error>;
+    fn antenna(&mut self, high: bool) -> Result<(), Self::Error>;
+    fn hf_gates(&mut self, hf: bool, band50: bool) -> Result<(), Self::Error>;
+    fn indicators(&mut self, rx: bool, tx: bool) -> Result<(), Self::Error>;
+    fn backlights(&mut self, display: bool, keys: bool) -> Result<(), Self::Error>;
+    fn verify_control(&mut self) -> Result<(), Self::Error>;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum State {
+    Off,
+    Configuring,
+    Receiving,
+    Sweeping,
+    Transmitting,
+    Failed,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Target {
+    Cold,
+    Receive,
+    Transmit,
+}
+#[derive(Debug, PartialEq, Eq)]
+pub enum Error<E> {
+    State,
+    NotInitialized,
+    PttReleased,
+    Clock,
+    ConfigurationTimeout,
+    Request(sequence::Error),
+    Io(E),
+    Readback {
+        register: u8,
+        expected: u16,
+        observed: u16,
+    },
+    InvalidAudio,
+    Sweep(sequence::sweep::Error),
+}
+#[derive(Debug, PartialEq, Eq)]
+pub struct Fault<E> {
+    pub reason: Error<E>,
+    pub cleanup_attempted: bool,
+    /// All independent off requests are attempted, even if one fails.
+    pub cleanup_failures: u8,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Poll {
+    pub state: State,
+    pub changed: bool,
+    pub tx_ended: bool,
+    pub tx_timed_out: bool,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Signal {
+    pub rssi: u16,
+    pub squelch_open: bool,
+    pub audio_open: bool,
+    pub status_0c: u16,
+    pub am_gain_index: u8,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReceiveDiagnostics {
+    pub gain_selection: u16,
+    pub gain: u16,
+    pub af_mode: u16,
+    pub volume: u16,
+    pub status01: u16,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Audio {
+    pub modulation: Modulation,
+    pub gain: u8,
+    pub dac: u8,
+    pub squelch: u8,
+    pub monitor: bool,
+    pub tone_required: bool,
+}
+
+pub struct Runtime<I: Io> {
+    io: I,
+    state: State,
+    initialized: bool,
+    plan: Option<Plan>,
+    target: Target,
+    index: usize,
+    started: u32,
+    last_now: Option<u32>,
+    wait: Option<(u32, u32)>,
+    finishing: bool,
+    tx_started: Option<u32>,
+    audio_open: bool,
+    am_agc: sequence::am_agc::State,
+    am_gain_word: Option<u16>,
+    sweep_session: Option<sweep::Session>,
+    indicator_state: Option<(bool, bool)>,
+    backlight_state: Option<(bool, bool)>,
+}
+
+impl<I: Io> Runtime<I> {
+    pub fn new(io: I) -> Self {
+        Self {
+            io,
+            state: State::Off,
+            initialized: false,
+            plan: None,
+            target: Target::Cold,
+            index: 0,
+            started: 0,
+            last_now: None,
+            wait: None,
+            finishing: false,
+            tx_started: None,
+            audio_open: false,
+            am_agc: sequence::am_agc::State::new(),
+            am_gain_word: None,
+            sweep_session: None,
+            indicator_state: None,
+            backlight_state: None,
+        }
+    }
+    pub fn state(&self) -> State {
+        self.state
+    }
+    pub fn initialized(&self) -> bool {
+        self.initialized
+    }
+    pub fn audio_open(&self) -> bool {
+        self.audio_open
+    }
+    /// Foreground light policy changes only the already-owned PA4/PA9 pins.
+    /// A GPIO fault follows the same RF shutdown path as other control faults.
+    pub fn set_backlights(&mut self, display: bool, keys: bool) -> Result<(), Fault<I::Error>> {
+        if self.state == State::Failed {
+            return Err(self.reject(Error::State));
+        }
+        if self.backlight_state != Some((display, keys)) {
+            let result = self.io.backlights(display, keys);
+            self.io_result(result)?;
+            self.backlight_state = Some((display, keys));
+        }
+        Ok(())
+    }
+    pub fn synchronize_indicators(&mut self) -> Result<(), Fault<I::Error>> {
+        let desired = (
+            self.state == State::Receiving && self.audio_open,
+            self.state == State::Transmitting,
+        );
+        if self.indicator_state != Some(desired) {
+            let result = self.io.indicators(desired.0, desired.1);
+            self.io_result(result)?;
+            self.indicator_state = Some(desired);
+        }
+        Ok(())
+    }
+    /// Readbacks for the RX trial only, never a claim of RF sensitivity.
+    pub fn receive_diagnostics(&mut self) -> Result<ReceiveDiagnostics, Fault<I::Error>> {
+        if self.state != State::Receiving {
+            return Err(self.reject(Error::State));
+        }
+        Ok(ReceiveDiagnostics {
+            gain_selection: self.read(0x7e)?,
+            gain: self.read(0x13)?,
+            af_mode: self.read(0x47)?,
+            volume: self.read(0x48)?,
+            status01: self.read(0x01)?,
+        })
+    }
+    pub fn tx_active_or_starting(&self) -> bool {
+        self.state == State::Transmitting
+            || (self.state == State::Configuring && self.target == Target::Transmit)
+    }
+    /// A caller can execute another bounded configuration operation without
+    /// spending an entire UI pass on a register write. Waiting never advances
+    /// a delay; the next tick still checks the clock, GPIO ownership and PTT.
+    pub fn configuration_step_ready(&self, now: u32) -> bool {
+        self.state == State::Configuring
+            && self
+                .wait
+                .is_none_or(|(since, delay)| now.wrapping_sub(since) >= delay)
+    }
+    pub fn into_io(self) -> I {
+        self.io
+    }
+
+    fn advance_clock(&mut self, now: u32) -> Result<(), Fault<I::Error>> {
+        if self
+            .last_now
+            .is_some_and(|last| now.wrapping_sub(last) >= 1 << 31)
+        {
+            return Err(self.fail(Error::Clock));
+        }
+        self.last_now = Some(now);
+        Ok(())
+    }
+    fn cleanup(&mut self) -> u8 {
+        let mut errors = 0;
+        if self.io.mute(true).is_err() {
+            errors |= 1;
+        }
+        if self.io.hf_gates(false, false).is_err() {
+            errors |= 2;
+        }
+        // A33=0 is intentionally stronger than a read/modify/write: terminal
+        // cleanup cannot retain an inherited or unreadable V/U TX gate.
+        for (bit, reg, word) in [
+            (2, 0x33, 0),
+            (3, 0x36, 0x007f),
+            (4, 0x30, 0),
+            (5, 0x47, 0x6040),
+        ] {
+            if self.io.write(reg, word).is_err() {
+                errors |= 1 << bit;
+            }
+        }
+        if self.io.indicators(false, false).is_err() {
+            errors |= 1 << 6;
+            self.indicator_state = None;
+        } else {
+            self.indicator_state = Some((false, false));
+        }
+        self.audio_open = false;
+        self.am_gain_word = None;
+        self.sweep_session = None;
+        self.plan = None;
+        self.wait = None;
+        self.finishing = false;
+        self.tx_started = None;
+        errors
+    }
+    fn fail(&mut self, reason: Error<I::Error>) -> Fault<I::Error> {
+        self.state = State::Failed;
+        let cleanup_failures = self.cleanup();
+        Fault {
+            reason,
+            cleanup_attempted: true,
+            cleanup_failures,
+        }
+    }
+    fn reject(&mut self, reason: Error<I::Error>) -> Fault<I::Error> {
+        // An invalid/reentrant request must not leave an earlier TX running.
+        if self.tx_active_or_starting()
+            || matches!(self.state, State::Configuring | State::Sweeping)
+        {
+            self.fail(reason)
+        } else {
+            Fault {
+                reason,
+                cleanup_attempted: false,
+                cleanup_failures: 0,
+            }
+        }
+    }
+    fn io_result<T>(&mut self, result: Result<T, I::Error>) -> Result<T, Fault<I::Error>> {
+        result.map_err(|error| self.fail(Error::Io(error)))
+    }
+    fn read(&mut self, reg: u8) -> Result<u16, Fault<I::Error>> {
+        let result = self.io.read(reg);
+        self.io_result(result)
+    }
+    fn write(&mut self, reg: u8, word: u16) -> Result<(), Fault<I::Error>> {
+        let result = self.io.write(reg, word);
+        self.io_result(result)?;
+        if matches!(reg, 0x30 | 0x33 | 0x36 | 0x38 | 0x39) {
+            let actual = self.read(reg)?;
+            if actual != word {
+                return Err(self.fail(Error::Readback {
+                    register: reg,
+                    expected: word,
+                    observed: actual,
+                }));
+            }
+        }
+        Ok(())
+    }
+    fn gates(&mut self, route: u8) -> Result<(), Fault<I::Error>> {
+        let result = self.io.hf_gates(false, false);
+        self.io_result(result)?;
+        let mut word = self.read(0x33)? & 0xfff3;
+        match route {
+            1 | 2 => {
+                let result = self.io.hf_gates(true, route == 2);
+                self.io_result(result)?;
+            }
+            3 => word |= 8,
+            4 | 5 => word |= 4,
+            _ => {}
+        }
+        self.write(0x33, word)
+    }
+    fn start(&mut self, plan: Plan, target: Target, now: u32) -> Result<(), Fault<I::Error>> {
+        if matches!(
+            self.state,
+            State::Failed | State::Configuring | State::Transmitting | State::Sweeping
+        ) {
+            return Err(self.reject(Error::State));
+        }
+        self.advance_clock(now)?;
+        self.state = State::Configuring;
+        self.target = target;
+        self.plan = Some(plan);
+        self.index = 0;
+        self.started = now;
+        self.wait = None;
+        self.finishing = false;
+        self.tx_started = if target == Target::Transmit {
+            Some(now)
+        } else {
+            None
+        };
+        Ok(())
+    }
+    pub fn cold_start(
+        &mut self,
+        calibration: &Calibration<'_>,
+        now: u32,
+    ) -> Result<(), Fault<I::Error>> {
+        if self.initialized {
+            return Err(self.reject(Error::State));
+        }
+        self.start(sequence::cold_init(calibration), Target::Cold, now)
+    }
+    pub fn receive(
+        &mut self,
+        calibration: &Calibration<'_>,
+        request: RxRequest,
+        now: u32,
+    ) -> Result<(), Fault<I::Error>> {
+        if !self.initialized {
+            return Err(self.reject(Error::NotInitialized));
+        }
+        let plan =
+            sequence::receive(calibration, request).map_err(|e| self.reject(Error::Request(e)))?;
+        self.am_agc = sequence::am_agc::State::new();
+        self.am_gain_word = None;
+        self.start(plan, Target::Receive, now)
+    }
+    /// A fresh PTT edge, channel permission and calibration identity must be
+    /// checked by the caller. tick additionally requires physical hold each time.
+    pub fn transmit(
+        &mut self,
+        calibration: &Calibration<'_>,
+        request: TxRequest,
+        now: u32,
+        held: bool,
+    ) -> Result<(), Fault<I::Error>> {
+        if !self.initialized {
+            return Err(self.reject(Error::NotInitialized));
+        }
+        if !held {
+            return Err(self.reject(Error::PttReleased));
+        }
+        let plan =
+            sequence::transmit(calibration, request).map_err(|e| self.reject(Error::Request(e)))?;
+        self.start(plan, Target::Transmit, now)
+    }
+    pub fn stop(&mut self) -> Result<(), Fault<I::Error>> {
+        if self.state == State::Failed {
+            return Err(self.reject(Error::State));
+        }
+        let cleanup_failures = self.cleanup();
+        if cleanup_failures != 0 {
+            self.state = State::Failed;
+            return Err(Fault {
+                reason: Error::State,
+                cleanup_attempted: true,
+                cleanup_failures,
+            });
+        }
+        self.state = State::Off;
+        // Verify the PA/gate/control words after all stop writes.
+        for (reg, word) in [(0x33, 0), (0x36, 0x007f), (0x30, 0)] {
+            let actual = self.read(reg)?;
+            if actual != word {
+                return Err(self.fail(Error::Readback {
+                    register: reg,
+                    expected: word,
+                    observed: actual,
+                }));
+            }
+        }
+        Ok(())
+    }
+    pub fn tick(&mut self, now: u32, physical_tx_held: bool) -> Result<Poll, Fault<I::Error>> {
+        if self.state == State::Failed {
+            return Err(self.reject(Error::State));
+        }
+        self.advance_clock(now)?;
+        let before = self.state;
+        if self.tx_active_or_starting() {
+            let expired = self
+                .tx_started
+                .is_some_and(|start| now.wrapping_sub(start) >= TX_TIMEOUT_MS);
+            if !physical_tx_held || expired {
+                self.stop()?;
+                return Ok(Poll {
+                    state: self.state,
+                    changed: true,
+                    tx_ended: true,
+                    tx_timed_out: expired,
+                });
+            }
+        }
+        let checked = self.io.verify_control();
+        self.io_result(checked)?;
+        if self.state == State::Configuring {
+            if now.wrapping_sub(self.started) >= CONFIG_TIMEOUT_MS {
+                return Err(self.fail(Error::ConfigurationTimeout));
+            }
+            if let Some((since, delay)) = self.wait {
+                if now.wrapping_sub(since) < delay {
+                    return Ok(Poll {
+                        state: self.state,
+                        changed: false,
+                        tx_ended: false,
+                        tx_timed_out: false,
+                    });
+                }
+                self.wait = None;
+            }
+            if self.finishing {
+                self.plan = None;
+                self.finishing = false;
+                self.state = match self.target {
+                    Target::Cold => {
+                        self.initialized = true;
+                        State::Off
+                    }
+                    Target::Receive => State::Receiving,
+                    Target::Transmit => State::Transmitting,
+                };
+            } else if let Some(step) = self
+                .plan
+                .as_ref()
+                .and_then(|p| p.operations().get(self.index))
+                .copied()
+            {
+                match step {
+                    Step::WriteA { register, value } => self.write(register, value)?,
+                    Step::UpdateA {
+                        register,
+                        keep_mask,
+                        value,
+                    } => {
+                        let old = self.read(register)?;
+                        self.write(register, (old & keep_mask) | value)?;
+                    }
+                    Step::DelayMs(delay) => self.wait = Some((now, u32::from(delay))),
+                    Step::Mute(muted) => {
+                        let result = self.io.mute(muted);
+                        self.io_result(result)?;
+                        self.audio_open = !muted;
+                    }
+                    Step::AntennaPf0(high) => {
+                        let result = self.io.antenna(high);
+                        self.io_result(result)?;
+                    }
+                    Step::TxGates(route) => self.gates(route)?,
+                }
+                self.index += 1;
+            } else {
+                // This fresh observation follows the final synchronous write.
+                self.finishing = true;
+                self.wait = Some((
+                    now,
+                    if self.target == Target::Receive {
+                        RECEIVE_SETTLE_MS
+                    } else {
+                        0
+                    },
+                ));
+            }
+        }
+        Ok(Poll {
+            state: self.state,
+            changed: before != self.state,
+            tx_ended: false,
+            tx_timed_out: false,
+        })
+    }
+    /// tone_detected is an independently observed decoder state. Unknown never
+    /// opens a tone-gated channel; explicit monitor bypasses both SQL and tones.
+    pub fn signal(
+        &mut self,
+        audio: Audio,
+        tone_detected: Option<bool>,
+    ) -> Result<Signal, Fault<I::Error>> {
+        let status = self.receive_status()?;
+        self.signal_at(audio, tone_detected, status)
+    }
+    fn receive_status(&mut self) -> Result<u16, Fault<I::Error>> {
+        if self.state != State::Receiving {
+            return Err(self.reject(Error::State));
+        }
+        let mut status = self.read(0x0c)?;
+        if status & 1 != 0 {
+            // Proven stock IRQ acknowledgement. No unbounded drain and no FSK
+            // handler claim; a still-pending IRQ cannot qualify a receive tone.
+            let _ = self.read(0x0b)?;
+            self.write(0x02, 0)?;
+            status = self.read(0x0c)?;
+        }
+        Ok(status)
+    }
+    /// Hardware entry: fresh status and bounded IRQ acknowledgement, then the
+    /// stock tone decision. Call at most once per foreground loop, no sooner
+    /// than 1ms after the preceding observation. No catch-up burst. Stock's
+    /// gain hold counts calls, not wall-clock milliseconds.
+    pub fn observe(&mut self, mut audio: Audio, raw_tone: u16) -> Result<Signal, Fault<I::Error>> {
+        let status = self.receive_status()?;
+        audio.tone_required = raw_tone != 0;
+        let mut result = self.signal_at(
+            audio,
+            Some(sequence::tone_matches(status, raw_tone)),
+            status,
+        )?;
+        if audio.modulation == Modulation::Am && result.audio_open {
+            let update = self
+                .am_agc
+                .sample(result.rssi)
+                .map_err(|_| self.fail(Error::InvalidAudio))?;
+            // Update the stock AGC state on every fresh sample, but avoid a
+            // redundant bus transaction when the selected gain is unchanged.
+            // Reset/retune/cleanup invalidate this cache; no other ordinary
+            // receiver operation writes A13 behind it.
+            if self.am_gain_word != Some(update.register13) {
+                self.write(0x13, update.register13)?;
+                self.am_gain_word = Some(update.register13);
+            }
+            self.am_agc = update.state;
+            result.am_gain_index = update.state.index;
+        }
+        Ok(result)
+    }
+    fn signal_at(
+        &mut self,
+        audio: Audio,
+        tone_detected: Option<bool>,
+        status: u16,
+    ) -> Result<Signal, Fault<I::Error>> {
+        if self.state != State::Receiving {
+            return Err(self.reject(Error::State));
+        }
+        if audio.gain > 63 || audio.dac > 15 || audio.squelch > 10 {
+            return Err(self.fail(Error::InvalidAudio));
+        }
+        let rssi = self.read(0x67)? & 0x01ff;
+        let squelch_open = audio.squelch == 0 || status & 2 != 0;
+        let open = audio.monitor
+            || (squelch_open && (!audio.tone_required || tone_detected == Some(true)));
+        if open != self.audio_open {
+            let result = self.io.mute(true);
+            self.io_result(result)?;
+            if open {
+                self.write(0x47, sequence::audio_mode_word(audio.modulation))?;
+                let reg1 = self.read(1)?;
+                self.write(
+                    0x48,
+                    sequence::audio_volume_word(audio.gain, audio.dac, reg1),
+                )?;
+                let result = self.io.mute(false);
+                self.io_result(result)?;
+            } else {
+                self.write(0x47, 0x6040)?;
+            }
+            self.audio_open = open;
+        }
+        Ok(Signal {
+            rssi,
+            squelch_open,
+            audio_open: open,
+            status_0c: status,
+            am_gain_index: 0,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests;

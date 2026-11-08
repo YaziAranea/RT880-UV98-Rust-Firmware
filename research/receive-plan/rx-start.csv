@@ -1,0 +1,9 @@
+chip,step,kind,target,address,value
+A,0,write,A,55,7951
+A,1,delay,caller,0,10
+A,2,write,A,48,512
+A,3,write,A,48,49137
+B,0,write,B,55,7951
+B,1,delay,caller,0,10
+B,2,write,B,48,512
+B,3,write,B,48,49137

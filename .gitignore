@@ -1,0 +1,16 @@
+/target/
+/validation/
+/private-inputs/
+/outputs/
+**/__pycache__/
+*.pyc
+*.880dmf
+*.elf
+*.exe
+*.dll
+*.zip
+*.env
+*.pem
+*.key
+/crates/calibration/tests/fixtures/uv98-plus-stock-1.16.bin
+storage-address-space.bin

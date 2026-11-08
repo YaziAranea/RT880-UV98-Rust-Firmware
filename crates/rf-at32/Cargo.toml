@@ -1,0 +1,19 @@
+[package]
+name = "uv98-rf-at32"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Opt-in AT32F423 GPIO RF transport with disjoint pin ownership"
+
+[features]
+default = []
+hardware = ["dep:at32f4xx-pac", "uv98-board-pins/hardware"]
+
+[dependencies]
+uv98-board-pins = { path = "../board-pins" }
+uv98-rf-bus = { path = "../rf-bus" }
+uv98-receive = { path = "../receive" }
+at32f4xx-pac = { version = "=0.4.0", default-features = false, features = ["at32f423"], optional = true }
+
+[dev-dependencies]
+uv98-calibration = { path = "../calibration" }

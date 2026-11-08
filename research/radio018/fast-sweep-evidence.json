@@ -1,0 +1,39 @@
+{
+  "reference_sha256": "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc",
+  "fragment": "08023C58..08023CF8, full4B88/12A30 calls execute",
+  "cases": 56,
+  "events_per_case": 7,
+  "dispatcher_cases": [
+    [
+      0,
+      10,
+      [
+        "0x8023048",
+        "0x8023658",
+        "0x8023a00",
+        "0x8023304",
+        "0x80227c4"
+      ]
+    ],
+    [
+      1,
+      1,
+      []
+    ],
+    [
+      10,
+      10,
+      []
+    ],
+    [
+      255,
+      255,
+      []
+    ]
+  ],
+  "trace_sha256": "c8355f04278244f4a8899f91c306c2ddf0195943dac2db83eae32945f8c5b802",
+  "hardware_accessed": false,
+  "mmio_mapped": false,
+  "nominal_cadence_ms": 10,
+  "limits": "No mute, PA-off, relay change, settling wait or PLL-lock poll in fragment. A33 preserves TX bits: execution requires independent TX-off preconditions. 10ms is stock foreground scheduling, not measured electrical settling. FFFF seed intentionally demonstrates preserved TX bits and must never authorize live TX."
+}

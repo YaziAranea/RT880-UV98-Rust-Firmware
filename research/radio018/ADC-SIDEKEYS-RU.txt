@@ -1,0 +1,47 @@
+PC2 ADC для боковых клавиш — backend018
+2026-11-09. Код и SDK исследованы; физический ADC пока не измерен.
+
+Подтверждённые источники
+- research/board/at32-datasheet-text.txt:1511..1512: LQFP64 pin10=PC2,
+  ADC1_IN12. PC2 назван fast ADC channel в примечании6.
+- локальная RT880 MCU схема: KEYIN-AD. Фактическое сопоставление физических
+  кнопок и Aux16/Aux17/Aux18 пока не переносится в PTT B.
+- C:/Users/User/Desktop/USB/rt880/fw_lib/libraries/drivers/src/at32f423_adc.c
+  SDK: base_config,sampletime/channel_set,enable,calibration_init/start,
+  ordinary_software_trigger,flagclear/dataread.
+- тот жеSDK project/at_start_f423/examples/adc/use_polling_get_conversion_data/
+  src/main.c: HCLK/4,12bit,640.5cycles,ADCRDY→CALINIT→CAL→softwaretrigger.
+- драйвер at32f423_crm.c:758:sourceHCLK=clearMISC1bit15.
+- SDK adc.h:758:ADC MISC offsetD0; adc_base_config пишет09.
+  PAC0.4.0этотрегистрнеописывает,backendделаетодинточечныйvolatileaccess.
+- старый verifiedkeysoracle13D68/keys::auxiliary_key:0..1884Aux17,
+  1885..2716Aux16,2717..3541Aux18,3542..4095Released.
+
+Реализация
+crates/sidekeys-at32,featurehardwareopt-in. SideAdc<T>::from_prepared принимает
+opaqueSideAdcPins,ADC1,ADCCOM,&mutCRM,PollTiming,budget. ADC иcommonвладеет
+backend;GPIOC/CRM RMW требуют сериализации со всеми остальными владельцами.
+PC2 modeanalog/no-pull,изменяются только его поля;clockGPIOC enable.
+ADC APB2 gatebit8;сброс толькоADC;sourceHCLK,div4 (48MHz→12MHz).
+Условие стабильного48MHzHCLK принадлежит уже проверенномуstartupintegration.
+Singlechannel12 rank1,12bit,rightaligned,640.5cycles,безDMA/IRQ/repeat/
+externaltrigger/oversampling. MISC09. Настройки читаются обратно.
+Enable→boundedRDY→boundedCALINIT→boundedCAL;сохраняетсяvolatileCALVAL7bits.
+Это внутренняя самокалибровка ADC, НЕ запись заводского calibrationNOR.
+
+sample() делает ровноодноsoftwaretrigger,boundedOCCEwait,overflowcheck,
+ODTread и проверку self-clearedtrigger. rawADCиauxcodeвозвращаются вместе.
+Ошибки/тайм-ауты не маскируются подReleased; backendвыключаетADCиостаётся
+Faulted,невыдаётстаруювыборку. Drop такжевыключаетADC. budget1..100000,
+каждаяwaitфаза имеетнеболееbudgetчтений иbudget-1 вызововPollTiming.
+Рекомендуемыйинтеграционныйbudget1000при1uswait; это программныйпредел,
+а не измеренныйтаймингплаты. НикакихDMA/IRQ/NOR/RFзаписейнет.
+
+Проверки
+6hosttests общейengine:точныйsetup,одинtriggerнавызов,все3initstall,
+conversiontimeout/terminal/no staleReleased,overflow/outofrange/configfail,
+timingfailure,rawthresholds. Hardwarebackend используеттужеengine.
+Этотагент Cargo/COMне запускал;ARM compileиtestresultsфиксируетrootbuild.
+Живойследующийкритерий:UARTraw4095/другойreleasebaseline,затемкаждаяфизическая
+боковаякнопкавотдельности,проверкастабильностиивозвратапослеотпускания.
+ТольконаблюдённыйAuxкодможносвязатьсphysicalPTTB;неподставлятьAux16поимени.

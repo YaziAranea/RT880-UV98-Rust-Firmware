@@ -1,0 +1,203 @@
+{
+  "schema": 1,
+  "kind": "existing_local_saved_cps_file_structural_inventory",
+  "user_reported_latest_file": "C:\\Users\\User\\Desktop\\USB\\880\\999.880dmf",
+  "user_reported_latest_saved_date": "2026-11-08",
+  "latest_saved_provenance": "user statement; not inferred from file metadata or contents",
+  "acquisition_provenance": "unknown; file existence and length do not prove a radio read",
+  "time_section_provenance": "unknown; standard examined CPS read does not fill this buffer",
+  "source_files_written": false,
+  "source_contents_embedded": false,
+  "native_files_in_source_package": false,
+  "rust_document_roundtrip_checked_by_this_script": false,
+  "files": [
+    {
+      "index": 0,
+      "source_path": "C:\\Users\\User\\Desktop\\USB\\base.880dmf",
+      "length": 221184,
+      "sha256": "0d5f76c47bb9d830a43671c7306ccf11b48a6f9167c598b549255dd14da3be23",
+      "expected_length_matches": true,
+      "sections": [
+        {
+          "section": "Cfg",
+          "file_offset": 0,
+          "length": 4096,
+          "sha256": "a367b5e7a0528c4fb8ac2095e6e034a2e04818cdd09f4e1222791d889fc24469",
+          "all_zero": false,
+          "all_ff": false
+        },
+        {
+          "section": "Channels",
+          "file_offset": 4096,
+          "length": 49152,
+          "sha256": "abd8e2a70d51a53287941838446e6ed141005d401faf597fd7c6de0bbc8c329d",
+          "all_zero": false,
+          "all_ff": true
+        },
+        {
+          "section": "Fm",
+          "file_offset": 53248,
+          "length": 4096,
+          "sha256": "f47a8ec3e9aff2318d896942282ad4fe37d6391c82914f54a5da8a37de1300c6",
+          "all_zero": false,
+          "all_ff": true
+        },
+        {
+          "section": "Time",
+          "file_offset": 57344,
+          "length": 32768,
+          "sha256": "c35020473aed1b4642cd726cad727b63fff2824ad68cedd7ffb73c7cbd890479",
+          "all_zero": true,
+          "all_ff": false
+        },
+        {
+          "section": "Zones",
+          "file_offset": 90112,
+          "length": 131072,
+          "sha256": "372b4e8433e7d0d1690924f98e68170da987264ed370f30fdc83c3595b31c542",
+          "all_zero": false,
+          "all_ff": false
+        }
+      ],
+      "active_channel_markers_equal_one": 0
+    },
+    {
+      "index": 1,
+      "source_path": "C:\\Users\\User\\Desktop\\USB\\880\\мой цпс.880dmf",
+      "length": 221184,
+      "sha256": "e6664f47f799ed2fb4fc65966ad594efb56eb1fc56564c0109c3ad07233915f2",
+      "expected_length_matches": true,
+      "sections": [
+        {
+          "section": "Cfg",
+          "file_offset": 0,
+          "length": 4096,
+          "sha256": "4170d04edd21d8b81931a6b8f7d1c2563582db6a3b369cd2e66f6e5a531ef127",
+          "all_zero": false,
+          "all_ff": false
+        },
+        {
+          "section": "Channels",
+          "file_offset": 4096,
+          "length": 49152,
+          "sha256": "65b97b97a7196a34bdf871ec5d3b0516dd73473abfb13dcd905c13ad30fb9ec4",
+          "all_zero": false,
+          "all_ff": false
+        },
+        {
+          "section": "Fm",
+          "file_offset": 53248,
+          "length": 4096,
+          "sha256": "2ba4004a12b833c98b392324f1016ae11d5c9592c8c1629b59c1246c30c2e990",
+          "all_zero": false,
+          "all_ff": false
+        },
+        {
+          "section": "Time",
+          "file_offset": 57344,
+          "length": 32768,
+          "sha256": "c35020473aed1b4642cd726cad727b63fff2824ad68cedd7ffb73c7cbd890479",
+          "all_zero": true,
+          "all_ff": false
+        },
+        {
+          "section": "Zones",
+          "file_offset": 90112,
+          "length": 131072,
+          "sha256": "6352c4ab7a27160764370173d7a3b891f1d3887a93d3d55a0b55e02e6f99cb83",
+          "all_zero": false,
+          "all_ff": false
+        }
+      ],
+      "active_channel_markers_equal_one": 144
+    },
+    {
+      "index": 2,
+      "source_path": "C:\\Users\\User\\Desktop\\USB\\880\\999.880dmf",
+      "length": 221184,
+      "sha256": "94b90ced67137d30ade3ee4b3443ee316202eaafd0008cd89f1d858d6c1912de",
+      "expected_length_matches": true,
+      "sections": [
+        {
+          "section": "Cfg",
+          "file_offset": 0,
+          "length": 4096,
+          "sha256": "88aaf9e1f2e249e20baa450f0181381ccb6674dc92a5ed4250f781fadb91c960",
+          "all_zero": false,
+          "all_ff": false
+        },
+        {
+          "section": "Channels",
+          "file_offset": 4096,
+          "length": 49152,
+          "sha256": "9b3223397ab32330662db874a37a5c69a1bb881970e7f5076819f0c4334f14de",
+          "all_zero": false,
+          "all_ff": false
+        },
+        {
+          "section": "Fm",
+          "file_offset": 53248,
+          "length": 4096,
+          "sha256": "21832ba7d833f24860e9ed6328f5d8e0345094c0cbb060040ffa1546a4c3b904",
+          "all_zero": false,
+          "all_ff": false
+        },
+        {
+          "section": "Time",
+          "file_offset": 57344,
+          "length": 32768,
+          "sha256": "c35020473aed1b4642cd726cad727b63fff2824ad68cedd7ffb73c7cbd890479",
+          "all_zero": true,
+          "all_ff": false
+        },
+        {
+          "section": "Zones",
+          "file_offset": 90112,
+          "length": 131072,
+          "sha256": "3a0c32fbcb0152078a033ce5d1add0c8a95af2c049aa7d61a702c59c79892373",
+          "all_zero": false,
+          "all_ff": false
+        }
+      ],
+      "active_channel_markers_equal_one": 144
+    }
+  ],
+  "comparisons": [
+    {
+      "first_index": 0,
+      "second_index": 1,
+      "identical": false,
+      "changed_bytes_by_section": {
+        "Cfg": 262,
+        "Channels": 5416,
+        "Fm": 167,
+        "Time": 0,
+        "Zones": 629
+      }
+    },
+    {
+      "first_index": 0,
+      "second_index": 2,
+      "identical": false,
+      "changed_bytes_by_section": {
+        "Cfg": 262,
+        "Channels": 5416,
+        "Fm": 167,
+        "Time": 0,
+        "Zones": 367
+      }
+    },
+    {
+      "first_index": 1,
+      "second_index": 2,
+      "identical": false,
+      "changed_bytes_by_section": {
+        "Cfg": 21,
+        "Channels": 1,
+        "Fm": 3,
+        "Time": 0,
+        "Zones": 336
+      }
+    }
+  ]
+}

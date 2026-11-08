@@ -1,0 +1,86 @@
+Stock read protocol: scope and evidence
+======================================
+
+This crate reads through an explicit user-selected Windows COM port. Enumeration
+uses QueryDosDeviceW and opens no port. No port is opened at startup by the crate.
+There is no write, erase, clock-setting, test-mode, bootloader or firmware command.
+Only CONNECT, READ and END can be transmitted. GENERIC_WRITE is required by Win32
+to send the READ requests; it does not enable a radio-memory write API here.
+
+Sources already examined in this workspace
+-----------------------------------------
+Radio Tuning Software 241219.exe, static ILSpy MainForm.cs: CmdConnect/CmdEnd,
+ButtonRead_Click, RecvDataOperation FlagWR==1, DataSum. The user physically
+confirmed its Read Success on UV98 Plus stock 1.16. Python reader.py transcribed
+that limited protocol; its four calibration blocks were independently read twice.
+
+RT880 CPS_V1_10_250806.exe SHA256
+b2533229c783c86150a4230a8a51c5ee274092e9f1b036bbb7a5b511c34dabd6,
+static ReadForm.btnRead_Click and MainForm.RevDateOperation (16713 onward),
+ArraySum (10934), .880dmf open/save (13515/13539). Related UV98 Plus CPS 1.07
+read handlers were compared; see research/cps/triage.json and CPS-PLAN-RU.txt.
+The Rust implementation does not load or execute those assemblies.
+
+Bounded plans, protocol block indices (1024 payload bytes per block)
+-----------------------------------------------------------------
+Calibration: 0..3 (4096 bytes).
+CFG: 8..11 (4096 bytes).
+Channels: 16..63 (49152 bytes).
+Zones: 112..239 (131072 bytes).
+FM/receiver: 856..859 (4096 bytes).
+CPS plan: four regions, 184 blocks / 188416 bytes per pass.
+CPS + calibration: five regions, 188 blocks / 192512 bytes per pass.
+No arbitrary address scan or full 4 MiB read is exposed by this crate.
+
+Time is not read by the examined standard CPS read. The returned snapshot states
+NotReadByStockCps and cannot synthesize a .880dmf/.98pdmf file. Applying read data
+to an existing local file must preserve its Time bytes and identify their origin
+as the preexisting local file, not as a new radio acquisition.
+All bytes of each selected region, including unknown/reserved fields, survive.
+These reads do not cover MCU firmware, bootloader, option bytes or every storage
+region. They are not a complete radio backup or a recovery image.
+
+Framing and failure rules
+-------------------------
+115200 baud, 8 data bits, no parity, one stop bit. DTR enabled, RTS disabled,
+no hardware/software flow control. Win32 DCB bitfield is exactly 0x11.
+CONNECT: 34 52 05 10 9B; reply 06. At most three attempts, 200ms each;
+00 can precede a retry as in the existing Python reader. Unexpected replies abort.
+READ: 52, block_hi, block_lo, sum8. Response: same three-byte header, exactly
+1024 payload bytes, sum8 of the preceding 1027 frame bytes. Header/address and
+checksum must match. Total response deadline is three seconds. No corrupt READ
+response is retried or accepted. Short reads are accumulated with <=50ms polls.
+The 20ms inter-frame interval also rejects unexpected extra response bytes.
+END: 34 52 05 EE 79 after an acknowledged session, including returned errors or
+cancellation; wait20ms then close. No END acknowledgement is expected.
+After a successful first pass, wait200ms and independently open/read/close again.
+Every second-pass block must equal the first; the first mismatch aborts.
+Only two complete matching passes with successful END/close create ReadSnapshot.
+
+END qualification
+-----------------
+The related RT880 1.16 firmware has conditional persistence of preexisting dirty
+state at END, and CONNECT does not necessarily clear those flags. Therefore this
+crate guarantees a restricted outgoing command set, not zero physical writes by
+unknown internal firmware state. It does not clear flags or alter firmware.
+
+Cancellation and retained artifacts
+-----------------------------------
+Cancellation is checked before opening, between blocks and during receive polls.
+A synchronous send has a one-second timeout; cleanup still attempts END/close.
+The caller retains all attempted TX packets, every returned RX byte, complete or
+partial frames, validation flags and cleanup errors on success or failure.
+There is no disk I/O in the engine; the GUI must persist captures, hashes and
+provenance to a new bundle before applying anything to its local document.
+The Windows transport owns/closes its handle, including configuration failure.
+Driver-level open/close timing remains subject to Windows; no device is identified
+solely from a COM name. Port enumeration does not establish the port is free.
+
+Tests
+-----
+Fake transports cover arbitrary fragmentation, each fixed plan, all65536 block
+indices against the allowlist, checksum/echo/opcode corruption, short and extra
+responses, bounded connection retries, independent-pass mismatch, short sends,
+disconnects, cleanup failures, cancellation and retained partial transcripts.
+Tests never open a serial port. Live operation is separately reviewed and owned
+by the parent task; this implementation agent did not connect to a COM device.

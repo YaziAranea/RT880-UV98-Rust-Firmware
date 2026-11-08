@@ -1,0 +1,177 @@
+{
+  "reference_sha256": "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc",
+  "compander_cases": 20,
+  "compander_sha256": "25bac63a06906b0a90e9ddd18d2f3e8a06953b2f6af5ab44dc4c10c9395246e0",
+  "timer_calls": [
+    [
+      "0x8026094",
+      1073807360,
+      999,
+      47
+    ],
+    [
+      "0x80260a4",
+      1073807360,
+      0
+    ],
+    [
+      "0x80260d0",
+      1073807360,
+      1,
+      1
+    ],
+    [
+      "0x80260ae",
+      1073807360,
+      1
+    ]
+  ],
+  "vector_index": 41,
+  "irq_number": 25,
+  "handler": "0x08021204",
+  "nominal_tmr_hz": 48000000,
+  "nominal_period_us": 1000,
+  "nominal_formula": "48MHz / (47+1) / (999+1); APB2=48MHz from startup oracle",
+  "countdown_irq_cases": [
+    [
+      0,
+      0
+    ],
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      1
+    ],
+    [
+      255,
+      254
+    ]
+  ],
+  "dispatcher_cases": [
+    [
+      0,
+      1,
+      [
+        "0x80220ec",
+        "0x8024140"
+      ]
+    ],
+    [
+      1,
+      1,
+      []
+    ],
+    [
+      2,
+      2,
+      []
+    ],
+    [
+      255,
+      255,
+      []
+    ]
+  ],
+  "agc_gate_cases": [
+    [
+      0,
+      0,
+      false
+    ],
+    [
+      0,
+      1,
+      false
+    ],
+    [
+      0,
+      2,
+      false
+    ],
+    [
+      0,
+      3,
+      false
+    ],
+    [
+      0,
+      4,
+      false
+    ],
+    [
+      0,
+      255,
+      false
+    ],
+    [
+      1,
+      0,
+      false
+    ],
+    [
+      1,
+      1,
+      false
+    ],
+    [
+      1,
+      2,
+      true
+    ],
+    [
+      1,
+      3,
+      false
+    ],
+    [
+      1,
+      4,
+      false
+    ],
+    [
+      1,
+      255,
+      false
+    ],
+    [
+      255,
+      0,
+      false
+    ],
+    [
+      255,
+      1,
+      false
+    ],
+    [
+      255,
+      2,
+      true
+    ],
+    [
+      255,
+      3,
+      false
+    ],
+    [
+      255,
+      4,
+      false
+    ],
+    [
+      255,
+      255,
+      false
+    ]
+  ],
+  "gate_sources": {
+    "20000810": "0511E FM=0;0514A AM=1;05178 AFmode5=1",
+    "20001125": "0509C activeRX=2;055BC TX=3;10854/B5F4 acquisition=1"
+  },
+  "limits": "IRQ prefix and scheduling fragment only; unrelated callees intercepted. Main-loop latency and electrical timer period not measured. AGC can run once per foreground pass at most once per nominal1ms tick; never infer exact observed period.",
+  "hardware_accessed": false,
+  "mmio_mapped": false
+}

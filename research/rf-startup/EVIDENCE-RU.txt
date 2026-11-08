@@ -1,0 +1,169 @@
+RF shutdown / startup: подтверждённые команды, не доказательство physical-off
+2026-11-08. Только offline анализ и bounded эмуляция отдельных функций.
+
+Идентичность
+------------
+RT-880_Upgrade_V1_16_250915.nicsure.bin, base08002800, 251904bytes.
+SHA256 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc.
+Это связанный RT880, не точный MCU readback пользовательской UV98 Plus.
+Наличие сохранённой внешней NOR не устанавливает идентичность MCU/bootloader.
+
+Локальная первичная схема: Desktop/USB/rt880/RT880 V2.pdf, страницы1..3.
+SHA256 b7858c30fbe6eb8bf57967d57d9985b29951ccffa766ca5ac9240796c9fab32a.
+AT32F423 datasheet revision2.03, printed pages28..31, подтверждает LQFP64 pins.
+Изображения chip-a.png/page2.png получены рендером схемы, это не фото UV98.
+
+Разделение двух RF-чипов
+-----------------------
+A = U201 на странице1. Write0801E660, read0801E620.
+  SCN: PA8 / MCU pin41, GPIOA CLR/SCR, mask0100.
+  SDATA: PC9 / pin40, GPIOC mask0200.
+  SCK: PF6 / pin47, GPIOF mask0040.
+B = U400 на странице2. Write0801E6D4, read0801E698.
+  SCN: PC7 / pin38, GPIOC mask0080.
+  SDATA: PC6 / pin37, GPIOC mask0040.
+  SCK: PC8 / pin39, GPIOC mask0100.
+Не путать A/B с текущим/дополнительным экранным каналом.
+
+Обе write-функции передают register,word_hi,word_lo, старший бит первым.
+A: bytehelper0801D8E8, input/output PC9 helper0801D894.
+B: bytehelper0801D7EC, input/output PC6 helper0801D79C.
+Чтение: register|80h, затем16бит; SDA переводится во вход.
+B write явно возвращает SDA output; A read возвращает его output в конце.
+Bitbang вызывает delay080251DC(10) на границах битов. Здесь аргумент не
+объявляется измеренным временем: clock/delay contract отдельно у startup.
+RF шины не являются SPI2 NOR, и их нельзя обслуживать через NOR backend.
+
+MCU boot levels и зависимости
+----------------------------
+GPIO init08011AC8 выполняется в device init080145CC до NOR/RF init.
+08011B58..11B68 настраивает GPIOC mask8030 output/pushpull/no-pull/drive2.
+08011B74: GPIOC CLR40020828 <-8000, PC15/pin4 HF-TXPOWER-EN LOW.
+08011B78: GPIOC CLR40020828 <-0010, PC4/pin24 RXTS-SW LOW.
+08011B7C: GPIOC CLR40020828 <-0020, PC5/pin25 FM-POWER-EN LOW.
+PC4/PC5 не объявляются PA-гейтами; функция RXTS-SW дополнительно не выведена.
+PB11/pin30 = TX29/50M-SW по схеме3. GPIO init08011B16..11B36 делает его output LOW.
+Исправление подписи 2026-11-08: AF MUTE относится к PF8/pin31, не PB11.
+См. PIN-LABEL-CORRECTION.txt и увеличенный MCU bottom crop. Адреса, маски,
+порядок операций и числовые oracle vectors от этого исправления не меняются.
+Схема2 связывает HF-TXPOWER-EN с Q400 и питающей коммутацией HF-тракта.
+Сток08005354 поднимает PC15 в TX-ветвях;08005318 сбрасывает его.
+Это согласует active-high запрос HF, но физическую цепь UV98 не измеряли.
+
+RF-пины GPIOA8,GPIOC6..9,GPIOF6 в08011C00..11C7C:
+output/pushpull/no-pull/drive2 (MODERATE), начальные уровни LOW.
+Stock начальная low-CS последовательность предполагает его boot/reset
+контекст. Не переносить её как универсальный takeover из работающего loader.
+Предварительно нужны clock gates портов A/B/C/F, исключённый конфликт pinmux,
+исключённые IRQ/DMA/другие владельцы шин и корректное питание/тактирование RF.
+PC14/PC15 также LEXT pins; альтернативные oscillator functions должны быть
+учтены при аппаратной интеграции. Эта pure crate ничего не переключает.
+
+RF GPIO / точные masks
+---------------------
+Схема1 и community source ниже согласуют GPIO A:
+  GPIO0/pin28 DCS-DET, reg33 bit6.
+  GPIO1/pin29 U-RXPOWER-EN, bit5.
+  GPIO2/pin30 V-RXPOWER-EN, bit4.
+  GPIO3/pin31 V-TXPOWER-EN, bit3.
+  GPIO4/pin32 U-TXPOWER-EN, bit2.
+  GPIO5/pin1 U8-RXPOWER-EN, bit1.
+  GPIO6/pin2 HF-RXPOWER-EN, bit0.
+Имена pin30..32 на схеме A частично legacy INTN/IFIP/IFIN; поэтому GPIO-номер
+подтверждён дополнительно кодом автора RT880, не одной текстовой подписью схемы.
+B GPIO2/pin30 связан с A/B-SW на схеме2. Его bit4 очищает helper08003F08.
+Не устанавливаем без проверки, какая физическая ветка соответствует LOW.
+
+Точные наблюдённые I/O-планы
+--------------------------
+08005318 TX gates A (tx_gates_a):
+  08005320 PC15 LOW;08005326 PB11 LOW;
+  readA33, word &FFF3, writeA33 at08005342.
+  Верхний байт сохранён; сняты ровно bits3/2.
+
+08004FC8 RX/filter clear A:
+  readA33, word &FFCC, writeA33 at08004FE4.
+  Сняты bits5/4/1/0. TX bits3/2 СОХРАНЕНЫ.
+
+080052B0 sleep A (sleep_a):
+  calls08004FC8;writeA30=0000 at052BA;writeA37=1D00 at052C4.
+  Затем RAM20001124=1. Pureplan намеренно не моделирует этот software flag.
+  Один sleep_a не является снятием внешних V/U TX-гейтов.
+
+08003F08 clear B GPIO (clear_b_gpio):
+  readB33, word &FFE0, writeB33 at08003F24; верхний байт иbits7..5 сохранены.
+08003EC0 sleep B (sleep_b):writeB30=0000;writeB37=1D00.
+08004F0C(0) /08003E08(0):writeA/B36=007F, PA-control code сbit7clear.
+  Код007F не объявляется измеренными нулевыми ваттами.
+
+Stock callers / порядок
+----------------------
+08004BF0 RX transition при RAM20001125==3:
+  calls08005318, затем08004F0C(0), затемdelay8380(20).
+08003CFC other transition:
+  calls08005318,08003F08,08003E08(0),...08003EC0.
+Power-down path08020F84 содержит:
+  20FB8 calls04FC8;20FBC calls05318;20FC4 PC5 LOW;
+  далее другие подсистемы/MCU writes;20FFE calls052B0;21002 calls03EC0.
+Мы не копируем его целиком: там дисплей, ожидание RAM-флага и другие сервисы.
+
+DIAGNOSTIC_QUIESCENCE_REQUESTS — новая композиция наблюдённых операций:
+  TX gates A -> PAcodeA0 -> RX/filterAclear -> sleepA regs -> B GPIOclear ->
+  PAcodeB0 -> sleepB regs -> FM power LOW.
+Она не выдаётся за дословный стоковый порядок. Сначала формируются внешние
+TX-gate requests; далее внутренние блоки. Никакого RF executor/MMIO нет.
+Нет автоматического продолжения при ошибке: стратегия исполнения/cleanup,
+fresh RMW readback и ошибка аппаратной шины ещё не реализованы.
+
+Почему full stock init не RF-off
+-------------------------------
+Primary08004DC0 / secondary08003D34:
+  write00=8000,delay8380(10),write00=0000,write37=1D0F;
+  gain table;write33=0,34=0,35=0; другие constants/calibration filters.
+  Затем04FA0/03E3C:37=1F0F,delay(10),30=0200,30=BFF1.
+  Primary далее05698(1,0) пишет30=C1FE.
+То есть полный init включает внутренние RX/другие блоки и не пригоден как
+универсальное доказательство отсутствия RF. Нельзя объявлять отсутствие
+пользовательского TX-кода гарантией выключенного PA.
+Полный init также зависит от заполненных RAM-калибровок/настроек и delaystate.
+
+Reset/entry scope
+-----------------
+Подробности у research/startup/EVIDENCE-RU.txt. Related Reset08002AC0 вызывает
+SystemInit08021080, runtime080029E0 ->main08025908. SystemInit временно ставит
+VTOR08000000; main послеclock08021124 ставит08002800,delay080251EC,device145CC.
+Приложение предполагает initialized .data/.bss, clock/delay и GPIO передRF.
+Exact loaderhandoff, IRQ/DMA/watchdog/CONTROL/peripheral state пользовательской
+UV98 не доказаны. Здесь startupclock не реализован и Stage0 не изменён.
+
+Дополнительные первичные community sources, проверены2026-11-08
+--------------------------------------------------------------
+https://github.com/fagci/rt880-fw/blob/main/src/driver/bk4819.c
+Gitblob97b61c8ee0734d5395f997b98d6b17e72e21ed86: pinmapA/B и GPIO bit40>>pin.
+https://github.com/fagci/rt880-fw/blob/main/src/driver/bk4819-regs.h
+Gitblob76dbe9feb267e63f98de57b93ad6cc7bbb31b218: V/U TX labels,reg30enablebits.
+https://github.com/fagci/rt880-fw/blob/main/src/driver/bk4819.h
+Gitblob547bd678fbb367ca5339574182a3f3a5368c6c4f: filter mask definitions.
+Эти источники подтверждают значения/назначение, но не заменяют точный UV98
+hardware audit. Уrepo license=null; код не копировался в Rust и не включён
+в deliverable. Community SetupPowerAmplifier(0) пишет36=0 и включаетRX: это
+отличается от рассмотренного stock helper36=007F; намеренно не перенесено.
+Дополнительно прочитан авторский driver в egzumer/uv-k5-firmware-custom
+(Apache-2.0/DualTachyon): Sleep использует30=0,37=1D00. Его pinmap UV-K5
+не используется для RT880/UV98; перенос реализации из него не выполнялся.
+
+Verification / residual limits
+------------------------------
+derive_oracle.py: 76boundedcases,175orderedI/Oevents. All MMIO remains unmapped.
+Register read/write intercepted. 5точныхMCU CLR-instructions recorded/skipped.
+MCU boot evidence — только slice11B6C..11B7E; остальные helpers полные.
+В seeds входят все одиночные16бит,00,FFFF,FF00,00FF,A5A5,5A5A,000C,0033.
+CSV+SHA manifest: crates/board-policy/tests/fixtures/rf-requests.csv;
+research/rf-startup/oracle-summary.json. Tests сравнивают completeorderedtraces,
+различают sleep иexternalTXclear, проверяютhighbits/idempotentcomposition.
+Cargo/build выполняетroot; эта задача не запускалаCargo/COM/target I/O.
+
+Не доказаны physicaloff, exactPCB полярность, gpio direction/highcontrolbits,
+поведение на power-up/brownout/failedwrite, PA bias и выходноеRFизлучение.
+RMW сохраняетнеизвестныеhighbits; это не гарантируетназначение/направлениеpins.
+API поэтому возвращаеттолькоrequests, никакогоKnownOff/TransmitSafe token.

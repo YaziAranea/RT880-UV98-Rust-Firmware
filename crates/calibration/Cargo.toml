@@ -1,0 +1,8 @@
+[package]
+name = "uv98-calibration"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Read-only borrowed views of a saved UV98 tuning block"
+
+[dependencies]

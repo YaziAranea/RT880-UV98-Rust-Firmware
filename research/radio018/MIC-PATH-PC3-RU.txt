@@ -1,0 +1,58 @@
+R-09: отсутствие голоса при работающей несущей/CT, 2026-11-09
+
+Наблюдение TX1 со слов пользователя: EXO Rep отвечает хвостом/голосовым
+уведомлением, но собственной речи в ответе нет. Повтор без К-кабеля тоже
+без речи. Это частичное evidence RF carrier/CT/RX, не приёмка микрофона,
+мощности или девиации. SerialException error31 не доказывает RFI.
+
+Конкретный найденный пробел
+Схема C:/Users/User/Desktop/USB/rt880/RT880 V2.pdf, стр.3, U501 BL1555:
+- pin9 2COM = MOD4819A, микрофонный вход основного RF;
+- pin7 2NC0 = MICI, обычный микрофон;
+- pin10 2NO1 = BT-MICI, внешний/опциональный путь;
+- pin8 SW2 = ANC POWER-EN = MCU PC3, physical pin11;
+- LOW выбирает MICI, HIGH выбирает BT-MICI; питание U501 постоянно3V3.
+До исправления RadioControl/early masks не готовили PC3. Его фактическое
+значение на пользовательской плате не измерено: возможный плавающий или
+унаследованный выбор BT-MICI — обоснованная гипотеза, не доказанная причина.
+
+Original stock:
+08011C08..11C36 конфигурирует GPIOC mask03C8, push-pull, output, no-pull,
+drive2; запись08011C34 CLR40020828<-8 задаёт PC3 LOW.
+08010338..10342 также очищаетPC3, но это TX-stop/tail prefix, не доказанный
+pre-TX caller. В digital backend2185C PC3 HIGH, затем218A8 сноваLOW.
+derive_mic_mux_timing_evidence.py исполняет эти ограниченные Thumb-фрагменты
+без MMIO/COM: GPIO init8B +3 stores PASS. В JSON указан SHA reference.
+
+Реализовано в следующем исходном кандидате
+crates/board-pins/src/lib.rs: RadioControl получает PC3 из оставшегося
+ReservedAfterBootLog. RADIO_CONTROL_C_MASK=8038. Diagnostic8030 и ранний
+ASM не меняются, двойного владения нет.
+crates/radio-runtime/src/gpio_control.rs:11 pins; PC3 LOW предзагружен до
+output; mode/type/pull/drive/latch проверяются. Обычные методы никогда не
+пишутPC3 HIGH. Io.verify_control перед каждым RF tick проверяет его вместе
+с остальными контрольными GPIO. При mismatch runtime делает Failed+cleanup
+до следующего RF-enable шага.
+hardware.rs документирует этот контракт. Cargo/ARM запускает root.
+Tests добавлены: PC3 stuckHIGH/lock; сохранение чужих GPIO включаяPC2 ADC;
+LOW после обычных control calls; Runtime integration mode/latch tamper
+перед первымTXtick -> толькоoff33/36/30/47, без разрешающей записи RF.
+
+Остальной тракт
+У U501 есть второй, независимый переключатель SW1:
+pin4 SW1 = RXTS-SW = PC4; pin3 1COM через R500/C511/C510 ведёт к AUDIO;
+pin5 1NC0 через R545 0R соединён с AFOUT4819; pin2 1NO1 = MOD4819B.
+Следовательно, приёмный выбор SW1 управляется PC4, а не PC3. Штатный PC4 LOW
+для CFG77=0 уже подтверждён AIR factory oracle. Исправление PC3 нельзя
+объявлять исправлением слабого AM; это отдельный не закрытый дефект.
+
+U505 BL1551 выбирает EMIC+/IMIC+ аппаратной линией EAR DET/SET-DET/ENB;
+R58210K подтягивает её к3V3. BiasMICI идёт от3V3 черезR5572K2/R5581K5,
+отдельный MCU bias-enable в этом фрагменте схемы не найден.
+Поэтому отключение кабеля — корректная отдельная проба, но её отрицательный
+результат не исключает U501/PC3 или другие причины.
+PA0/PA1/PA2/PF1 относятся к внешнему modem/GPS-shared пути; без его явного
+выбора их не следует дёргать ради обычной FM речи. A7D=E95F, A30=C1FE,
+девиацияA40=34E2 уже совпадают с original EXO factory oracle. Gain и
+калибровки не менялись. Окончательное доказательство исправления — слышимая
+речь в следующем коротком ручномTX, не успешная сборка или уровеньPC3ODT.

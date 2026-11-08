@@ -1,0 +1,48 @@
+{
+  "reference_sha256": "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc",
+  "function": "0x08025F6C",
+  "tests": [
+    {
+      "name": "stock_pll_48mhz",
+      "pllcfg": "0x31801",
+      "cfg": "0x100a",
+      "misc1": "0x1000",
+      "expected_hz": 48000000,
+      "actual_hz": 48000000
+    },
+    {
+      "name": "same_pll_ahb_div2",
+      "pllcfg": "0x31801",
+      "cfg": "0x108a",
+      "misc1": "0x1000",
+      "expected_hz": 24000000,
+      "actual_hz": 24000000
+    },
+    {
+      "name": "hick_8mhz",
+      "pllcfg": "0x31801",
+      "cfg": "0x0",
+      "misc1": "0x0",
+      "expected_hz": 8000000,
+      "actual_hz": 8000000
+    },
+    {
+      "name": "hick_direct_48mhz",
+      "pllcfg": "0x31801",
+      "cfg": "0x0",
+      "misc1": "0x5000",
+      "expected_hz": 48000000,
+      "actual_hz": 48000000
+    }
+  ],
+  "all_passed": true,
+  "physical_measurement": false,
+  "scope": "Only stock clock calculation with synthetic read-only CRM inputs; no oscillator startup, power/RF state, bootloader or interrupts are modeled.",
+  "derived_stock_profile": {
+    "core_hz": 48000000,
+    "apb1_hz": 24000000,
+    "apb2_hz": 48000000,
+    "spi2_sck_hz": 12000000
+  },
+  "formula": "8MHz * NS96 / (MS1 * FR8) / 2; AHB /1, APB1 /2, APB2 /1, SPI2 /2"
+}

@@ -1,0 +1,9 @@
+[package]
+name = "uv98-nor-read"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Bounded read-only NOR command layer for offline-tested UV98 research"
+
+[dependencies]
+uv98-calibration = { path = "../calibration" }

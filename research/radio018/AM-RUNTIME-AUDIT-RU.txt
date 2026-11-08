@@ -1,0 +1,50 @@
+AM runtime audit после живой018, 2026-11-09.
+Только связанный reference RT8801.16, не измерение UV98 RF.
+Reference SHA256 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc.
+
+1. В receive восстановлен пропущенный compander reset04518.
+Stockcaller1F842..1F84A:4228(width),4518(reset),4BF0(receive).
+04518 читает свежийA31 и пишетA31&FFF7,A28=6B38,A29=AB40.
+Это точное восстановление stock порядка; улучшение RF ещё не измерено.
+derive_oracle.py заново исполняет24RX cases с этой последовательностью.
+derive_runtime_evidence.py:20 независимых seedA31, включая каждый бит.
+
+2. Cadence подтверждён инструкциями и ограниченным Unicorn oracle.
+211D4 вызывает26094(TMR1 base40010000,PR999,DIV47),260A4(mode0),
+260D0(overflowIRQ enable),260AE(counter enable).
+Вектор080028A4 содержит08021205:IRQ25=TMR1_OVF_TMR10 (SDKat32f423.h:221).
+48MHzAPB2/(47+1)/(999+1)=1kHz nominal, см.startup/clock-oracle.json.
+21204 handler:21242..21250 уменьшает200011AD до0.
+24966 dispatcher: если0, пишет1, вызывает220EC, затем24140AMgain.
+Фактически один AGC вызов на foregroundпроход, не чаще nominal1ms.
+UI/другая работа могут задержать вызов; точный wall-clock период не измерен.
+Наши50ms искусственно растягивали250ticks до12.5s. Следует разделять
+AGC cadence и обновление UI/RSSI, без burst catch-up после задержки.
+
+3. Условия24140:20000810!=0 И20001125==2.
+Флаг00810 не optional userAGC:050EA selector пишет0 дляFM(0511E),
+1 дляAM(0514A),1 длядругогоAFmode5(05178). State1125:05098 пишет2
+при переходе к активномуRX/AF;055BC пишет3TX;10854/B5F4 пишет1acquisition.
+24140 читает067&01FF через4F40 прямо: коррекции доAGC нет.
+Усреднение raw с предыдущим,target142 и таблицаA13 уже сверены1161cases.
+ПрименениеAGC при закрытом audio_open отличается от этого stockgate.
+Сбросgainindex90/history0/hold0 выполняют2E50/2E5C приRX4C34/4C38,
+а такжеcold4E7A/4E7E; при каждом AF-open05098 такого сброса нет.
+runtime-evidence.json:18gatecases,4IRQcountdown,4dispatch,4timercalls PASS.
+Все периферийные адреса в Unicorn остаются unmapped; подменены только
+названные timer/helpers; это не полная эмуляцияIRQ/firmwareboot.
+
+4. Cold04DC0..4E88 не содержитA7E/A3D. Не добавляли неподтверждённые
+manualgain/crystal writes. RAW165..170 не доказывает RSSI вdBm.
+Следующий живой readback A13/index,A7E,A38/39,A43,A47/48,A01,A0C
+различит испрошенную конфигурацию и реальнопрочитанные значения.
+
+5. Indicators: PA9 keypadlight,PA13 greenRX,PA14 redTX, HIGH=on.
+Stock1E29A..2A0:SET PA9;2101E..24:CLEAR PA9;
+1E33C..346:SET PA13/14. Схема mcu-j500-detail и rt880-v2-3:
+BACKLED-EN→R531/Q502;D500 cathodesGND,R533/R534.
+GPIOEngine заранееCLR всехвладимыхлиний, exactmodes,pushpull,readback;
+PA4/PA9 HIGH только послеуспешнойподготовки. LEDs mutualexclude;
+смена clearboth→setone, очистки независимы приошибке.
+PA13/14 занимают SWD; SPI/NOR/PTT/ADC/UART поля не меняются.
+Регистровые tests доказывают запросы/сохранение чужихбит, не свечениеLED.

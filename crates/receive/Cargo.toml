@@ -1,0 +1,12 @@
+[package]
+name = "uv98-receive"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Bounded receive configuration plans and fallible RF-bus composition"
+
+[dependencies]
+uv98-calibration = { path = "../calibration" }
+uv98-stock-model = { path = "../stock-model" }
+uv98-band-plan = { path = "../band-plan" }
+uv98-rf-bus = { path = "../rf-bus" }

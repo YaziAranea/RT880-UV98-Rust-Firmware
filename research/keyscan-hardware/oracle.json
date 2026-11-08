@@ -1,0 +1,255 @@
+{
+  "reference_sha256": "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc",
+  "hardware_qualified": false,
+  "scope": "Two explicitly bounded init slices and column function; GPIO helpers executed against RAM; no MMIO mapping; no ADC/encoder/RF code",
+  "init_slice_inheritance": "11BCC slice inherits byte4=0 and byte7=2 from explicit stock11B80/11B86 stores",
+  "fixture_sha256": {
+    "stock-gpio.csv": "84e68c590c348402381c5008b19df083cb3eb800e959f6cac299c5cde27411b4",
+    "stock-columns.csv": "eda60c6e78b14c69a5cce7396e0258b85a771483b6871154ccfff6cfd0d39b47"
+  },
+  "gpio_traces": [
+    {
+      "seed": 0,
+      "gpio_calls": [
+        [
+          "0x40020400",
+          "5000000000010002"
+        ],
+        [
+          "0x40020400",
+          "0704000000000102"
+        ],
+        [
+          "0x40020800",
+          "001c000000010002"
+        ],
+        [
+          "0x40020c00",
+          "0400000000010002"
+        ]
+      ],
+      "skipped_column_release_stores": [
+        [
+          "0x8011cac",
+          "0x40020418",
+          1024
+        ],
+        [
+          "0x8011cb0",
+          "0x40020418",
+          4
+        ],
+        [
+          "0x8011cb4",
+          "0x40020418",
+          2
+        ],
+        [
+          "0x8011cb8",
+          "0x40020418",
+          1
+        ]
+      ]
+    },
+    {
+      "seed": 4294967295,
+      "gpio_calls": [
+        [
+          "0x40020400",
+          "5000000000010002"
+        ],
+        [
+          "0x40020400",
+          "0704000000000102"
+        ],
+        [
+          "0x40020800",
+          "001c000000010002"
+        ],
+        [
+          "0x40020c00",
+          "0400000000010002"
+        ]
+      ],
+      "skipped_column_release_stores": [
+        [
+          "0x8011cac",
+          "0x40020418",
+          1024
+        ],
+        [
+          "0x8011cb0",
+          "0x40020418",
+          4
+        ],
+        [
+          "0x8011cb4",
+          "0x40020418",
+          2
+        ],
+        [
+          "0x8011cb8",
+          "0x40020418",
+          1
+        ]
+      ]
+    },
+    {
+      "seed": 2779096485,
+      "gpio_calls": [
+        [
+          "0x40020400",
+          "5000000000010002"
+        ],
+        [
+          "0x40020400",
+          "0704000000000102"
+        ],
+        [
+          "0x40020800",
+          "001c000000010002"
+        ],
+        [
+          "0x40020c00",
+          "0400000000010002"
+        ]
+      ],
+      "skipped_column_release_stores": [
+        [
+          "0x8011cac",
+          "0x40020418",
+          1024
+        ],
+        [
+          "0x8011cb0",
+          "0x40020418",
+          4
+        ],
+        [
+          "0x8011cb4",
+          "0x40020418",
+          2
+        ],
+        [
+          "0x8011cb8",
+          "0x40020418",
+          1
+        ]
+      ]
+    },
+    {
+      "seed": 305419896,
+      "gpio_calls": [
+        [
+          "0x40020400",
+          "5000000000010002"
+        ],
+        [
+          "0x40020400",
+          "0704000000000102"
+        ],
+        [
+          "0x40020800",
+          "001c000000010002"
+        ],
+        [
+          "0x40020c00",
+          "0400000000010002"
+        ]
+      ],
+      "skipped_column_release_stores": [
+        [
+          "0x8011cac",
+          "0x40020418",
+          1024
+        ],
+        [
+          "0x8011cb0",
+          "0x40020418",
+          4
+        ],
+        [
+          "0x8011cb4",
+          "0x40020418",
+          2
+        ],
+        [
+          "0x8011cb8",
+          "0x40020418",
+          1
+        ]
+      ]
+    }
+  ],
+  "column_traces": [
+    {
+      "sampled": [
+        0
+      ],
+      "stores": [
+        [
+          "0x801fbc2",
+          "0x40020428",
+          4
+        ],
+        [
+          "0x801fbca",
+          "0x40020418",
+          1024
+        ]
+      ]
+    },
+    {
+      "sampled": [
+        1
+      ],
+      "stores": [
+        [
+          "0x801fbd8",
+          "0x40020428",
+          2
+        ],
+        [
+          "0x801fbe0",
+          "0x40020418",
+          4
+        ]
+      ]
+    },
+    {
+      "sampled": [
+        2
+      ],
+      "stores": [
+        [
+          "0x801fbee",
+          "0x40020428",
+          1
+        ],
+        [
+          "0x801fbf6",
+          "0x40020418",
+          2
+        ]
+      ]
+    },
+    {
+      "sampled": [
+        3
+      ],
+      "stores": [
+        [
+          "0x801fc06",
+          "0x40020428",
+          1024
+        ],
+        [
+          "0x801fc0e",
+          "0x40020418",
+          1
+        ]
+      ]
+    }
+  ],
+  "driver_difference": "Open-drain rather than stock push-pull; break-before-make; two complete scans; aliases/multikey rejected for actions"
+}

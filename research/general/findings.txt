@@ -1,0 +1,137 @@
+RT880-LABELLED 1.16 — GENERAL CALIBRATION / BATTERY / VOX / SQUELCH
+Offline review and bounded ARM oracle, 2026-11-08
+Reference SHA256 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc
+This is not an image obtained from the user's UV98 MCU. Physical equivalence,
+RF units and behavior of the exact user's firmware are not established.
+
+1. GENERAL LOAD / COPY SELECTION
+Entry 0x08013E3C. Ordinary mode r0=0 is modeled; it performs the following:
+  source flag RAM0x200010E9 <- 0
+  SPI READ offset0 length32 -> RAM0x20003044
+  if general[0] == 0x9A: retain source0
+  else source <- 1; SPI READ offset0x1000 length32 -> same RAM
+  if marker still !=0x9A: source <- 2; copy32 from ROM0x08028344 to same RAM
+The checks are at 0x08013E7E and 0x08013E96. No checksum or field validation
+is present in this bounded load. Primary wins even when backup also has marker.
+Invalid general body bytes are not detected by the marker check.
+Byte copy helper0x080081C4 copies source r1 to dest r0+r2 for r3 bytes.
+
+Mode10 is explicitly destructive: 0x08013E44..66 reads backup4KiB, erases
+primary sector0, programs4096 bytes back to primary. Mode12 at0x08013EAC
+toggles general[1] and calls writer0x08025E40 for32 bytes. These modes are
+neither emulated by the oracle nor exposed in Rust.
+
+Band selector0x08012CFA..0x08012D36 uses this same source flag for112-byte
+records from primary, backup+0x1000, or ROM defaults. Hardware analysis agent
+owns the full frequency-to-slot/point model and its oracle.
+
+Rust select_stored_source reports Primary / Backup / NoValidStoredCopy.
+general_read_range provides only address0 or0x1000,length32; no defaults,
+repair or persistence. It is a read description, not a device operation.
+
+2. GENERAL[1] NAMING CORRECTION
+Tuning Software MainForm.cs line6983:
+  ComboBoxScreen.Items.AddRange(new object[2] { "Stop Test", "Start Test" });
+Thus the variable name "Screen" must not be interpreted as screen hardware.
+Use raw test-mode flag; actual behavior is broader than display configuration.
+Stock0x08013EB0..BE toggles it in mode12. Other observed consumers include:
+  0x0800359A..B6: conditional GPIOF bit0 handling;
+  0x080078B4..7904: changes frequency-acceptance path with settings[0x74];
+  0x0801E00C..1E: nonzero clears settings[0x76],[0x77],[0x105].
+No toggle, GPIO effect or test-mode activation is implemented in Rust model.
+
+3. BATTERY ADC / INDICATOR
+DMA config0x0800822C..A2 points peripheral DR0x4001204C at RAM0x200010CC,
+with two halfword samples. No hardware acquisition is executed in the oracle.
+0x080121A8 enables ADC through0x08024CC4, waits on completion words
+RAM0x200010D4 / RAM0x200010D8, then clears both.
+ 0x080121D2 loads u16 DMA sample0 from0x200010CC.
+ 0x080121D6 multiplies by3; 0x080121DC signed-divides by51; values positive.
+ 0x080121E0 adds2;0x080121E4 stores u16 at RAM0x200010E4.
+ 0x080121E6..EA copies second u16 sample unchanged to RAM0x200010E6.
+Therefore code=floor(sample_u16*3/51)+2. No tuning general[31] correction
+is read between this DMA record and the output. This does not rule out all
+upstream hardware calibration or other firmware paths.
+
+Battery UI caller0x08021E70..B4 copies low8 bits of code to RAM0x2000116A,
+then calls0x080122AC. The latter contains fixed comparisons, not a lookup
+through general[16..30]:
+  code<62 ->0; 62..63 ->1; 64..65 ->2; 66->3; 67..68->4;
+  69..81 -> code-63; >=82 ->19.
+Output5 is absent in the observed code. Preserve this distinction from any
+new desired battery display behavior. Numeric code is not proven volts or %.
+Additional low-voltage state transitions at0x08021ECE..1F4E use fixed60/64/65/58
+thresholds; they are not ported because their shutdown/UI side effects and
+scheduler context are beyond this pure model.
+
+4. VOX DECISION
+CPS MainForm.cs12309..12311 identifies settings[167]=VOX enable,
+settings[168]=VOX threshold, settings[169]=VOX delay; live settings RAM0x200035EC.
+Caller0x080227EA..F8 loads threshold=settings[0xA8], computes
+upper=(threshold+10)&255, lower=threshold, and calls0x08005708.
+0x08005708 reads RF register0x64 through0x0801E620 and uses u16 sample:
+  sample>=upper ->1
+  otherwise sample<=lower ->0
+  otherwise -> previous byte RAM0x2000112E
+Upper comparison is first, including threshold246..255 where addition wraps.
+Pure Rust bool model covers valid previous states0/1; it does not write state.
+The general tuning VOX fields at12..15 are not consumed in this traced path.
+This is not proof they are unused globally.
+
+Controller0x080227C4..289A additionally gates enable, state flags, mode and
+settings[0x77], maintains a counter atRAM0x2000115C, and calls TX control.
+It is deliberately not executed or ported. Timing units/scheduler and physical
+VOX activation are not established. Rust only computes the hysteresis decision.
+
+5. NOISE / SQUELCH CODES
+Selector0x08012D56..7C copies band-table bytes to RAM:
+  wide noise0x2000081D, narrow noise0x2000081E,
+  wide squelch0x2000081F, narrow squelch0x20000820.
+0x08004CCA..CF6 chooses wide if active-channel byte3==0, narrow otherwise,
+unless the separate override flagRAM0x200011F9 is nonzero. Override paths use
+settings[0xB5]/[0xB4]; those bypass paths are not modeled.
+
+0x08004ECC(noise_code) uses settings level[0xA4] to index ROM0x08026370:
+  10,10,9,8,7,6,5,4,3,2,1
+0x08004F60(squelch_code) indexes ROM0x0802637B:
+  0,0,2,4,6,10,16,22,28,34,38
+Both produce upper=(code+2+offset)&255; lower=(code-4+offset)&255;
+word=(upper<<8)|lower. They call bus writer0x0801E660 with registers0x4F
+and0x78 respectively. STRB causes modulo256 wrapping; no saturation exists
+in those setters. Levels0..10 modeled; out-of-range refused by Rust API.
+Register words are outputs only: the Rust crate performs no bus writes.
+
+6. GENERAL FIELD CONSUMPTION MAP / BOUNDARIES
+Offsets   Traced evidence / owner
+0         Marker0x9A, primary/backup/default decision: verified above.
+1         Test mode (tool labels Stop Test / Start Test), consumers above.
+2..3      Tool REG3E field; RF analysis agent owns application review.
+4..7      Tool expander/compressor fields; RF agent owns application review.
+8..11     Tool TX/RX filter fields; refs0x08003DA6..DD2 and0x08004E32..E5E;
+          RF agent owns the exact setter masks and register plans.
+12..15    Tool VOX on/off; not read in reviewed VOX comparator/controller.
+16..30    Tool battery points; not read in reviewed ADC/indicator paths.
+31        Tool ADC correction; not read between reviewed DMA sample/output.
+No blanket claim that fields are unused throughout the binary is justified.
+
+7. VALIDATION
+oracle.py executes real selected Thumb instructions in Unicorn2.1.4 Cortex-M4,
+Flash+RAM only, 1000-instruction call budget. No peripherals are mapped.
+No host EXE, serial connection, radio boot flow or physical device code runs.
+Every substitution is listed in evidence.json:
+- load SPI READ supplies synthetic primary/backup32 bytes; persistence helpers
+  reject if reached; mode argument fixed0. ROM fallback observed in emulator,
+  but Rust reports NoValidStoredCopy instead of supplying defaults.
+- ADC control callee returns0; completion supplied; conversion/stores execute.
+- RF bus reader returns fixture reg0x64 sample; writer captures arguments.
+- Battery indicator executes unchanged with no intercepted callee.
+
+Generated oracle rows: selection768, ADC4100, indicator256, squelch2816,
+VOX6108; total14048. Generator exited0. SHA256s in evidence.json.
+Rust general.rs plus tests/general.rs contains six tests against these CSVs
+and rejected-input checks. Agent did not invoke Cargo; root owns integration.
+
+Reproduction: common stock_emu.py supports UV98_STOCK_REFERENCE for input BIN;
+oracle.py supports UV98_RUST_PROJECT for Rust project output path. Requires
+the pinned reference hash and Unicorn dependency. Annotated .asm files are
+research evidence; analyze.py uses workspace-local Capstone dependencies.

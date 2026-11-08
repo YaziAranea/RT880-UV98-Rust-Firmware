@@ -1,0 +1,67 @@
+R-08: компактный аппаратный RX sweep adapter — проект, не готовая функция
+2026-11-09. Без COM, без изменений runtime/main или RF timing.
+
+Доказанная основа
+SPECTRUM-HF-EVIDENCE-RU.txt, fast-sweep.csv, derive_sweep_evidence.py:
+56 original Thumb cases подтверждают stock23C58..23CF8. Для каждого bin:
+calibrated frequency38/39,37=1F0F,30=0200,30=BFF1, fresh33 затем
+(old&FFCC)|RXmask. Ровно6 writes+1 read в исходном фрагменте. Он сохраняет
+TX bits: FFFF fixture специально показывает, почему одного stockRMW мало.
+Наш adapter обязан отклонять33&000C!=0; PA36 и внешниеTXgates заранееOFF.
+Readbacks38/39/30/33 сохраняются. ФизическийPLL lock не доказан.
+
+Память
+Старый spectrum::Engine с240bins иOption<Measurement{u16,u64}> занимал
+около7760B. Для текущей платы предпочтителен отдельный compact scheduler:
+81raw u16 +81peak u16 +11B valid bitmap =335B, плюс небольшой context/phase.
+Непрочитанные bins показывать как пустые, а некакRSSI0. Tickets/generation
+хранить на текущем запросе, не в каждомbin. График RAW, без выдуманныхdBm.
+Размер подтвердить ARM layout/host size; эта оценка не замена измерению.
+
+Граница API (предложение)
+sweep_begin(calibration, range, origin_profile, now)
+sweep_tick(now, cancelled) -> progress
+sweep_stop(now) -> restoring/off
+Runtime должен явно различать Sweeping/Restoring/Receiving и запрещать
+transmit в первых двух состояниях. Сам sweep никогда не вызываетTX.
+Точное имя API выбирает владелец runtime; важен следующий порядок.
+
+Вход
+1. Сохранить origin RXprofile и generation; all-off cleanup+readback.
+2. Проверить каждый bin до I/O: положительная сетка<=81, всечастоты внутри
+   доказанного primary диапазона, одинаковые calibration.band_index,
+   RXroute/PF0 иwidth. Routeboundaries/calband boundaries сужают окно
+   либо отклоняют fastpath. Ни18MHzdown, ни660..840MHzgap не обходить.
+3. Fullreceive на первомbin одинраз: gain,filter,width,calibration;
+   tone0/SQL0, PF8 muted. Не вызыватьobserve/AMAGC во времяsweep, иначе
+   уровень разныхbins зависит от историиgain/audio. RF B остаётсяsleep.
+
+Bin
+4. Fresh guard: cancel/PTT/clock/control +TXoff. Выполнить exact bounded
+   fast fragment с текущей factory correction. Fresh33 передfinalRMW
+   обязан иметь TXbits0; несовпадение/readback/I/O -> terminalcleanup.
+5. Только после последней успешной записи+readback отметить TuningComplete
+   текущего generation/bin. Выждать elapsed>=10ms доfresh67&01FF.
+   Stockpoll nominal10ms подтверждён, физическоеsettling пока неизвестно;
+   этот интервал — экспериментальная консервативная policy, неPLL ACK.
+6. Принять sample только для ожидаемыхgeneration/bin иправильнойphase.
+   Поздний sample послеcancel/retune не изменяетграфик. Clockrollback,
+   deadline иcounteroverflow завершаютsession, не создаютложныхданных.
+
+Выход
+7. EXIT/любаяPTT отменяеттекущийticket. Сначалаoff, затемfullRXrestore
+   origin. HeldPTT не превращаетсявTX и не возобновляетsweep: release/newedge.
+   Fullrestore вновь задаётtones/SQL/AM/FM/gain/calroute, сбрасываетAGCcache.
+8. UI рисуетpartialbins пакетами/dirtyrows, неfullframe послекаждогоsample.
+   Сначалаsinglepass; continuous только явныйрежим. Измеритьsweepduration
+   иmaxinputpoll, показатьprogress.81×10ms даётлишьsettlefloor810ms;
+   I/Oreadbacks иUI добавляются, снынешнейшиной ожидаютсясекунды.
+
+Независимая проверка перединтеграцией
+Сверкаfastfragment с56originalcases, включаяbandedges иseed33FFFFreject;
+readbackfault накаждомшаге; stalegeneration; cancelPTT накаждомprefix;
+stop/restore fault; wrapclock; noTXactions; sourceNOR/calibrationunchanged;
+одинаковыйgain всехbins; частичныепустыеbins; ARMmemorybudget.
+На железе: сначалаimmutableknownregister readback, затемshortRX-onlysweep
+и возврат к исходномуканалу. Уровни/скорость/соседниеbins не объявлять
+аппаратно принятыми поhosttests или нарисованномуграфику.

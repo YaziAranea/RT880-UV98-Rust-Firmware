@@ -1,0 +1,99 @@
+RX runtime review contract (2026-11-08)
+
+Scope: offline, independent source review. No device/COM access, no physical
+RF qualification, no assertion that a successful write proves RF state.
+Related RT880 mappings remain a candidate profile for UV98 Plus hardware.
+
+1. Ownership and hardware boundary
+Primary bus: CS PA8, SCK PF6, DATA PC9. Secondary: CS PC7, SCK PC8,
+DATA PC6. Receive control: PF0 antenna request, PF8 AF mute. PC15 HF
+TX power and PB11 TX29/50M selector must remain outside this backend.
+RF capabilities must consume GPIOF ownership as well as the reserved A/C
+capability. No Clone/Copy/Send/Sync, no second split path, no raw public
+pin constructor. RMW GPIO configuration must preserve every other field.
+Latch preload before output mode is a NEW initialization policy, not the
+stock sequence. Ownership splits and Runtime/Bus constructors are inert.
+Explicit unsafe from_prepared_quiescent hardware constructors do configure
+GPIO, under their documented pre-established hardware/serialization contract.
+
+2. Runtime boundary
+Validated immutable Plan only; no arbitrary register list. Every normal
+operation is preceded by an observational qualification/PTT guard. An A33
+TX-gate check must precede the first register configuration write. Fresh
+route read must be followed by the existing second guard before its write.
+Each step is bounded; no polling loop, retry, delayed background callback
+or automatic reconstruction of a poisoned bus.
+
+RX-start37/30, mute polarity and RSSI mask require separate stock evidence.
+Configured is not Listening. Completion of writes and the nominal delay
+alone cannot fabricate a ready/settled event. Require a current tune ticket
+acknowledging the adapter's qualified settling condition plus the configured
+minimum delay. Reject early, duplicate, stale and wrong-phase ACKs.
+
+RSSI is permitted only for the current Listening state. A successful read
+must be followed by an interlock check before publishing the measurement;
+PTT or failure during the read invalidates that result. Preserve the actual
+register word separately if diagnostics need it; raw masked RSSI is not dBm.
+Audio opening is explicit and cannot be inferred from a raw RSSI threshold.
+
+Stop/fault is terminal for this runtime instance. It cancels future normal
+operations, attempts only the qualified mute cleanup, and retains both the
+original error and mute-cleanup error. A mute request is not proof of RF-off.
+Repeated stop/step/old ACKs must not repeat cleanup or resume configuration.
+Active Runtime Drop makes one best-effort mute attempt; Idle or already
+terminal Drop is inert. Explicit stop is required to inspect cleanup errors.
+
+3. Spectrum adapter
+Ready(prepare_ticket) acknowledges an acquired, prepared RX context, not
+merely Runtime::new/start. Settled(tune_ticket) belongs to the current tune.
+The Engine itself ignores wrong tickets/phases; its timeout fires at equality.
+Engine u32 clock differences must remain below 2^31; normal wrap is supported.
+Do not reset the Engine ticket counter while old work can return. Keep a
+runtime generation or drain/drop all old callbacks before replacing Engine.
+Mode::Once SweepComplete makes is_running false: later Stop/PTT can return
+no Action::Cancel. UI close/PTT must still explicitly stop/mute the runtime.
+PTT release never restarts. New spectrum Start cannot revive terminal runtime.
+
+4. Required regression cases (behavioral safety properties)
+- PTT/qualification failure injected before each operation: no subsequent
+  configuration, tune, audio-open or sample publication; cleanup only.
+- PTT changes during fresh route read: no dependent route write.
+- PTT changes during RSSI read: result discarded, mute attempted once.
+- Fault at every successful execution prefix: exact successful prefix only,
+  original fault preserved, cleanup failure separately retained.
+- ACK before all startup operations, wrong ticket, old ticket after retune,
+  duplicate ACK: no early Listening and no RSSI reads.
+- Minimum settle boundary, deadline equality, u32 wrap and >=2^31/backwards
+  clock: deterministic acceptance/cancellation with no extra normal I/O.
+- Stop before start, during plan, startup delay, settle, Listening and after
+  a complete one-shot sweep: terminal behavior and bounded mute cleanup.
+- Failure while muting does not hide the triggering fault or allow restart.
+- Data and control traces contain only the reviewed A/B register/pin set;
+  no calibration persistence, TX activation, erase, reset or storage write.
+
+Sources reviewed: crates/spectrum/src/lib.rs, crates/receive/src/{lib,
+executor,transport}.rs, crates/rf-bus/src/lib.rs, crates/board-policy/src/lib.rs,
+research/receive-plan/EVIDENCE-RU.txt. This is a review specification, not
+hardware test evidence or a claim that all listed tests already passed.
+
+Completed independent source review:
+- crates/board-pins capability split consumes GPIOF once; masks are disjoint.
+- crates/rf-at32 engine/hardware/tests preserve unrelated GPIO fields, use
+  single-mask atomic latches, release DATA before turnaround, preload output
+  before mode enable, and keep PF8 LOW cleanup available after interlock failure.
+- Hardware bindings contain no GPIOB access, so PB6/PTT and PB11/TX selector
+  ownership are not duplicated. Fresh PTT remains external Interlock duty.
+- Use hardware into_bus constructors to bind the intended profile. Generic
+  Bus::new labels do not independently prove the physical pin profile.
+- No substantive blocker found in this static review. Exact board identity,
+  qualified delay, fresh physical interlock, supply/clock and RF inactivity
+  remain hardware prerequisites, outside these host tests.
+
+Prepared crates/receive/tests/runtime.rs: 18 tests, including each startup
+I/O failure prefix, PTT before each normal startup/sample/audio operation,
+PTT during RSSI/audio reads, terminal stop/drop/cleanup failures, stale ACK,
+full 10ms and minimum-settle delay after delayed post-write observation,
+clock wrap/deadline equality, and independent stock CSV comparisons.
+RSSI checks all1024 oracle rows. Squelch comparisons exclude software override;
+FM volume comparisons restrict raw bytes to the explicit new Volume API.
+Tests were not run by this reviewer; parent owns Cargo/build and result report.

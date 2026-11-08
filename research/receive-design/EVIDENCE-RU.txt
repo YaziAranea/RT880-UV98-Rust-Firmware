@@ -1,0 +1,164 @@
+Связь калибровок, выбора диапазона и RF-шины: ограниченная RX composition
+2026-11-08. Статический аудит и новый программный слой, без устройства.
+
+Источники и степень подтверждения
+
+Опорный application RT-880_Upgrade_V1_16_250915.nicsure.bin, base08002800,
+251904 байта, SHA256:
+eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc.
+Это родственный RT880 image, НЕ MCU-readback пользовательской UV98 Plus.
+Доказательства фрагментов: research/frequency/EVIDENCE-RU.txt,
+research/general/findings.txt, research/rf/RF-CONSUMPTION-AND-FORMULAS.txt,
+research/band-switch/EVIDENCE-RU.txt, research/rf-bus/EVIDENCE-RU.txt.
+Новый bounded oracle RX helpers ведётся отдельно в research/receive-plan.
+Чужой C driver не копировался; новый слой использует собственные pure crates.
+
+1. Честная цепочка данных
+
+Calibration::parse проверяет только4096байт и marker9A. Checksum неизвестна.
+Из неизменного блока берутся General32 и 15record*112; неизвестные bytes
+и весь tail остаются доступны. Применение калибровок не означает их запись.
+
+frequency::select(original_frequency_10hz) -> Selection {band,point}.
+Band = calibration.band(selection.band_index()). Частотная поправка:
+  corrected = (original_code + raw_u16_offset - 32768) mod2^32;
+  reg38 = low16; reg39 = high16, порядок именно38, затем39.
+И selector, и routing используют ИСХОДНЫЙ код, не corrected. После поправки
+повторный выбор диапазона не выполняется. Единица input — codeplug10Hz;
+stored offset и выходные слова не объявляются измеренной ошибкой в герцах.
+
+Обёртки стока:
+  08004B88 -> selector08012A30(mode0) -> writer0801E660 -> RF A/U201;
+  08003CCC -> selector08012A30(mode1) -> writer0801E6D4 -> RF B/U400.
+A/B здесь контекст чипа, не режим FM/AM и не право передачи.
+
+Point = floor((frequency-origin)/500000), capped15. Это прямой выбор,
+не интерполяция. Band::valid_points() описывает столбцы tuning UI; его нельзя
+использовать для ограничения stock selection. Читать point_raw из всех16bytes.
+Особенно важно сохранить shared endpoints, gap660..840MHz и повторныйslot13
+в последнем окне1240..1300MHz. Существующий selector slot14 не выбирает.
+За пределами распознанных окон новый API возвращает ошибку; старый RAMcache
+и встроенные ROM defaults не подставляются.
+
+Primary mode0 обновляет четыре noise/squelch RAMbytes из band tables+30/40/50/60h.
+Secondary mode1 их не обновляет. Его RX routing обычно также не меняется;
+наблюдённое исключение —400..480MHz. Поэтому B сейчас получает только38/39.
+
+2. Что включено в новый Plan
+
+crates/receive, uv98-receive, no_std, forbid unsafe, без heap/MMIO.
+Plan::primary(calibration,original_10hz,Width,level) валидирует всё доIO.
+Width принимает только известные raw0/1; level0..10. Модель ordinary path:
+стоковая overrideflag RAM200011F9 предполагается выключенной.
+
+Новый порядок7operations:
+  A43 width -> A38 -> A39 -> A4F noise -> A78 squelch -> freshA33 route -> PF0.
+Это НОВАЯ композиция отдельно исследованных фрагментов. Она не объявляется
+дословным полным trace функции08004BF0 или полной сменой RX-состояния.
+  width helper08004228: raw1 -> A43=4048, другиеraw ->3028;
+  calibration choice08004CD4..4CF6: raw0 ->wide, любыеnonzero ->narrow.
+Таким образом неизвестный raw2 имеет несогласованное поведение; typed Width
+его отвергает вместо молчаливой нормализации. Helper04228 адресуетA даже
+из secondary caller; его нельзя автоматически превратить в B43.
+
+SquelchWords: ROMlevel tables08026370/0802637B; helpers04ECC/04F60,
+каждыйthresholdbyte использует wrappingu8(cal+2+offset,cal-4+offset).
+Level0 всё равно формирует/пишет пороги. Отдельная программная логика
+открытого squelch и её подтверждение находятся вне этого плана.
+
+FrequencyPlan::new(calibration,Chip,frequency) содержит только два слова.
+Он не меняет routing, width, noise, PLL latch или внутреннее RX-enable.
+Даже дляB новый executor применяет initialA33 gate check — это явная новая
+integration policy, не имитация поведения secondary stock wrapper.
+
+3. Route и важность свежего чтения
+
+Stock helper08004FF0: readA33; value=(previous&FFCC)|rxmask; writeA33; PF0.
+Mask0033 отвечает выбранным RX outputs. TXbits3/2 СОХРАНЯЮТСЯ этим helper.
+Следовательно один receive_plan не отключает TX и не даёт KnownOff token.
+Неизвестные direction/highbits также сохраняются, не толкуются как safe.
+
+Executor сначала требует observational caller interlock, затем readA33.
+Если word&000C !=0, отказывает ДО любых записей плана. Не очищает TX bits.
+Initial word не кэшируется для будущего RMW. При PrimaryRoute снова:
+  interlock -> fresh readA33 -> TXbit check -> interlock -> writeA33.
+Повторный interlock после чтения позволяет отвергнуть изменение PTT между
+read/write. Check должен быть observational-only: он не может менять RF/relay
+registers/ownership и тем самым делать прочитанное слово устаревшим.
+Всё это требует exclusiveownership и отсутствия конкурирующих IRQ/DMA.
+InitialA33 check не охватывает PC15, bias/power или внутренние RF-блоки;
+actual board preparation/PTT/quiescence входят в отдельный caller contract.
+
+4. Executor API и ошибки
+
+Executor::new(io) и start(Plan)/start_frequency(FrequencyPlan) инертны.
+Произвольные публично собранные Operation slices принять нельзя: операции
+попадают сюда только через валидированные Plan с закрытыми полями.
+step() сначала выполняет precheck, затем за вызов не более одной planop.
+Возвращает Result<Progress,&Fault<E>>; fault хранит исходную ошибку,
+точный Attempt и число полностью завершённых logical operations.
+Нулевое число completed не доказывает отсутствие частично выполненной записи.
+
+Успех = Configured. Это не Settled, PLLLock, Ready, полученный сигнал или RF-off.
+После Configured явный новый start разрешён, снова с initialfreshread.
+Повторный step без start не перенастраивает радио.
+Любая Io/interlock/TXgate ошибка -> terminalFaulted. Сохранённая ошибка
+возвращается повторно без новогоIO; retry/recovery/io_mut/into_inner отсутствуют.
+cancel() -> terminalCancelled, без IO/rollback/shutdown. При существующем fault
+cancel не уничтожает причину. PTT/Stop должен отменять executor независимо
+от того, закончился ли spectrum sweep; отмена не означает выключение RF.
+Calls synchronous: отмена происходит между конечными traitcalls/steps.
+Произвольный зависающий backend этим чистым слоем прервать нельзя.
+
+5. RF-bus Pair adapter
+
+Pair::new(&mut BusA,&mut BusB,&mut BoardControl) проверяет Profile A/B безIO.
+Exclusiveborrows не дают другому foreground владельцу обращаться к Bus.
+При profile mismatch исходные Bus не drop и не исполняют cleanup.
+BoardControl реализует только caller interlock и set_antenna_pf0; готовой
+аппаратной реализации нет. PairError::A/B сохраняет rf_bus::Error целиком,
+включая первопричину и обе ошибки CS/DATA cleanup. Boarderror также сохраняется.
+
+RFbus — отдельная3wireшина, не SPI2 NOR и не SPI3 LCD:
+  A: PA8 CS, PF6 SCK, PC9 DATA; B: PC7 CS, PC8 SCK, PC6 DATA.
+Начальные режимы pins, питание, CS HIGH, DATAoutput дляA, временные параметры
+и valid sample сразу после SCKHIGH — контракты rf-bus, не работа Pair.
+Transport без аппаратного ACK не подтверждает применение слова чипом.
+Ошибка может оставить частичную запись; rf_bus пытается CS HIGH/DATAinput
+и poison. Executor не добавляет выдуманное «выключение RF» после этой ошибки.
+
+6. Что намеренно отсутствует
+
+- Полный startup/reset RF: write00=8000/0,37, gain tables, init33/34/35,
+  полная установкаfilters, tone/AFC/AGC и RAM/runtime flags.
+- Helper04FA0/03E3C с37=1F0F,delay,30=0200/BFF1 и иной internalenable.
+  Reg30/37/36 и TX helper05354 не входят в новый план.
+- Tone setup04388/4554, RX voice/audio/mute/PF8, volume reg48 и readreg1,
+  compander31/28/29, RXfilters54/55/75, TXfilter/MIC/deviation/power пути.
+- Override noise/squelch: при RAM11F9!=0 caller использует CFG B5/B4.
+- Полный RX decision loop, считывание RSSI, fresh sample после tuning,
+  lock/settling/relaydebounce, dBm calibration, audio-demodulation proof.
+- GPIO backend/ownership дляRF иPF0. Сейчас board-pins::split потребляет
+  GPIOA/B/C/D; GPIOF отсутствует. RF SCK PF6, relay PF0 и mute PF8 требуют
+  отдельного владельца и review; существующий ReservedPins этого не доказывает.
+- ExactUV98 bootloaderhandoff/MCUidentity/PCB/timing и физический RF прием.
+
+Важная связь с codeplug: Channel::operation_mode() — byte1 RX/TX flags,
+не FM/AM. Стоковые audio/modulation ветви используют channelbyte0.
+Bandvolume/MIC/CTCSS/DCS tuning fields разобраны форматом, но их потребление
+не установлено в reviewed paths; подставлять их вместоCFGaudio нельзя.
+Filter input при будущем переносе — General::filter_raw(), а не filter_code()&7.
+
+7. Проверяемая граница и следующий шаг
+
+Подготовлены8executor и6transport regressiontests: все18Io failure positions,
+cancel на каждойstepгранице, PTT после route-read, lateTXbits, freshRMWvalue,
+terminalerror preservation, explicitretune, Bfrequencyonly, actualrf-bus mock
+MSBframes/dispatch, profilemismatchinertness, cause+cleanupidentity.
+Cargo и факт прохождения выполняет/фиксирует основной build; этот файл сам
+не является свидетельством запуска тестов или аппаратного приёма.
+
+Следующий ограниченный milestone: сравнить новый plan/executor с новым
+machinecodeoracle, выполнить software mock composition и проверить отказ
+при каждом частичном шаге. Затем отдельно доказывать аппаратныйRF GPIO/clock/
+timing/preparedRXcontract. Перенос в Stage0 и запись в радио здесь не делались.

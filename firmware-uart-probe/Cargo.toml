@@ -1,0 +1,15 @@
+[package]
+name = "uv98-uart-probe"
+version = "0.1.2"
+edition = "2021"
+publish = false
+build = "build.rs"
+description = "Stackless UART observer application, preserving the existing loader"
+
+[[bin]]
+name = "uv98-uart-probe"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]

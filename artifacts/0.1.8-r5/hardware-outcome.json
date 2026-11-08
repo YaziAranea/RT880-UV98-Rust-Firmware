@@ -1,0 +1,148 @@
+{
+  "schema": 1,
+  "installed_image": "0.1.8-r5-build2",
+  "profile": "channel-tx",
+  "image_sha256": "bde124a26b800352b9c75b073548f114186241f7e57024dcb5f22c3786ed5307",
+  "transfer_status": "transfer_acknowledged",
+  "acked_blocks": 246,
+  "ack_count": 250,
+  "final_ack_received": true,
+  "flash_port_closed": true,
+  "wire_sha_matches_oracle": true,
+  "capture_status": "capture_complete",
+  "capture_port_closed": true,
+  "capture_bytes": 2577,
+  "valid_records": 54,
+  "rejected_records": 0,
+  "ready_observed": true,
+  "onboard_calibration_matches_preserved_sha": true,
+  "calibration_sha_expected": "8906c3d9847eeeefe0ee6aad6aa4302949bd5e5984f3c64ed02edb8cf6fb0ff7",
+  "new_calibration_raw_dump_read": false,
+  "lcd_ctrl1": [
+    49988
+  ],
+  "timing_windows": [
+    {
+      "max_loop_us": 16430,
+      "max_render_us": 5177,
+      "rows": 200
+    },
+    {
+      "max_loop_us": 7049,
+      "max_render_us": 4258,
+      "rows": 35
+    },
+    {
+      "max_loop_us": 7050,
+      "max_render_us": 4261,
+      "rows": 70
+    },
+    {
+      "max_loop_us": 7049,
+      "max_render_us": 4261,
+      "rows": 70
+    },
+    {
+      "max_loop_us": 7051,
+      "max_render_us": 4262,
+      "rows": 56
+    },
+    {
+      "max_loop_us": 7050,
+      "max_render_us": 4259,
+      "rows": 70
+    },
+    {
+      "max_loop_us": 7054,
+      "max_render_us": 4263,
+      "rows": 63
+    },
+    {
+      "max_loop_us": 7054,
+      "max_render_us": 4266,
+      "rows": 56
+    }
+  ],
+  "work_windows": [
+    {
+      "loop_count": 673,
+      "active_loop_us": 1886017,
+      "max_redraw_backlog_ms": 97,
+      "mean_active_loop_us": 2802.4
+    },
+    {
+      "loop_count": 710,
+      "active_loop_us": 1876332,
+      "max_redraw_backlog_ms": 7,
+      "mean_active_loop_us": 2642.72
+    },
+    {
+      "loop_count": 703,
+      "active_loop_us": 1876169,
+      "max_redraw_backlog_ms": 7,
+      "mean_active_loop_us": 2668.8
+    },
+    {
+      "loop_count": 703,
+      "active_loop_us": 1876150,
+      "max_redraw_backlog_ms": 7,
+      "mean_active_loop_us": 2668.78
+    },
+    {
+      "loop_count": 706,
+      "active_loop_us": 1875101,
+      "max_redraw_backlog_ms": 7,
+      "mean_active_loop_us": 2655.95
+    },
+    {
+      "loop_count": 703,
+      "active_loop_us": 1876184,
+      "max_redraw_backlog_ms": 7,
+      "mean_active_loop_us": 2668.83
+    },
+    {
+      "loop_count": 705,
+      "active_loop_us": 1876912,
+      "max_redraw_backlog_ms": 7,
+      "mean_active_loop_us": 2662.29
+    },
+    {
+      "loop_count": 707,
+      "active_loop_us": 1877730,
+      "max_redraw_backlog_ms": 7,
+      "mean_active_loop_us": 2655.91
+    }
+  ],
+  "timing_limit": "Processing time before heartbeat UART and idle; not key-to-photon or measured RF release time. Timing quota completed before user navigation in this capture.",
+  "last_radio_record": {
+    "kind": "record",
+    "byte_offset": 2530,
+    "bytes": 47,
+    "received_monotonic_ms": 42893.655,
+    "code": 368,
+    "code_hex": "0x00000170",
+    "label": "radio_state_frequency_power",
+    "details": [
+      1,
+      43020000,
+      0
+    ],
+    "details_hex": [
+      "0x00000001",
+      "0x02906EE0",
+      "0x00000000"
+    ],
+    "checksum_valid": true,
+    "decoded_details": {
+      "state_code": 1,
+      "frequency_10hz": 43020000,
+      "power_code": 0
+    }
+  },
+  "tx_transmitting_state_observed": false,
+  "tx_shutdown_physically_verified": false,
+  "voice_test_on_r5_user_confirmed": false,
+  "ui_latency_on_r5_user_accepted": false,
+  "absence_of_later_frames_does_not_establish_hang_or_usb_failure": true,
+  "previous_voice_evidence": "User confirmed own voice returned by EXO repeater on r4."
+}

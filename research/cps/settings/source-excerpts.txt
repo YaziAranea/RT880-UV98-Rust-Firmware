@@ -1,0 +1,503 @@
+Source MainForm.cs SHA256 1096b3c280d1d279b321f504c936ffb3fc5553123ecd110d4505a7e77bd7234c
+Targeted static excerpts; no source executable was run.
+
+Lines 1877..1885
+1877: 	public string[] CFG_ONOFF = new string[6] { "关闭", "开启", "關閉", "開啓", "Off", "On" };
+1878: 
+1879: 	public string[] CFG_LOCK = new string[6] { "解锁", "锁定", "解鎖", "鎖定", "Unlock", "Lock" };
+1880: 
+1881: 	public string[] CFG_SCANMODE = new string[9] { "载波模式", "时间模式", "搜索模式", "載波模式", "時間模式", "搜索模式", "CO", "TO", "SE" };
+1882: 
+1883: 	public string[] CFG_SCANDIR = new string[6] { "向上", "向下", "向上", "向下", "Up", "Down" };
+1884: 
+1885: 	public string[] CFG_SCANCH = new string[6] { "初始信道", "当前信道", "初始信道", "當前信道", "Original CH", "Current CH" };
+
+Lines 4707..4718
+4707: 		this.cboxMultiStandby.Size = new System.Drawing.Size(110, 25);
+4708: 		this.cboxMultiStandby.TabIndex = 585;
+4709: 		this.cboxKeyLed.BackColor = System.Drawing.Color.White;
+4710: 		this.cboxKeyLed.DropDownHeight = 100;
+4711: 		this.cboxKeyLed.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+4712: 		this.cboxKeyLed.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+4713: 		this.cboxKeyLed.FormattingEnabled = true;
+4714: 		this.cboxKeyLed.IntegralHeight = false;
+4715: 		this.cboxKeyLed.Items.AddRange(new object[2] { "关闭", "开启" });
+4716: 		this.cboxKeyLed.Location = new System.Drawing.Point(210, 50);
+4717: 		this.cboxKeyLed.Name = "cboxKeyLed";
+4718: 		this.cboxKeyLed.Size = new System.Drawing.Size(110, 25);
+
+Lines 4895..4910
+4895: 		this.cboxScanDwell.BackColor = System.Drawing.Color.White;
+4896: 		this.cboxScanDwell.DropDownHeight = 100;
+4897: 		this.cboxScanDwell.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+4898: 		this.cboxScanDwell.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+4899: 		this.cboxScanDwell.FormattingEnabled = true;
+4900: 		this.cboxScanDwell.IntegralHeight = false;
+4901: 		this.cboxScanDwell.Items.AddRange(new object[31]
+4902: 		{
+4903: 			"0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+4904: 			"10", "11", "12", "13", "14", "15", "16", "17", "18", "19",
+4905: 			"20", "21", "22", "23", "24", "25", "26", "27", "28", "29",
+4906: 			"30"
+4907: 		});
+4908: 		this.cboxScanDwell.Location = new System.Drawing.Point(530, 155);
+4909: 		this.cboxScanDwell.Name = "cboxScanDwell";
+4910: 		this.cboxScanDwell.Size = new System.Drawing.Size(110, 25);
+
+Lines 4918..4927
+4918: 		this.cboxSaveStart.Items.AddRange(new object[43]
+4919: 		{
+4920: 			"0", "5", "10", "15", "30", "45", "60", "75", "90", "105",
+4921: 			"120", "135", "150", "165", "180", "195", "210", "225", "240", "255",
+4922: 			"270", "285", "300", "315", "330", "345", "360", "375", "390", "405",
+4923: 			"420", "435", "450", "465", "480", "495", "510", "525", "540", "555",
+4924: 			"570", "585", "600"
+4925: 		});
+4926: 		this.cboxSaveStart.Location = new System.Drawing.Point(210, 330);
+4927: 		this.cboxSaveStart.Name = "cboxSaveStart";
+
+Lines 4929..4959
+4929: 		this.cboxSaveStart.TabIndex = 508;
+4930: 		this.cboxLight.BackColor = System.Drawing.Color.White;
+4931: 		this.cboxLight.DropDownHeight = 100;
+4932: 		this.cboxLight.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+4933: 		this.cboxLight.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+4934: 		this.cboxLight.FormattingEnabled = true;
+4935: 		this.cboxLight.IntegralHeight = false;
+4936: 		this.cboxLight.Items.AddRange(new object[5] { "0", "1", "2", "3", "4" });
+4937: 		this.cboxLight.Location = new System.Drawing.Point(210, 225);
+4938: 		this.cboxLight.Name = "cboxLight";
+4939: 		this.cboxLight.Size = new System.Drawing.Size(110, 25);
+4940: 		this.cboxLight.TabIndex = 506;
+4941: 		this.cboxVoicePrompt.BackColor = System.Drawing.Color.White;
+4942: 		this.cboxVoicePrompt.DropDownHeight = 100;
+4943: 		this.cboxVoicePrompt.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+4944: 		this.cboxVoicePrompt.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+4945: 		this.cboxVoicePrompt.FormattingEnabled = true;
+4946: 		this.cboxVoicePrompt.IntegralHeight = false;
+4947: 		this.cboxVoicePrompt.Items.AddRange(new object[2] { "关闭", "开启" });
+4948: 		this.cboxVoicePrompt.Location = new System.Drawing.Point(210, 85);
+4949: 		this.cboxVoicePrompt.Name = "cboxVoicePrompt";
+4950: 		this.cboxVoicePrompt.Size = new System.Drawing.Size(110, 25);
+4951: 		this.cboxVoicePrompt.TabIndex = 8;
+4952: 		this.cboxKeyBeep.BackColor = System.Drawing.Color.White;
+4953: 		this.cboxKeyBeep.DropDownHeight = 100;
+4954: 		this.cboxKeyBeep.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+4955: 		this.cboxKeyBeep.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+4956: 		this.cboxKeyBeep.FormattingEnabled = true;
+4957: 		this.cboxKeyBeep.IntegralHeight = false;
+4958: 		this.cboxKeyBeep.Items.AddRange(new object[2] { "关闭", "开启" });
+4959: 		this.cboxKeyBeep.Location = new System.Drawing.Point(210, 120);
+
+Lines 4962..5011
+4962: 		this.cboxKeyBeep.TabIndex = 9;
+4963: 		this.cboxKeyLock.BackColor = System.Drawing.Color.White;
+4964: 		this.cboxKeyLock.DropDownHeight = 100;
+4965: 		this.cboxKeyLock.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+4966: 		this.cboxKeyLock.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+4967: 		this.cboxKeyLock.FormattingEnabled = true;
+4968: 		this.cboxKeyLock.IntegralHeight = false;
+4969: 		this.cboxKeyLock.Items.AddRange(new object[2] { "解锁", "锁定" });
+4970: 		this.cboxKeyLock.Location = new System.Drawing.Point(210, 155);
+4971: 		this.cboxKeyLock.Name = "cboxKeyLock";
+4972: 		this.cboxKeyLock.Size = new System.Drawing.Size(110, 25);
+4973: 		this.cboxKeyLock.TabIndex = 10;
+4974: 		this.cboxScanReturn.BackColor = System.Drawing.Color.White;
+4975: 		this.cboxScanReturn.DropDownHeight = 100;
+4976: 		this.cboxScanReturn.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+4977: 		this.cboxScanReturn.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+4978: 		this.cboxScanReturn.FormattingEnabled = true;
+4979: 		this.cboxScanReturn.IntegralHeight = false;
+4980: 		this.cboxScanReturn.Items.AddRange(new object[2] { "初始信道", "当前信道" });
+4981: 		this.cboxScanReturn.Location = new System.Drawing.Point(530, 120);
+4982: 		this.cboxScanReturn.Name = "cboxScanReturn";
+4983: 		this.cboxScanReturn.Size = new System.Drawing.Size(110, 25);
+4984: 		this.cboxScanReturn.TabIndex = 474;
+4985: 		this.cboxLockTimer.BackColor = System.Drawing.Color.White;
+4986: 		this.cboxLockTimer.DropDownHeight = 100;
+4987: 		this.cboxLockTimer.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+4988: 		this.cboxLockTimer.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+4989: 		this.cboxLockTimer.FormattingEnabled = true;
+4990: 		this.cboxLockTimer.IntegralHeight = false;
+4991: 		this.cboxLockTimer.Items.AddRange(new object[43]
+4992: 		{
+4993: 			"关闭", "5", "10", "15", "30", "45", "60", "75", "90", "105",
+4994: 			"120", "135", "150", "165", "180", "195", "210", "225", "240", "255",
+4995: 			"270", "285", "300", "315", "330", "345", "360", "375", "390", "405",
+4996: 			"420", "435", "450", "465", "480", "495", "510", "525", "540", "555",
+4997: 			"570", "585", "600"
+4998: 		});
+4999: 		this.cboxLockTimer.Location = new System.Drawing.Point(210, 190);
+5000: 		this.cboxLockTimer.Name = "cboxLockTimer";
+5001: 		this.cboxLockTimer.Size = new System.Drawing.Size(110, 25);
+5002: 		this.cboxLockTimer.TabIndex = 11;
+5003: 		this.cboxScanDir.BackColor = System.Drawing.Color.White;
+5004: 		this.cboxScanDir.DropDownHeight = 100;
+5005: 		this.cboxScanDir.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+5006: 		this.cboxScanDir.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+5007: 		this.cboxScanDir.FormattingEnabled = true;
+5008: 		this.cboxScanDir.IntegralHeight = false;
+5009: 		this.cboxScanDir.Items.AddRange(new object[2] { "向上", "向下" });
+5010: 		this.cboxScanDir.Location = new System.Drawing.Point(530, 85);
+5011: 		this.cboxScanDir.Name = "cboxScanDir";
+
+Lines 5012..5095
+5012: 		this.cboxScanDir.Size = new System.Drawing.Size(110, 25);
+5013: 		this.cboxScanDir.TabIndex = 472;
+5014: 		this.cboxStep.BackColor = System.Drawing.Color.White;
+5015: 		this.cboxStep.DropDownHeight = 100;
+5016: 		this.cboxStep.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+5017: 		this.cboxStep.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+5018: 		this.cboxStep.FormattingEnabled = true;
+5019: 		this.cboxStep.IntegralHeight = false;
+5020: 		this.cboxStep.Items.AddRange(new object[14]
+5021: 		{
+5022: 			"0.25K", "1.25K", "2.5K", "5K", "6.25K", "10K", "12.5K", "20K", "25K", "50K",
+5023: 			"100K", "500K", "1M", "5M"
+5024: 		});
+5025: 		this.cboxStep.Location = new System.Drawing.Point(530, 435);
+5026: 		this.cboxStep.Name = "cboxStep";
+5027: 		this.cboxStep.Size = new System.Drawing.Size(110, 25);
+5028: 		this.cboxStep.TabIndex = 468;
+5029: 		this.cboxLEDTimer.BackColor = System.Drawing.Color.White;
+5030: 		this.cboxLEDTimer.DropDownHeight = 100;
+5031: 		this.cboxLEDTimer.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+5032: 		this.cboxLEDTimer.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+5033: 		this.cboxLEDTimer.FormattingEnabled = true;
+5034: 		this.cboxLEDTimer.IntegralHeight = false;
+5035: 		this.cboxLEDTimer.Items.AddRange(new object[43]
+5036: 		{
+5037: 			"关闭", "5", "10", "15", "30", "45", "60", "75", "90", "105",
+5038: 			"120", "135", "150", "165", "180", "195", "210", "225", "240", "255",
+5039: 			"270", "285", "300", "315", "330", "345", "360", "375", "390", "405",
+5040: 			"420", "435", "450", "465", "480", "495", "510", "525", "540", "555",
+5041: 			"570", "585", "600"
+5042: 		});
+5043: 		this.cboxLEDTimer.Location = new System.Drawing.Point(210, 260);
+5044: 		this.cboxLEDTimer.Name = "cboxLEDTimer";
+5045: 		this.cboxLEDTimer.Size = new System.Drawing.Size(110, 25);
+5046: 		this.cboxLEDTimer.TabIndex = 460;
+5047: 		this.cboxScanMode.BackColor = System.Drawing.Color.White;
+5048: 		this.cboxScanMode.DropDownHeight = 100;
+5049: 		this.cboxScanMode.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+5050: 		this.cboxScanMode.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+5051: 		this.cboxScanMode.FormattingEnabled = true;
+5052: 		this.cboxScanMode.IntegralHeight = false;
+5053: 		this.cboxScanMode.Items.AddRange(new object[3] { "CO", "TO", "SE" });
+5054: 		this.cboxScanMode.Location = new System.Drawing.Point(530, 50);
+5055: 		this.cboxScanMode.Name = "cboxScanMode";
+5056: 		this.cboxScanMode.Size = new System.Drawing.Size(110, 25);
+5057: 		this.cboxScanMode.TabIndex = 470;
+5058: 		this.cboxSaveMode.BackColor = System.Drawing.Color.White;
+5059: 		this.cboxSaveMode.DropDownHeight = 100;
+5060: 		this.cboxSaveMode.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+5061: 		this.cboxSaveMode.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+5062: 		this.cboxSaveMode.FormattingEnabled = true;
+5063: 		this.cboxSaveMode.IntegralHeight = false;
+5064: 		this.cboxSaveMode.Items.AddRange(new object[4] { "关闭", "1:1", "1:2", "1:3" });
+5065: 		this.cboxSaveMode.Location = new System.Drawing.Point(210, 295);
+5066: 		this.cboxSaveMode.Name = "cboxSaveMode";
+5067: 		this.cboxSaveMode.Size = new System.Drawing.Size(110, 25);
+5068: 		this.cboxSaveMode.TabIndex = 17;
+5069: 		this.cboxTXPri.BackColor = System.Drawing.Color.White;
+5070: 		this.cboxTXPri.DropDownHeight = 100;
+5071: 		this.cboxTXPri.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+5072: 		this.cboxTXPri.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+5073: 		this.cboxTXPri.FormattingEnabled = true;
+5074: 		this.cboxTXPri.IntegralHeight = false;
+5075: 		this.cboxTXPri.Items.AddRange(new object[2] { "编辑", "繁忙" });
+5076: 		this.cboxTXPri.Location = new System.Drawing.Point(530, 225);
+5077: 		this.cboxTXPri.Name = "cboxTXPri";
+5078: 		this.cboxTXPri.Size = new System.Drawing.Size(110, 25);
+5079: 		this.cboxTXPri.TabIndex = 466;
+5080: 		this.cboxMenuTimer.BackColor = System.Drawing.Color.White;
+5081: 		this.cboxMenuTimer.DropDownHeight = 100;
+5082: 		this.cboxMenuTimer.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+5083: 		this.cboxMenuTimer.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+5084: 		this.cboxMenuTimer.FormattingEnabled = true;
+5085: 		this.cboxMenuTimer.IntegralHeight = false;
+5086: 		this.cboxMenuTimer.Items.AddRange(new object[43]
+5087: 		{
+5088: 			"关闭", "5", "10", "15", "30", "45", "60", "75", "90", "105",
+5089: 			"120", "135", "150", "165", "180", "195", "210", "225", "240", "255",
+5090: 			"270", "285", "300", "315", "330", "345", "360", "375", "390", "405",
+5091: 			"420", "435", "450", "465", "480", "495", "510", "525", "540", "555",
+5092: 			"570", "585", "600"
+5093: 		});
+5094: 		this.cboxMenuTimer.Location = new System.Drawing.Point(210, 365);
+5095: 		this.cboxMenuTimer.Name = "cboxMenuTimer";
+
+Lines 5562..5584
+5562: 		this.label191.Location = new System.Drawing.Point(402, 159);
+5563: 		this.label191.Name = "label191";
+5564: 		this.label191.Size = new System.Drawing.Size(125, 17);
+5565: 		this.label191.TabIndex = 604;
+5566: 		this.label191.Text = "Scan Dwell Timer :";
+5567: 		this.label191.Visible = false;
+5568: 		this.label192.AutoSize = true;
+5569: 		this.label192.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+5570: 		this.label192.Location = new System.Drawing.Point(85, 334);
+5571: 		this.label192.Name = "label192";
+5572: 		this.label192.Size = new System.Drawing.Size(122, 17);
+5573: 		this.label192.TabIndex = 602;
+5574: 		this.label192.Text = "Save Start Timer :";
+5575: 		this.label192.Visible = false;
+5576: 		this.label193.AutoSize = true;
+5577: 		this.label193.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+5578: 		this.label193.Location = new System.Drawing.Point(93, 229);
+5579: 		this.label193.Name = "label193";
+5580: 		this.label193.Size = new System.Drawing.Size(114, 17);
+5581: 		this.label193.TabIndex = 601;
+5582: 		this.label193.Text = "LCD Brightness :";
+5583: 		this.label193.Visible = false;
+5584: 		this.label194.AutoSize = true;
+
+Lines 5618..5624
+5618: 		this.label198.Location = new System.Drawing.Point(93, 194);
+5619: 		this.label198.Name = "label198";
+5620: 		this.label198.Size = new System.Drawing.Size(114, 17);
+5621: 		this.label198.TabIndex = 589;
+5622: 		this.label198.Text = "Key Lock Timer :";
+5623: 		this.label198.Visible = false;
+5624: 		this.label199.AutoSize = true;
+
+Lines 5666..5672
+5666: 		this.label205.Location = new System.Drawing.Point(90, 368);
+5667: 		this.label205.Name = "label205";
+5668: 		this.label205.Size = new System.Drawing.Size(117, 17);
+5669: 		this.label205.TabIndex = 594;
+5670: 		this.label205.Text = "Menu Exit Timer :";
+5671: 		this.label205.Visible = false;
+5672: 		this.PIC_BASIC_1_CN.Image = (System.Drawing.Image)resources.GetObject("PIC_BASIC_1_CN.Image");
+
+Lines 5966..5989
+5966: 		this.numRXDAC_AM.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+5967: 		this.numRXDAC_AM.Location = new System.Drawing.Point(540, 180);
+5968: 		this.numRXDAC_AM.Maximum = new decimal(new int[4] { 15, 0, 0, 0 });
+5969: 		this.numRXDAC_AM.Name = "numRXDAC_AM";
+5970: 		this.numRXDAC_AM.Size = new System.Drawing.Size(110, 23);
+5971: 		this.numRXDAC_AM.TabIndex = 584;
+5972: 		this.numRXDAC_AM.TextAlign = System.Windows.Forms.HorizontalAlignment.Center;
+5973: 		this.numRXDAC_AM.Value = new decimal(new int[4] { 15, 0, 0, 0 });
+5974: 		this.numRXSPK_AM.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+5975: 		this.numRXSPK_AM.Location = new System.Drawing.Point(540, 145);
+5976: 		this.numRXSPK_AM.Maximum = new decimal(new int[4] { 63, 0, 0, 0 });
+5977: 		this.numRXSPK_AM.Name = "numRXSPK_AM";
+5978: 		this.numRXSPK_AM.Size = new System.Drawing.Size(110, 23);
+5979: 		this.numRXSPK_AM.TabIndex = 582;
+5980: 		this.numRXSPK_AM.TextAlign = System.Windows.Forms.HorizontalAlignment.Center;
+5981: 		this.numRXSPK_AM.Value = new decimal(new int[4] { 55, 0, 0, 0 });
+5982: 		this.numRXDAC.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+5983: 		this.numRXDAC.Location = new System.Drawing.Point(540, 110);
+5984: 		this.numRXDAC.Maximum = new decimal(new int[4] { 15, 0, 0, 0 });
+5985: 		this.numRXDAC.Name = "numRXDAC";
+5986: 		this.numRXDAC.Size = new System.Drawing.Size(110, 23);
+5987: 		this.numRXDAC.TabIndex = 580;
+5988: 		this.numRXDAC.TextAlign = System.Windows.Forms.HorizontalAlignment.Center;
+5989: 		this.numRXDAC.Value = new decimal(new int[4] { 15, 0, 0, 0 });
+
+Lines 6054..6061
+6054: 		this.numRXSPK.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+6055: 		this.numRXSPK.Location = new System.Drawing.Point(540, 75);
+6056: 		this.numRXSPK.Maximum = new decimal(new int[4] { 63, 0, 0, 0 });
+6057: 		this.numRXSPK.Name = "numRXSPK";
+6058: 		this.numRXSPK.Size = new System.Drawing.Size(110, 23);
+6059: 		this.numRXSPK.TabIndex = 563;
+6060: 		this.numRXSPK.TextAlign = System.Windows.Forms.HorizontalAlignment.Center;
+6061: 		this.numRXSPK.Value = new decimal(new int[4] { 55, 0, 0, 0 });
+
+Lines 6104..6116
+6104: 		this.cboxVOXDelay.BackColor = System.Drawing.Color.White;
+6105: 		this.cboxVOXDelay.DropDownHeight = 100;
+6106: 		this.cboxVOXDelay.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+6107: 		this.cboxVOXDelay.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+6108: 		this.cboxVOXDelay.FormattingEnabled = true;
+6109: 		this.cboxVOXDelay.IntegralHeight = false;
+6110: 		this.cboxVOXDelay.Items.AddRange(new object[11]
+6111: 		{
+6112: 			"0", "0.5", "1", "1.5", "2", "2.5", "3", "3.5", "4", "4.5",
+6113: 			"5"
+6114: 		});
+6115: 		this.cboxVOXDelay.Location = new System.Drawing.Point(210, 250);
+6116: 		this.cboxVOXDelay.Name = "cboxVOXDelay";
+
+Lines 6513..6519
+6513: 		this.label169.Location = new System.Drawing.Point(99, 254);
+6514: 		this.label169.Name = "label169";
+6515: 		this.label169.Size = new System.Drawing.Size(108, 17);
+6516: 		this.label169.TabIndex = 550;
+6517: 		this.label169.Text = "VOX Delay (S) :";
+6518: 		this.label169.Visible = false;
+6519: 		this.label168.AutoSize = true;
+
+Lines 6637..6671
+6637: 		this.label37.Visible = false;
+6638: 		this.label35.AutoSize = true;
+6639: 		this.label35.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f);
+6640: 		this.label35.Location = new System.Drawing.Point(429, 183);
+6641: 		this.label35.Name = "label35";
+6642: 		this.label35.Size = new System.Drawing.Size(108, 17);
+6643: 		this.label35.TabIndex = 583;
+6644: 		this.label35.Text = "DAC Gain(AM) :";
+6645: 		this.label35.Visible = false;
+6646: 		this.label36.AutoSize = true;
+6647: 		this.label36.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f);
+6648: 		this.label36.Location = new System.Drawing.Point(430, 148);
+6649: 		this.label36.Name = "label36";
+6650: 		this.label36.Size = new System.Drawing.Size(107, 17);
+6651: 		this.label36.TabIndex = 581;
+6652: 		this.label36.Text = "SPK Gain(AM) :";
+6653: 		this.label36.Visible = false;
+6654: 		this.label34.AutoSize = true;
+6655: 		this.label34.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f);
+6656: 		this.label34.Location = new System.Drawing.Point(430, 113);
+6657: 		this.label34.Name = "label34";
+6658: 		this.label34.Size = new System.Drawing.Size(107, 17);
+6659: 		this.label34.TabIndex = 579;
+6660: 		this.label34.Text = "DAC Gain(FM) :";
+6661: 		this.label34.Visible = false;
+6662: 		this.label162.AutoSize = true;
+6663: 		this.label162.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f);
+6664: 		this.label162.Location = new System.Drawing.Point(431, 78);
+6665: 		this.label162.Name = "label162";
+6666: 		this.label162.Size = new System.Drawing.Size(106, 17);
+6667: 		this.label162.TabIndex = 536;
+6668: 		this.label162.Text = "SPK Gain(FM) :";
+6669: 		this.label162.Visible = false;
+6670: 		this.label61.AutoSize = true;
+6671: 		this.label61.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f);
+
+Lines 8191..8201
+8191: 		this.cboxFMStandby.BackColor = System.Drawing.Color.White;
+8192: 		this.cboxFMStandby.DropDownHeight = 100;
+8193: 		this.cboxFMStandby.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+8194: 		this.cboxFMStandby.Font = new System.Drawing.Font("Microsoft Sans Serif", 10.5f, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, 0);
+8195: 		this.cboxFMStandby.FormattingEnabled = true;
+8196: 		this.cboxFMStandby.IntegralHeight = false;
+8197: 		this.cboxFMStandby.Items.AddRange(new object[2] { "关闭", "开启" });
+8198: 		this.cboxFMStandby.Location = new System.Drawing.Point(440, 35);
+8199: 		this.cboxFMStandby.Name = "cboxFMStandby";
+8200: 		this.cboxFMStandby.Size = new System.Drawing.Size(110, 25);
+8201: 		this.cboxFMStandby.TabIndex = 496;
+
+Lines 12152..12165
+12152: 			@string = @string.Replace("\0", "");
+12153: 			txtName.Text = @string;
+12154: 			cboxVoicePrompt.SelectedIndex = array[92];
+12155: 			cboxKeyBeep.SelectedIndex = array[93];
+12156: 			cboxKeyLock.SelectedIndex = array[94];
+12157: 			cboxLockTimer.SelectedIndex = array[95];
+12158: 			cboxKeyLed.SelectedIndex = array[96];
+12159: 			cboxLight.SelectedIndex = array[97];
+12160: 			cboxLEDTimer.SelectedIndex = array[98];
+12161: 			cboxSaveMode.SelectedIndex = array[99];
+12162: 			cboxSaveStart.SelectedIndex = array[100];
+12163: 			cboxMenuTimer.SelectedIndex = array[101];
+12164: 			cboxTXPri.SelectedIndex = array[102];
+12165: 			cboxTalkaround.SelectedIndex = array[103];
+
+Lines 12212..12223
+12212: 			cboxMainRange.SelectedIndex = array[117];
+12213: 			cboxMultiStandby.SelectedIndex = array[118];
+12214: 			cboxUVRepeat.SelectedIndex = array[119];
+12215: 			cboxStep.SelectedIndex = array[120];
+12216: 			cboxWorkModeA.SelectedIndex = array[121];
+12217: 			cboxDisModeA.SelectedIndex = array[122];
+12218: 			numZoneOfA.Value = array[123] + 1;
+12219: 			num = array[125];
+12220: 			num <<= 8;
+12221: 			num += array[124];
+12222: 			numCHA.Value = num + 1;
+12223: 			cboxWorkModeB.SelectedIndex = array[126];
+
+Lines 12271..12298
+12271: 			num += array[154];
+12272: 			numEnd4.Value = num;
+12273: 			cboxScanDir.SelectedIndex = array[156];
+12274: 			cboxScanMode.SelectedIndex = array[157];
+12275: 			cboxScanReturn.SelectedIndex = array[158];
+12276: 			cboxScanDwell.SelectedIndex = array[159];
+12277: 			cboxVoiceDet.SelectedIndex = array[160];
+12278: 			cboxRSSIDet.SelectedIndex = array[161];
+12279: 			num = array[163];
+12280: 			num <<= 8;
+12281: 			num += array[162];
+12282: 			numTone.Value = num;
+12283: 			numSQ.Value = array[164];
+12284: 			cboxTXStartBeep.SelectedIndex = array[165];
+12285: 			cboxRogerBeep.SelectedIndex = array[166];
+12286: 			cboxVOX.SelectedIndex = array[167];
+12287: 			numVOXTH.Value = array[168];
+12288: 			cboxVOXDelay.SelectedIndex = array[169];
+12289: 			cboxDetectRange.SelectedIndex = array[170];
+12290: 			cboxRelayDelay.SelectedIndex = array[171];
+12291: 			cboxNOAA.SelectedIndex = array[172];
+12292: 			numTXMIC.Value = array[173];
+12293: 			numRXSPK.Value = array[174];
+12294: 			numRXDAC.Value = array[175];
+12295: 			numRXSPK_AM.Value = array[176];
+12296: 			numRXDAC_AM.Value = array[177];
+12297: 			numGlitch.Value = array[178];
+12298: 			cboxLSRX.SelectedIndex = array[179];
+
+Lines 12689..12702
+12689: 			}
+12690: 		}
+12691: 		bufCFG[92] = (byte)cboxVoicePrompt.SelectedIndex;
+12692: 		bufCFG[93] = (byte)cboxKeyBeep.SelectedIndex;
+12693: 		bufCFG[94] = (byte)cboxKeyLock.SelectedIndex;
+12694: 		bufCFG[95] = (byte)cboxLockTimer.SelectedIndex;
+12695: 		bufCFG[96] = (byte)cboxKeyLed.SelectedIndex;
+12696: 		bufCFG[97] = (byte)cboxLight.SelectedIndex;
+12697: 		bufCFG[98] = (byte)cboxLEDTimer.SelectedIndex;
+12698: 		bufCFG[99] = (byte)cboxSaveMode.SelectedIndex;
+12699: 		bufCFG[100] = (byte)cboxSaveStart.SelectedIndex;
+12700: 		bufCFG[101] = (byte)cboxMenuTimer.SelectedIndex;
+12701: 		bufCFG[102] = (byte)cboxTXPri.SelectedIndex;
+12702: 		bufCFG[103] = (byte)cboxTalkaround.SelectedIndex;
+
+Lines 12745..12753
+12745: 		}
+12746: 		bufCFG[116] = (byte)cboxWorkRange.SelectedIndex;
+12747: 		bufCFG[117] = (byte)cboxMainRange.SelectedIndex;
+12748: 		bufCFG[118] = (byte)cboxMultiStandby.SelectedIndex;
+12749: 		bufCFG[119] = (byte)cboxUVRepeat.SelectedIndex;
+12750: 		bufCFG[120] = (byte)cboxStep.SelectedIndex;
+12751: 		bufCFG[121] = (byte)cboxWorkModeA.SelectedIndex;
+12752: 		bufCFG[122] = (byte)cboxDisModeA.SelectedIndex;
+12753: 		bufCFG[123] = (byte)(numZoneOfA.Value - 1m);
+
+Lines 12796..12821
+12796: 		bufCFG[155] = (byte)(num >> 8);
+12797: 		bufCFG[156] = (byte)cboxScanDir.SelectedIndex;
+12798: 		bufCFG[157] = (byte)cboxScanMode.SelectedIndex;
+12799: 		bufCFG[158] = (byte)cboxScanReturn.SelectedIndex;
+12800: 		bufCFG[159] = (byte)cboxScanDwell.SelectedIndex;
+12801: 		bufCFG[160] = (byte)cboxVoiceDet.SelectedIndex;
+12802: 		bufCFG[161] = (byte)cboxRSSIDet.SelectedIndex;
+12803: 		num = (int)numTone.Value;
+12804: 		bufCFG[162] = (byte)((uint)num & 0xFFu);
+12805: 		bufCFG[163] = (byte)(num >> 8);
+12806: 		bufCFG[164] = (byte)numSQ.Value;
+12807: 		bufCFG[165] = (byte)cboxTXStartBeep.SelectedIndex;
+12808: 		bufCFG[166] = (byte)cboxRogerBeep.SelectedIndex;
+12809: 		bufCFG[167] = (byte)cboxVOX.SelectedIndex;
+12810: 		bufCFG[168] = (byte)numVOXTH.Value;
+12811: 		bufCFG[169] = (byte)cboxVOXDelay.SelectedIndex;
+12812: 		bufCFG[170] = (byte)cboxDetectRange.SelectedIndex;
+12813: 		bufCFG[171] = (byte)cboxRelayDelay.SelectedIndex;
+12814: 		bufCFG[172] = (byte)cboxNOAA.SelectedIndex;
+12815: 		bufCFG[173] = (byte)numTXMIC.Value;
+12816: 		bufCFG[174] = (byte)numRXSPK.Value;
+12817: 		bufCFG[175] = (byte)numRXDAC.Value;
+12818: 		bufCFG[176] = (byte)numRXSPK_AM.Value;
+12819: 		bufCFG[177] = (byte)numRXDAC_AM.Value;
+12820: 		bufCFG[178] = (byte)numGlitch.Value;
+12821: 		bufCFG[179] = (byte)cboxLSRX.SelectedIndex;
+
+Lines 12353..12353
+12353: 			cboxFMStandby.SelectedIndex = array[261];
+
+Lines 12866..12866
+12866: 		bufCFG[261] = (byte)cboxFMStandby.SelectedIndex;
+

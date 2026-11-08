@@ -1,0 +1,163 @@
+{
+  "target_exe": "RT-880 CPS_V1_10_250806.exe",
+  "target_sha256": "b2533229c783c86150a4230a8a51c5ee274092e9f1b036bbb7a5b511c34dabd6",
+  "target_bytes": 1677824,
+  "target_executed": false,
+  "device_accessed": false,
+  "method": "ILSpy 8.2.0 static decompilation, source inspection only",
+  "rt880_mainform_sha256": "1096b3c280d1d279b321f504c936ffb3fc5553123ecd110d4505a7e77bd7234c",
+  "uv98_mainform_sha256": "3824d89a091a2915ff0ca523fb6fad6371187bafea8d68d3adde95fa5e32a3e3",
+  "config_file": {
+    "extension": ".880dmf",
+    "expected_saved_bytes": 221184,
+    "sections": [
+      {
+        "buffer": "bufCFG",
+        "file_offset": 0,
+        "bytes": 4096
+      },
+      {
+        "buffer": "bufAll",
+        "file_offset": 4096,
+        "bytes": 49152
+      },
+      {
+        "buffer": "bufFM",
+        "file_offset": 53248,
+        "bytes": 4096
+      },
+      {
+        "buffer": "bufTime",
+        "file_offset": 57344,
+        "bytes": 32768
+      },
+      {
+        "buffer": "bufZone",
+        "file_offset": 90112,
+        "bytes": 131072
+      }
+    ],
+    "header_or_file_checksum_in_save_handler": false
+  },
+  "method_comparison": {
+    "mbtnOpen_Click": {
+      "rt880_line": 13515,
+      "uv98_line": 13545,
+      "same_normalized_decompiled_body": false,
+      "rt880_method_sha256": "e7448f1d92ca5fe790556eb8bdda3793eed19e423170d3905e0e96a8868a62f1",
+      "uv98_method_sha256": "e1c105c6dcb974fe38182eb6126d7ad6135329e51504d7db9fdc3298aa9b4a08",
+      "same_except_extension": true
+    },
+    "mbtnSave_Click": {
+      "rt880_line": 13539,
+      "uv98_line": 13569,
+      "same_normalized_decompiled_body": false,
+      "rt880_method_sha256": "68308a0fa13a1d44b24c1adbcf0f15ec996829dd8ed53026d166bb5aacb4c4c4",
+      "uv98_method_sha256": "e15edd6de8231761f72c7c21c527648df2c0628a3148cf96787fbfc52745da98",
+      "same_except_extension": true
+    },
+    "ArraySum": {
+      "rt880_line": 10934,
+      "uv98_line": 10957,
+      "same_normalized_decompiled_body": true,
+      "rt880_method_sha256": "f719401bcab639d4b6a35de6ccaf729232e91be8b50cce94b924d4f1783731fc",
+      "uv98_method_sha256": "f719401bcab639d4b6a35de6ccaf729232e91be8b50cce94b924d4f1783731fc"
+    },
+    "Comm_DataReceived": {
+      "rt880_line": 16667,
+      "uv98_line": 16695,
+      "same_normalized_decompiled_body": true,
+      "rt880_method_sha256": "7a917110bda0c01c43954062629349a24f4e12053ecec115855cf5867e46c800",
+      "uv98_method_sha256": "7a917110bda0c01c43954062629349a24f4e12053ecec115855cf5867e46c800"
+    },
+    "RevDateOperation": {
+      "rt880_line": 16713,
+      "uv98_line": 16741,
+      "same_normalized_decompiled_body": true,
+      "rt880_method_sha256": "23974691677169673ed05f5d317d0d33b7ba9abb1f9e8c7cfbf90b6d7cb3f54f",
+      "uv98_method_sha256": "23974691677169673ed05f5d317d0d33b7ba9abb1f9e8c7cfbf90b6d7cb3f54f"
+    },
+    "SaveData": {
+      "rt880_line": 12585,
+      "uv98_line": 12608,
+      "same_normalized_decompiled_body": true,
+      "rt880_method_sha256": "9868f2234a54eb695ca08307e2cdbde53f57f364fbf0161e8d1bc554febcac97",
+      "uv98_method_sha256": "9868f2234a54eb695ca08307e2cdbde53f57f364fbf0161e8d1bc554febcac97"
+    },
+    "DataToPanel": {
+      "rt880_line": 12002,
+      "uv98_line": 12025,
+      "same_normalized_decompiled_body": true,
+      "rt880_method_sha256": "7e33d6a91f8f197058ee4524018ecd8b0878ce81e97d24e83f786b69392f4bdb",
+      "uv98_method_sha256": "7e33d6a91f8f197058ee4524018ecd8b0878ce81e97d24e83f786b69392f4bdb"
+    },
+    "SaveSingle": {
+      "rt880_line": 11214,
+      "uv98_line": 11237,
+      "same_normalized_decompiled_body": true,
+      "rt880_method_sha256": "f62dc84fb4a477925d1730bfc482cf30312b51a262428e6c0332c43a4bc9f77e",
+      "uv98_method_sha256": "f62dc84fb4a477925d1730bfc482cf30312b51a262428e6c0332c43a4bc9f77e"
+    },
+    "SaveCHName": {
+      "rt880_line": 10944,
+      "uv98_line": 10967,
+      "same_normalized_decompiled_body": true,
+      "rt880_method_sha256": "46c41281ad79f190c5bac7e3d89586aab3dcb1f95e00662b0e753ecdef9f9727",
+      "uv98_method_sha256": "46c41281ad79f190c5bac7e3d89586aab3dcb1f95e00662b0e753ecdef9f9727"
+    },
+    "SaveSingleFM": {
+      "rt880_line": 11412,
+      "uv98_line": 11435,
+      "same_normalized_decompiled_body": true,
+      "rt880_method_sha256": "f530402d2246b35c5f324c6eebd0ddd0e9ffbc91468270b44b3ce51001086c82",
+      "uv98_method_sha256": "f530402d2246b35c5f324c6eebd0ddd0e9ffbc91468270b44b3ce51001086c82"
+    },
+    "GetInt32Data": {
+      "rt880_line": 10809,
+      "uv98_line": 10832,
+      "same_normalized_decompiled_body": true,
+      "rt880_method_sha256": "d7f088fd52973e2f4b6f79240c899c26bfde3a8522867688c865199f4605e444",
+      "uv98_method_sha256": "d7f088fd52973e2f4b6f79240c899c26bfde3a8522867688c865199f4605e444"
+    },
+    "GetInt16Data": {
+      "rt880_line": 10820,
+      "uv98_line": 10843,
+      "same_normalized_decompiled_body": true,
+      "rt880_method_sha256": "ff1b6145470f4952543632bcb645c9624c4e70a4c02aebae75733c5f6f2e7930",
+      "uv98_method_sha256": "ff1b6145470f4952543632bcb645c9624c4e70a4c02aebae75733c5f6f2e7930"
+    },
+    "ReadCsvColumn": {
+      "rt880_line": 18050,
+      "uv98_line": 17836,
+      "same_normalized_decompiled_body": true,
+      "rt880_method_sha256": "0d7d4cedc4288081f3b8d84274a68cdd1ecdaa4fd57b66b80798a6989afb920f",
+      "uv98_method_sha256": "0d7d4cedc4288081f3b8d84274a68cdd1ecdaa4fd57b66b80798a6989afb920f"
+    },
+    "btnCHImport_Click": {
+      "rt880_line": 18070,
+      "uv98_line": 17856,
+      "same_normalized_decompiled_body": true,
+      "rt880_method_sha256": "bcfb574ed427fe43fd840de6dc588ffc6b5e7bc6530f050980bda831de1da070",
+      "uv98_method_sha256": "bcfb574ed427fe43fd840de6dc588ffc6b5e7bc6530f050980bda831de1da070"
+    },
+    "btnCHExport_Click": {
+      "rt880_line": 18261,
+      "uv98_line": 18047,
+      "same_normalized_decompiled_body": true,
+      "rt880_method_sha256": "ff3591799886cbfb1114c96ce253c4037a8897bfdaf1195368b964e193bc2d0f",
+      "uv98_method_sha256": "ff3591799886cbfb1114c96ce253c4037a8897bfdaf1195368b964e193bc2d0f"
+    }
+  },
+  "same_supporting_sources": {
+    "ReadForm.cs": true,
+    "WriteForm.cs": true,
+    "PortForm.cs": true,
+    "NewFileForm.cs": true,
+    "DesClass.cs": true
+  },
+  "same_default_arrays": {
+    "bufCFGInit": true,
+    "bufVFOInit": true,
+    "bufAPRSInit": true
+  }
+}

@@ -1,0 +1,17 @@
+[package]
+name = "uv98-diag-quiesce"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Bounded diagnostic RF shutdown requests and register readback"
+
+[features]
+default = []
+hardware = ["dep:at32f4xx-pac", "uv98-board-pins/hardware"]
+
+[dependencies]
+uv98-board-policy = { path = "../board-policy" }
+uv98-board-pins = { path = "../board-pins" }
+uv98-rf-bus = { path = "../rf-bus" }
+at32f4xx-pac = { version = "=0.4.0", default-features = false, features = ["at32f423"], optional = true }
+

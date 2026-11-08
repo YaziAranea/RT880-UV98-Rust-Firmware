@@ -1,0 +1,37 @@
+{
+  "reference_sha256": "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc",
+  "counts": {
+    "rssi": 1024,
+    "squelch_status": 96,
+    "audio_mode": 512,
+    "fm_audio": 36,
+    "rx_start": 2,
+    "pf8_fragments": 18,
+    "nominal_delay_profiles": 3
+  },
+  "hardware_accessed": false,
+  "mmio_mapped": false,
+  "hooks": [
+    "A/B RF read/write helpers",
+    "8380 RX-start delay argument capture",
+    "PF8 stores1F09A/182DC",
+    "stop7C50/518E/182DE",
+    "2606C clock-source argument capture",
+    "eight exact SysTick instruction PCs"
+  ],
+  "limitations": [
+    "related RT880 image, not exact UV98 MCU backup",
+    "COUNTFLAG supplied immediately: no elapsed-time measurement",
+    "no B RSSI caller proved",
+    "audio/start are fragments, not complete cold RX startup"
+  ],
+  "hashes": {
+    "rssi.csv": "fe6788c63974f02848ea0b543f0d29f1554e7e72e88b64763d39a12761215767",
+    "squelch-status.csv": "c2ca4c76054a98794149dbb91150d9501ef6d72c027f3ae5b8a66e8a6d30f3c8",
+    "audio-mode.csv": "cb0fbd03084989b2c66b1765ec0dba898ed468165e6d6154cac43f44f98b4a2a",
+    "fm-audio.csv": "795a50f6d9d1a33eb8993627633fb6f83cea21829dddb5b19a1c402f2740810b",
+    "rx-start.csv": "6053bab0be9799f5ce93781172d82f47ca22e5d385fdc1085282e6fe05562278",
+    "pf8.json": "428c57cddc616727ea299cfccea807dba3c67eeed074e8d150281266100298e0",
+    "delay-clock.json": "d2d9c09b5a520c637f1c3e09e4c162f2b6becf76cbf8717473625b1d43ea54a4"
+  }
+}

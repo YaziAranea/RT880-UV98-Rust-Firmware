@@ -1,0 +1,427 @@
+// RT880 MainForm.cs:10779; CopyArrayToString
+	public byte[] CopyArrayToString(byte[] a, int offset, int lenth)
+	{
+		byte[] array = new byte[lenth];
+		for (int i = 0; i < lenth; i++)
+		{
+			if (a[offset + i] == byte.MaxValue)
+			{
+				return array;
+			}
+			array[i] = a[offset + i];
+		}
+		return array;
+	}
+
+
+// RT880 MainForm.cs:10944; SaveCHName
+	public void SaveCHName(int ch)
+	{
+		byte[] bytes = utf8.GetBytes(listChannel.Items[ch].SubItems[15].Text);
+		bytes = Encoding.Convert(utf8, gbk, bytes);
+		if (bytes.Length <= 16)
+		{
+			for (int i = 0; i < bytes.Length; i++)
+			{
+				bufAll[ch * 48 + 32 + i] = bytes[i];
+			}
+			for (int i = bytes.Length; i < 16; i++)
+			{
+				bufAll[ch * 48 + 32 + i] = byte.MaxValue;
+			}
+		}
+		else
+		{
+			for (int i = 0; i < 16; i++)
+			{
+				bufAll[ch * 48 + 32 + i] = bytes[i];
+			}
+		}
+	}
+
+
+// RT880 MainForm.cs:11206; ClearSingleCH
+	public void ClearSingleCH(int ch)
+	{
+		for (int i = 0; i < 48; i++)
+		{
+			bufAll[ch * 48 + i] = byte.MaxValue;
+		}
+	}
+
+
+// RT880 MainForm.cs:11214; SaveSingle
+	public void SaveSingle(int i)
+	{
+		int num = 0;
+		if (listChannel.Items[i].SubItems[2].Text == "")
+		{
+			ClearSingleCH(i);
+			return;
+		}
+		try
+		{
+			for (int j = 0; j < cboxAMFM.Items.Count; j++)
+			{
+				if (listChannel.Items[i].SubItems[16].Text == cboxAMFM.Items[j].ToString())
+				{
+					bufAll[i * 48] = (byte)j;
+					break;
+				}
+			}
+			for (int j = 0; j < cboxRXTX.Items.Count; j++)
+			{
+				if (listChannel.Items[i].SubItems[17].Text == cboxRXTX.Items[j].ToString())
+				{
+					bufAll[i * 48 + 1] = (byte)j;
+					break;
+				}
+			}
+			num = Convert.ToInt32(listChannel.Items[i].SubItems[2].Text.Replace(".", ""));
+			bufAll[i * 48 + 9] = (byte)((num & 0xFF000000u) >> 24);
+			bufAll[i * 48 + 8] = (byte)((num & 0xFF0000) >> 16);
+			bufAll[i * 48 + 7] = (byte)((num & 0xFF00) >> 8);
+			bufAll[i * 48 + 6] = (byte)((uint)num & 0xFFu);
+			num = ((!(listChannel.Items[i].SubItems[3].Text == ALL_NONE[flgLanguage])) ? SaveSubaudio(listChannel.Items[i].SubItems[3].Text, encodeflag: true) : SaveSubaudio(listChannel.Items[i].SubItems[3].Text, encodeflag: false));
+			bufAll[i * 48 + 5] = (byte)((num & 0xFF00) >> 8);
+			bufAll[i * 48 + 4] = (byte)((uint)num & 0xFFu);
+			num = Convert.ToInt32(listChannel.Items[i].SubItems[4].Text.Replace(".", ""));
+			bufAll[i * 48 + 13] = (byte)((num & 0xFF000000u) >> 24);
+			bufAll[i * 48 + 12] = (byte)((num & 0xFF0000) >> 16);
+			bufAll[i * 48 + 11] = (byte)((num & 0xFF00) >> 8);
+			bufAll[i * 48 + 10] = (byte)((uint)num & 0xFFu);
+			num = ((!(listChannel.Items[i].SubItems[5].Text == ALL_NONE[flgLanguage])) ? SaveSubaudio(listChannel.Items[i].SubItems[5].Text, encodeflag: true) : SaveSubaudio(listChannel.Items[i].SubItems[5].Text, encodeflag: false));
+			bufAll[i * 48 + 15] = (byte)((num & 0xFF00) >> 8);
+			bufAll[i * 48 + 14] = (byte)((uint)num & 0xFFu);
+			bufAll[i * 48 + 2] = 1;
+			if (listChannel.Items[i].SubItems[6].Text == CH_POWER[0] || listChannel.Items[i].SubItems[6].Text == CH_POWER[3] || listChannel.Items[i].SubItems[6].Text == CH_POWER[6])
+			{
+				bufAll[i * 48 + 16] = 0;
+			}
+			else if (listChannel.Items[i].SubItems[6].Text == CH_POWER[1] || listChannel.Items[i].SubItems[6].Text == CH_POWER[4] || listChannel.Items[i].SubItems[6].Text == CH_POWER[7])
+			{
+				bufAll[i * 48 + 16] = 1;
+			}
+			else
+			{
+				bufAll[i * 48 + 16] = 2;
+			}
+			for (int j = 0; j < cboxBand.Items.Count; j++)
+			{
+				if (listChannel.Items[i].SubItems[7].Text == cboxBand.Items[j].ToString())
+				{
+					bufAll[i * 48 + 3] = (byte)j;
+					break;
+				}
+			}
+			bufAll[i * 48 + 18] = 0;
+			bufAll[i * 48 + 19] = 0;
+			if (listChannel.Items[i].SubItems[8].Text == CH_SCAN[0] || listChannel.Items[i].SubItems[8].Text == CH_SCAN[2] || listChannel.Items[i].SubItems[8].Text == CH_SCAN[4])
+			{
+				bufAll[i * 48 + 19] &= 127;
+			}
+			else
+			{
+				bufAll[i * 48 + 19] |= 128;
+			}
+			for (int j = 0; j < cboxTXPriority.Items.Count; j++)
+			{
+				if (listChannel.Items[i].SubItems[9].Text == cboxTXPriority.Items[j].ToString())
+				{
+					bufAll[i * 48 + 17] = (byte)j;
+					break;
+				}
+			}
+			for (int j = 0; j < cboxScramble.Items.Count; j++)
+			{
+				if (listChannel.Items[i].SubItems[10].Text == cboxScramble.Items[j].ToString())
+				{
+					bufAll[i * 48 + 19] |= (byte)j;
+					break;
+				}
+			}
+			for (int j = 0; j < cboxTailTone.Items.Count; j++)
+			{
+				if (listChannel.Items[i].SubItems[11].Text == cboxTailTone.Items[j].ToString())
+				{
+					bufAll[i * 48 + 19] |= (byte)(j << 4);
+					break;
+				}
+			}
+			for (int j = 0; j < cboxTOT.Items.Count; j++)
+			{
+				if (listChannel.Items[i].SubItems[12].Text == cboxTOT.Items[j].ToString())
+				{
+					bufAll[i * 48 + 18] |= (byte)j;
+					break;
+				}
+			}
+			for (int j = 0; j < cboxCTDCSelet.Items.Count; j++)
+			{
+				if (listChannel.Items[i].SubItems[13].Text == cboxCTDCSelet.Items[j].ToString())
+				{
+					bufAll[i * 48 + 18] |= (byte)(j << 5);
+					break;
+				}
+			}
+			string text = listChannel.Items[i].SubItems[14].Text;
+			try
+			{
+				num = Convert.ToInt32(text.Substring(0, 8), 16);
+			}
+			catch (Exception)
+			{
+				num = 0;
+			}
+			bufAll[i * 48 + 23] = (byte)((num & 0xFF000000u) >> 24);
+			bufAll[i * 48 + 22] = (byte)((num & 0xFF0000) >> 16);
+			bufAll[i * 48 + 21] = (byte)((num & 0xFF00) >> 8);
+			bufAll[i * 48 + 20] = (byte)((uint)num & 0xFFu);
+			try
+			{
+				num = Convert.ToInt32(text.Substring(8, 8), 16);
+			}
+			catch (Exception)
+			{
+				num = 0;
+			}
+			bufAll[i * 48 + 27] = (byte)((num & 0xFF000000u) >> 24);
+			bufAll[i * 48 + 26] = (byte)((num & 0xFF0000) >> 16);
+			bufAll[i * 48 + 25] = (byte)((num & 0xFF00) >> 8);
+			bufAll[i * 48 + 24] = (byte)((uint)num & 0xFFu);
+			try
+			{
+				num = Convert.ToInt32(text.Substring(16, 8), 16);
+			}
+			catch (Exception)
+			{
+				num = 0;
+			}
+			bufAll[i * 48 + 31] = (byte)((num & 0xFF000000u) >> 24);
+			bufAll[i * 48 + 30] = (byte)((num & 0xFF0000) >> 16);
+			bufAll[i * 48 + 29] = (byte)((num & 0xFF00) >> 8);
+			bufAll[i * 48 + 28] = (byte)((uint)num & 0xFFu);
+			SaveCHName(i);
+		}
+		catch (Exception)
+		{
+			ClearSingleCH(i);
+		}
+	}
+
+
+// RT880 MainForm.cs:11493; CheckFreq
+	public string CheckFreq(string s)
+	{
+		int num = 0;
+		int length = 0;
+		string text = "";
+		for (int i = 0; i < s.Length; i++)
+		{
+			if (s[i] == '.')
+			{
+				num++;
+				length = i;
+			}
+			else if (s[i] < '0' || s[i] > '9')
+			{
+				return "";
+			}
+		}
+		if (num > 1)
+		{
+			return "";
+		}
+		int num2;
+		if (num == 1)
+		{
+			text = s.Substring(0, length);
+			num2 = Convert.ToInt32(text);
+			if (num2 < 18 || (num2 >= 660 && num2 < 840) || num2 >= 1000)
+			{
+				return "";
+			}
+			text = s;
+			if (num2 < 100)
+			{
+				if (text.Length == 9)
+				{
+					text = text.Substring(0, 8);
+				}
+				while (text.Length < 8)
+				{
+					text += "0";
+				}
+			}
+			else
+			{
+				while (text.Length < 9)
+				{
+					text += "0";
+				}
+			}
+			return text;
+		}
+		num2 = Convert.ToInt32(s);
+		if (num2 < 18 || (num2 >= 660 && num2 < 840) || num2 >= 1000)
+		{
+			return "";
+		}
+		text = s + ".";
+		if (num2 < 100)
+		{
+			while (text.Length < 8)
+			{
+				text += "0";
+			}
+		}
+		else
+		{
+			while (text.Length < 9)
+			{
+				text += "0";
+			}
+		}
+		return text;
+	}
+
+
+// RT880 MainForm.cs:11729; SaveSubaudio
+	public int SaveSubaudio(string Subaudio, bool encodeflag)
+	{
+		int num = 0;
+		try
+		{
+			if (Subaudio[0] != 'D')
+			{
+				num = Convert.ToInt32(Subaudio.Replace(".", ""));
+				num &= 0xFFF;
+				return num | 0x1000;
+			}
+			num = ((byte)Subaudio[1] - 48) * 64 + ((byte)Subaudio[2] - 48) * 8 + ((byte)Subaudio[3] - 48);
+			num &= 0xFFF;
+			if (Subaudio[4] == 'I')
+			{
+				return num | 0x3000;
+			}
+			return num | 0x2000;
+		}
+		catch (Exception)
+		{
+			return 0;
+		}
+	}
+
+
+// RT880 MainForm.cs:11754; SetSubaudio
+	public string SetSubaudio(byte[] Subaudio)
+	{
+		string text = "";
+		int num = 0;
+		num = Subaudio[0] & 0xF;
+		num <<= 8;
+		num += Subaudio[1];
+		if ((Subaudio[0] & 0xF0) == 16)
+		{
+			return num / 10 + "." + num % 10;
+		}
+		if ((Subaudio[0] & 0xF0) == 32)
+		{
+			return DCS_NO[num] + "N";
+		}
+		if ((Subaudio[0] & 0x30) == 48)
+		{
+			return DCS_NO[num] + "I";
+		}
+		if (flgLanguage == 0)
+		{
+			return "无";
+		}
+		if (flgLanguage == 0)
+		{
+			return "無";
+		}
+		return "None";
+	}
+
+
+// RT880 MainForm.cs:11784; SetChInfo
+	public void SetChInfo(int chno)
+	{
+		int num = 0;
+		byte[] array = new byte[2];
+		if (bufAll[chno * 48 + 2] != 1)
+		{
+			ClearCHRow(chno);
+		}
+		else
+		{
+			num = bufAll[chno * 48 + 9];
+			num <<= 8;
+			num += bufAll[chno * 48 + 8];
+			num <<= 8;
+			num += bufAll[chno * 48 + 7];
+			num <<= 8;
+			num += bufAll[chno * 48 + 6];
+			listChannel.Items[chno].SubItems[2].Text = num / 100000 + "." + (num % 100000).ToString("00000");
+			num = bufAll[chno * 48 + 13];
+			num <<= 8;
+			num += bufAll[chno * 48 + 12];
+			num <<= 8;
+			num += bufAll[chno * 48 + 11];
+			num <<= 8;
+			num += bufAll[chno * 48 + 10];
+			listChannel.Items[chno].SubItems[4].Text = num / 100000 + "." + (num % 100000).ToString("00000");
+			array[0] = bufAll[chno * 48 + 5];
+			array[1] = bufAll[chno * 48 + 4];
+			listChannel.Items[chno].SubItems[3].Text = SetSubaudio(array);
+			array[0] = bufAll[chno * 48 + 15];
+			array[1] = bufAll[chno * 48 + 14];
+			listChannel.Items[chno].SubItems[5].Text = SetSubaudio(array);
+			num = bufAll[chno * 48 + 16];
+			listChannel.Items[chno].SubItems[6].Text = cboxPower.Items[num].ToString();
+			listChannel.Items[chno].SubItems[7].Text = cboxBand.Items[bufAll[chno * 48 + 3]].ToString();
+			num = (bufAll[chno * 48 + 19] >> 7) & 1;
+			listChannel.Items[chno].SubItems[8].Text = cboxScan.Items[num].ToString();
+			listChannel.Items[chno].SubItems[9].Text = cboxTXPriority.Items[bufAll[chno * 48 + 17]].ToString();
+			listChannel.Items[chno].SubItems[10].Text = cboxScramble.Items[bufAll[chno * 48 + 19] & 0xF].ToString();
+			listChannel.Items[chno].SubItems[11].Text = cboxTailTone.Items[(bufAll[chno * 48 + 19] >> 4) & 7].ToString();
+			listChannel.Items[chno].SubItems[12].Text = cboxTOT.Items[bufAll[chno * 48 + 18] & 0x1F].ToString();
+			listChannel.Items[chno].SubItems[13].Text = cboxCTDCSelet.Items[(bufAll[chno * 48 + 18] >> 5) & 7].ToString();
+			string text = "";
+			num = bufAll[chno * 48 + 23];
+			num <<= 8;
+			num += bufAll[chno * 48 + 22];
+			num <<= 8;
+			num += bufAll[chno * 48 + 21];
+			num <<= 8;
+			text = (num + bufAll[chno * 48 + 20]).ToString("X8");
+			num = bufAll[chno * 48 + 27];
+			num <<= 8;
+			num += bufAll[chno * 48 + 26];
+			num <<= 8;
+			num += bufAll[chno * 48 + 25];
+			num <<= 8;
+			text += (num + bufAll[chno * 48 + 24]).ToString("X8");
+			num = bufAll[chno * 48 + 31];
+			num <<= 8;
+			num += bufAll[chno * 48 + 30];
+			num <<= 8;
+			num += bufAll[chno * 48 + 29];
+			num <<= 8;
+			text += (num + bufAll[chno * 48 + 28]).ToString("X8");
+			listChannel.Items[chno].SubItems[14].Text = text;
+			byte[] bytes = CopyArrayToString(bufAll, chno * 48 + 32, 16);
+			bytes = Encoding.Convert(gbk, utf8, bytes);
+			string @string = utf8.GetString(bytes);
+			@string = @string.Replace("\0", "");
+			listChannel.Items[chno].SubItems[15].Text = @string;
+			num = ((bufAll[chno * 48] <= 1) ? bufAll[chno * 48] : 0);
+			listChannel.Items[chno].SubItems[16].Text = cboxAMFM.Items[num].ToString();
+			num = ((bufAll[chno * 48 + 1] <= 2) ? bufAll[chno * 48 + 1] : 0);
+			listChannel.Items[chno].SubItems[17].Text = cboxRXTX.Items[num].ToString();
+		}
+		SetSelectList();
+		ResetSelectedList();
+	}
+

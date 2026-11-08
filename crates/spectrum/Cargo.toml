@@ -1,0 +1,8 @@
+[package]
+name = "uv98-spectrum"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Bounded receive-only sweep requests and raw signal bins, without hardware I/O"
+
+[dependencies]

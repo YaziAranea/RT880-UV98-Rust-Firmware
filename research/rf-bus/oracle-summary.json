@@ -1,0 +1,43 @@
+{
+  "reference_sha256": "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc",
+  "cases": 80,
+  "events": 10020,
+  "fixture": "crates/rf-bus/tests/fixtures/transactions.csv",
+  "fixture_sha256": "54cf6609fcc2d80a3f82f8f9bde68a055aa4dfc6f3977e80a01a2848fb7abb27",
+  "mmio_mapped": false,
+  "hardware_accessed": false,
+  "skipped_gpio_store_pcs": [
+    "0x0801E628",
+    "0x0801E62E",
+    "0x0801E64A",
+    "0x0801E66A",
+    "0x0801E670",
+    "0x0801E68A",
+    "0x0801D8F6",
+    "0x0801D902",
+    "0x0801D90E",
+    "0x0801D91C",
+    "0x0801D84A",
+    "0x0801D85E",
+    "0x0801D878",
+    "0x0801E6A8",
+    "0x0801E6AC",
+    "0x0801E6C8",
+    "0x0801E6E6",
+    "0x0801E6EA",
+    "0x0801E704",
+    "0x0801D7FC",
+    "0x0801D80A",
+    "0x0801D812",
+    "0x0801D822",
+    "0x0801D750",
+    "0x0801D766",
+    "0x0801D784"
+  ],
+  "intercepts": [
+    "A/B direction helpers",
+    "GPIO data sample 0x080254DE",
+    "delay(10) 0x080251DC"
+  ],
+  "limits": "logical pin call order only, not electrical timing, target response, or physical RF state"
+}

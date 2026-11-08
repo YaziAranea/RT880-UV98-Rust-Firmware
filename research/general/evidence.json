@@ -1,0 +1,43 @@
+{
+  "reference_sha256": "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc",
+  "not_exact_user_mcu_image": true,
+  "runtime": "Unicorn 2.1.4, Cortex-M4, Thumb, Flash+RAM only; no MMIO mappings",
+  "source_identity": "related public RT-880 1.16, not acquired from user MCU",
+  "functions": {
+    "selection": "0x08013E3C called with r0=0; SPI reader 0x08025D30 supplies synthetic bytes; mutation-related callees denylisted; source 2 ROM bytes observed only in emulator",
+    "battery_adc": "0x080121A8; ADC control callee 0x08024CC4 returns 0, DMA-complete flag supplied; actual integer conversion and stores execute",
+    "battery_indicator": "0x080122AC unmodified, no intercepted callees",
+    "squelch": "0x08004ECC and 0x08004F60; bus writer 0x0801E660 captures arguments, no device operation",
+    "vox": "0x08005708; bus reader 0x0801E620 returns fixture sample only for reg0x64. Caller-derived upper=(threshold+10)&255 supplied; parent TX controller not executed"
+  },
+  "not_proved": [
+    "actual radio calibration behavior",
+    "all general fields used",
+    "VOX scheduler timing",
+    "hardware units",
+    "physical restoration",
+    "user-image identity"
+  ],
+  "artifacts": {
+    "general_selection.csv": {
+      "rows": 768,
+      "sha256": "77c091574c3e9332fe43b860b83b582b4c0abdd620da178970e3c2581ea07677"
+    },
+    "general_battery_adc.csv": {
+      "rows": 4100,
+      "sha256": "7f55a6ecfd5a8d4293a288cdc4c89db1831358acf13f6f3dc184b0841be49055"
+    },
+    "general_battery_indicator.csv": {
+      "rows": 256,
+      "sha256": "8fa22e60a77701aa3928255208602946d9b66a8460aca9405bdcca50fa8de797"
+    },
+    "general_squelch.csv": {
+      "rows": 2816,
+      "sha256": "3e903ce73b5afdd5559b423d0e76e0186d605ceca9b3fac162bfdaf00e050900"
+    },
+    "general_vox.csv": {
+      "rows": 6108,
+      "sha256": "204952e3f13730ba059e2e5e9fdd66f040345de41f66113dfd4428070820dbc4"
+    }
+  }
+}

@@ -1,0 +1,159 @@
+[
+  {
+    "fragment": "1f084",
+    "flags_before": 0,
+    "flags_after": 0,
+    "events": []
+  },
+  {
+    "fragment": "182d0..182de",
+    "flags_before": 0,
+    "flags_after": 0,
+    "events": []
+  },
+  {
+    "fragment": "1f084",
+    "flags_before": 1,
+    "flags_after": 1,
+    "events": []
+  },
+  {
+    "fragment": "182d0..182de",
+    "flags_before": 1,
+    "flags_after": 1,
+    "events": [
+      [
+        "gpio",
+        "F",
+        8,
+        1
+      ]
+    ]
+  },
+  {
+    "fragment": "1f084",
+    "flags_before": 4,
+    "flags_after": 4,
+    "events": []
+  },
+  {
+    "fragment": "182d0..182de",
+    "flags_before": 4,
+    "flags_after": 4,
+    "events": [
+      [
+        "gpio",
+        "F",
+        8,
+        1
+      ]
+    ]
+  },
+  {
+    "fragment": "1f084",
+    "flags_before": 32768,
+    "flags_after": 0,
+    "events": [
+      [
+        "gpio",
+        "F",
+        8,
+        0
+      ]
+    ]
+  },
+  {
+    "fragment": "182d0..182de",
+    "flags_before": 32768,
+    "flags_after": 32768,
+    "events": [
+      [
+        "gpio",
+        "F",
+        8,
+        1
+      ]
+    ]
+  },
+  {
+    "fragment": "1f084",
+    "flags_before": 32769,
+    "flags_after": 32769,
+    "events": []
+  },
+  {
+    "fragment": "182d0..182de",
+    "flags_before": 32769,
+    "flags_after": 32769,
+    "events": [
+      [
+        "gpio",
+        "F",
+        8,
+        1
+      ]
+    ]
+  },
+  {
+    "fragment": "1f084",
+    "flags_before": 32772,
+    "flags_after": 32772,
+    "events": []
+  },
+  {
+    "fragment": "182d0..182de",
+    "flags_before": 32772,
+    "flags_after": 32772,
+    "events": [
+      [
+        "gpio",
+        "F",
+        8,
+        1
+      ]
+    ]
+  },
+  {
+    "fragment": "1f084",
+    "flags_before": 65535,
+    "flags_after": 65535,
+    "events": []
+  },
+  {
+    "fragment": "182d0..182de",
+    "flags_before": 65535,
+    "flags_after": 65535,
+    "events": [
+      [
+        "gpio",
+        "F",
+        8,
+        1
+      ]
+    ]
+  },
+  {
+    "fragment": "1fc70(4)",
+    "flags_before": 0,
+    "flags_after": 32772,
+    "events": []
+  },
+  {
+    "fragment": "1fc70(4)",
+    "flags_before": 1,
+    "flags_after": 32773,
+    "events": []
+  },
+  {
+    "fragment": "1fc70(4)",
+    "flags_before": 32768,
+    "flags_after": 32772,
+    "events": []
+  },
+  {
+    "fragment": "1fc70(4)",
+    "flags_before": 65535,
+    "flags_after": 65535,
+    "events": []
+  }
+]

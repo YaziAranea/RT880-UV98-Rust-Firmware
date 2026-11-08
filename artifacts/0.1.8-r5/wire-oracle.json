@@ -1,0 +1,8 @@
+{
+  "image_sha256": "bde124a26b800352b9c75b073548f114186241f7e57024dcb5f22c3786ed5307",
+  "source_sha256": "4fce477ceab5d84dc18ba0552814fa2796fdfc4f9708c05ea657aee5f67d8e08",
+  "packets": 249,
+  "tx_bytes": 252903,
+  "tx_sha256": "e13b6ff65b49e82d9f903d3bc179e9b6ec27d600598bc6f819354e913123b62a",
+  "device_accessed": false
+}

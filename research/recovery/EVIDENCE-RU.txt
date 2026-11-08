@@ -1,0 +1,253 @@
+Recovery / loader audit — 2026-11-08
+===================================
+
+Решение
+-------
+Офлайн-разработка и проверка образов подготовлены. Готовность к физической
+установке этим отчётом НЕ устанавливается: точный MCU-image/bootloader
+пользовательской UV-98 Plus 1.16 не считан, exact recovery BIN не получен,
+реальные erase boundaries её загрузчика пока не доказаны.
+Это ограничение технических данных, а не отсутствие разрешения пользователя.
+
+Ни один COM-порт не открывался. Прошивальщики не собирались и не запускались.
+Не отправлялись протокольные команды. Quarantined UV98 EXE не открывался,
+не извлекался повторно и не запускался; настройки Defender не изменялись.
+Локальный RT8801.15 EXE разобран только статическим ILSpy как входной файл.
+В пакет исходников не входят EXE, полные vendor/third-party исходники, HEX/BIN
+прошивок, полные PDF или полный пользовательский backup размером 4 MiB.
+Пользовательский calibration fixture размером 4096 байт сохранён в пакете для тестов.
+
+1. Какие образы действительно доступны
+--------------------------------------
+Связанный reference RT-880_Upgrade_V1_16_250915.nicsure.bin:
+  251904 bytes =0x3D800 =246KiB
+  SHA256 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc
+  Git blob04e7f868beaa93a7ccfd196caa7c00017dcc938d
+  SP0x200099C8; Resetvector0x08002AC1.
+https://github.com/nicsure/RT880-FlasherX/blob/915545ae89f4a7547f6cea37408a5ba1d48e21f6/RT-880_Upgrade_V1_16_250915.bin
+Это RT880-labelled application-only image. Нет доказательства совпадения
+с MCU-кодом конкретной UV98. Совпавшая строка версии1.16 недостаточна.
+related-rt880-1.16-preflight.json фиксирует структурную проверку этого файла.
+
+Официальный каталог iRadio ранее в этой сессии проверен и сохранён локально:
+https://www.qziradio.com/download
+UV98plus V1_16 Upgrade Tool 250915__Slow.zip, дата2025-09-18, Id1020912:
+https://www.qziradio.com/filedownload/1020912
+В просмотренном каталоге19 записей standalone UV98 1.16 BIN не найден.
+Одноимённый локальный EXE был помещён Defender в карантин; детект не оценивался
+как истинный/ложный. Ни этот EXE, ни его копия из другого источника не получались
+для обхода блокировки. Официальная ссылка сама по себе не снимает блокировку.
+Текущие деревья/релизы nicsure FlasherX и просмотренные primary repositories
+также не дали exact UV98 1.16 BIN/MCU dump. Это результат ограниченного поиска,
+не утверждение, что такой файл нигде не существует.
+В rampa069/RT880-misc опубликован старый firmware_UV98_1.05.bin; он НЕ заменяет
+1.16 и не доказывает совместимость восстановления текущего аппарата.
+https://github.com/rampa069/RT880-misc/tree/3fe4796aa4a8fb3e563f13817118341e9ce998f4
+
+Имеющийся пользовательский4MiB backup — внешний SPI main-array address space,
+не MCU. Его SHA256:
+1e8f4c5c5373392a08a041da9132e22d21ad0dba4fca97b9bb4f21ade77c55a3.
+Raw calibration4096 SHA256:
+8906c3d9847eeeefe0ee6aad6aa4302949bd5e5984f3c64ed02edb8cf6fb0ff7.
+Они не содержат доказанной копии внутреннего bootloader, USD или boot memory.
+
+2. Размер блока передачи и размер стирания — разные величины
+----------------------------------------------------------
+Для AT32F423xC256KiB официальный RM rev2.03 page77 задаёт128 секторов по2KiB.
+Main Flash0x08000000..0x0803FFFF. Предполагаемое application window
+0x08002800..0x0803FFFF занимает секторы5..127:123×2KiB=251904bytes.
+Префикс0x08000000..0x080027FF —10KiB, пять секторов.
+Эта геометрия согласуется с reference и hosttools, но НЕ доказывает, какие
+секторы стирает реальный UV98 loader и что весь префикс им сохраняется.
+Никакого device-side bootloader BIN для трассировки erase-loop нет.
+
+Hosttools передают246 блоков по1024bytes для полного appwindow.
+Один transportblock — половина2KiB MCU-sector этого профиля.
+Нельзя делать вывод «1024-byte packet означает стирание только1024bytes».
+Нельзя считать код примера Artery USART-IAP прошивкой штатного radio loader.
+
+Источник геометрии:
+https://www.arterychip.com/download/RM/RM_AT32F423_EN_V2.03.pdf
+https://www.arterychip.com/download/DS/DS_AT32F423_V2.02_EN.pdf
+Локальный BSP пример flash_2kb_write подтверждает2KiB-операцию; для меньших
+Flash-вариантов вызывает два1KiB sector erase. SHA256 этой локальной flash.c:
+0fbdcec65e129b0380512001b1f1f1a20a96c6bb57a20d82b248c0aefc642562.
+Пример использован только для геометрии, не для erase-set рации.
+
+3. Что доказано host-side updater protocol
+-----------------------------------------
+Pinned nicsure/RT880-FlasherX commit915545ae89f4a7547f6cea37408a5ba1d48e21f6:
+https://github.com/nicsure/RT880-FlasherX/blob/915545ae89f4a7547f6cea37408a5ba1d48e21f6/RT880-FlasherX/MainWindow.axaml.cs
+Ключевые методы Flash иConstructPacket; blob9a706e86128facd0d6c4f3f79c82b714df967017.
+1152008N1. Две одинаковые подготовительные команды типа0x39, значение0x10;
+затем третья типа0x39, значение0x55. Полеaddress у них0x3305.
+После каждой ожидается ACK0x06. Далее пакеты типа0x57 с1024payloadbytes,
+двумя байтамиaddress и однобайтовой суммой. После каждого ACK; в конце ещё ACK.
+Ни READ-MCU, ни сравнения readback/full-image checksum здесь нет.
+
+Wireaddress=(file_offset &0xFFFF), big-endian, а НЕ полный absoluteMCU address.
+Он повторяется каждые64KiB. Для image251904bytes offset последнего блока
+0x3D400 кодируется0xD400. Device-side правило восстановления старших разрядов
+не разобрано. Последовательный cursor/pagecounter — гипотеза, не доказанный API.
+Повтор пакета после потерянного ACK нельзя считать идемпотентным без loadercode.
+
+Checksum seed: для выбранного iRadioUV-98 —0, для Radtel —0x52, плюс сумма
+всех предшествующих packetbytes modulo256. Соответствие выбора модели видно:
+https://github.com/nicsure/RT880-FlasherX/blob/915545ae89f4a7547f6cea37408a5ba1d48e21f6/RT880-FlasherX/MainWindow.axaml
+Различается hostprotocol, не доказана идентичность applicationimages брендов.
+Название Connect у стороннего кода НЕ доказывает отсутствие erase/write
+side effects при этих подготовительных командах. Их не следует отправлять
+только ради «безопасной идентификации» неизвестного loader.
+
+Независимый related hostsource:
+https://github.com/rampa069/RT880-flasher/blob/6d7531a82356a0f2c057bc5f64bc4c2ad2fab9f5/main.go
+blob4e9a6837b11f291e570050e715d694c069d54765.
+Он задаёт fixed251904bytes, три Connect в обычной ACK-ветке, Update,
+те жеlow16address/1024payload/checksum seeds, затем End.
+Комментарии о seeds в NewFlasher местами перепутаны; проверены присваивания.
+Последний блок отправляется перед End/close, без ожидания его отдельного ACK.
+Это подтверждает hostпоследовательность, но не recovery verification.
+
+Локальный manufacturer-labelled RT8801.15 hosttool также закрывает порт после
+последней отправки и150ms, сразу ставит Completed. Нет MCU readback comparison.
+У FlasherX число Connect/ожидание последнего ACK отличаются от этого hosttool.
+Следовательно, совпадающее название protocol не даёт законченной спецификации
+всех состояний loader и поведения после interrupted/duplicate transfer.
+
+4. Формат firmwarecontainer и опасные допущения существующих парсеров
+-------------------------------------------------------------------
+Локальный RT-880 Upgrade V1_15_250612.exe:
+  bytes1058816
+  SHA2567995b94f95d31f9d0bc89c255e1b377cf0f90adcc301e6509ea85d4d356c9c32.
+Статически декомпилирован типIdo_Update.UpDate, ILSpy8.2.0.7535.
+ILSpy DLL SHA256c1635be8deba8b374b43863fe843950460f9860989decff3e522afab35d30904.
+Полученный текст SHA256c3d3479ae8f8c2234b18299571ccdb776540341ad08e0d23f9d32b8f97eb859e.
+Embedded allcode — строка concatenated IntelHEX records. Application array
+размером251904 сначала заполняется нулями, затем в него переносятся records.
+Legacy parser использует порядковый номер type04, игнорирует type05 иchecksums.
+В данном контейнере type04 идут0x0800,0801,0802, и standard addressmapping
+совпадает с legacy formula; это проверено, а не предположено.
+
+Strict parser увидел11222 records и179468 реально заданных bytes:
+0x08002800..0x0802E50B. Ещё72436bytes хвоста исходнымHEX не описаны.
+In-memory моделирование штатного zero-initialized array даёт SHA256:
+59f4e40989c8d28b8573a4f2a5b16defcb589a7dbb59adb1a3c628472b22696c.
+Его Gitblob9396a875cacc26e42f9e0fe167227723ebec4b4c совпал с опубликованным:
+https://github.com/nicsure/RT880-FlasherX/blob/915545ae89f4a7547f6cea37408a5ba1d48e21f6/RT-880-V1.15_250612.bin
+Отчёт related-rt880-1.15-container-audit.json. Новый firmware BIN не создавался.
+Это доказательство разбора связанного контейнера, не exactUV98recovery.
+
+BIN в просмотренных flasher — raw applicationbytes без проверяемого заголовка
+модели/варианта, загружаемые относительно предполагаемого0x08002800.
+FlasherX дополняет до1024 нулями, не проверяет верхнюю границу/векторы.
+Rampa main.go молча обрезает oversized BIN и заполняет короткий образ0xFF;
+его HEXparser не проверяет recordchecksum и пропускает out-of-window records.
+Fagci flash.py также использует0xFF и не является строгим containervalidator.
+Поэтому название .bin/.hex и успех загрузки файла не дают compatibility check.
+Наш preflight ничего не дополняет, не обрезает и не экспортирует новый image.
+
+Локальный FirmwareExtractor.exe не является purely static extractor:
+его декомпиляция показывает Assembly.LoadFrom, Activator.CreateInstance,
+затем Invoke(UpDate_Load). Он выполняет code из updater и здесь не запускался.
+Проверка allcode сделана audit_container_literal.py над текстом декомпиляции:
+regex+strictHEXparser, без eval, Assembly.Load или исполнения конструктора.
+
+5. Entry/handoff: что видно и что неизвестно
+------------------------------------------
+Related1.16 vectors: SP0x200099C8, Reset0x08002AC1.
+Reset instructions0x08002AC0..0x08002AC6 вызывают0x08021080, затем переходят
+в runtimeentry0x080029E0. В related1.15 IntelHEX type05 указывает0x080029E1,
+а Resetvector остаётся0x08002AC1. Это разные metadata; нельзя подменять одно другим.
+Related1.16 SystemInit0x08021080 включаетFPU, сбрасываетclockconfiguration;
+0x0802110E пишетVTOR=0x08000000. Позже main0x08025908 вызываетclocksetup,
+а0x08025910 пишетVTOR=0x08002800. Эти действия принадлежат приложению.
+Кто выставляетMSP перед переходом из loader, его interruptmask/pendingIRQ,
+watchdog, peripheralclock иобработка невалидных vectors — не установлено.
+Приложение не содержит начало внутренней Flash; по нему нельзя восстановить
+точный loaderhandoff. Ruststartup должен иметь явный собственный контракт,
+а не считать неизвестное состояние bootloader аппаратным resetstate.
+
+6. Возможность сохранить точный MCU без записи
+---------------------------------------------
+StockCPS R, уже использованный для4MiB, читает внешнюю SPI черезREAD03.
+У него не доказан режим чтения MCU. Прочитанные hostflashers такого режима
+также не реализуют. Название SpiBackup в старом nicsureFWFlasher означает
+приём4MiB потока230400baud от другого firmware, а не MCU readback штатного loader.
+Multi-UVTools прямо требует specialfirmware/custombootloader для своего dump:
+https://github.com/spm81/Multi-UVTools/blob/3979b8097af1703762e472f574219cbc2d35c172/js/flash-rt880-ui.js
+lines358..359; blob47cee8b9735260be706f66ae101d5a8694cd63f4.
+Установка такого dumper уже меняет MCUapplication; это не исходный беззаписный backup.
+
+AT32 mainFlash, bootmemory/extension/APmode иUSD — разные области.
+Vendor bootmemory0x1FFFA400..0x1FFFF3FF (20KiB) не тождествен предполагаемому
+radio loader prefix0x08000000..0x080027FF. USD0x1FFFF800..0x1FFFF9FF(512bytes).
+Не следует называть20KiB неизменяемымROM во всех режимах: у семейства естьAPmode.
+Официальный нативныйISP — отдельный возможный путь; доступность его входа,
+распайка BOOT0 и programmingjack→поддержанныйUART на этой плате не подтверждены.
+НадписиTXD/RXD около J501 схемы сами по себе не доказывают эту распайку.
+
+Практический кандидат для exactreadback — SWD только при уже разрешённом доступе,
+с заранее проверенной конфигурацией без erase/program/unlock/auto-unlock.
+Если FAP запрещает чтение, отключение защиты не является способом backup:
+оно стирает Flash. Высокая защита может быть необратимой; sLib учитывается отдельно.
+SEGGER сообщает о remembered unlock choice и auto-unlock standalone workflows:
+https://kb.segger.com/index.php?title=ArteryTek_AT32&oldid=21913
+Документация OpenOCD подтверждает поддержкуAT32F423, но artery driver отдельно
+ограничивает работу сUSD; нельзя обещать «полныйbackup» одним mainbankdump:
+https://www.openocd.org/doc/html/Flash-Commands.html#Flash-Driver_003a-artery
+Здесь ни debugger, ниISP не подключались; FAP/actualMCU/boardrevision неизвестны.
+
+7. Готовый hostpreflight
+-----------------------
+image_preflight.py — Python3.10+, standardlibrary, stdoutJSON/exitcode0 или2.
+Только localregularfile BIN/HEX. Нетtransport, imagewriter, COM, subprocess.
+BIN:8..251904bytes; никакого silenttruncation. PE/ELFcontainer отвергается.
+HEX:ASCII, точныеlength/checksum, один finalEOF, типы00/01/04/05;
+неподдержанныеtypes, overlap, crossing16bitboundary, out-of-windowdata — ошибки.
+Holes сохраняются отсутствиемsegments и перечисляются, а не превращаются в00/FF.
+SP проверяется по явно указанному48KiBRAMprofile и8-bytealignment; ResetThumb,
+допустимый диапазон и наличие targetbytes обязательны. Type05 хранится отдельно.
+Эти проверки структуры не доказывают корректность instructionstream/периферии.
+
+Запуск из корня проекта:
+  python research/recovery/image_preflight.py PATH_TO_APPLICATION.bin
+  python research/recovery/image_preflight.py PATH_TO_APPLICATION.hex
+  python -m unittest discover -s research/recovery -p test_image_preflight.py -v
+13 synthetic tests прошли. Root также сообщил повторный проход13tests.
+Независимый staticreview второго агента не нашёл блокирующих ошибок.
+Reportproperties hardware_qualified=false, recovery_verified=false;
+safe_to_flash_assessment="not assessed; structural evidence only".
+Это оценки имеющихся доказательств, не модель пользовательских разрешений.
+
+8. Конкретный следующий операционный этап
+----------------------------------------
+Транспорт прошивки пока не нужен для закрытия главного пробела.
+Цель следующего этапа — получить exactrecoverysource и device-loader evidence:
+
+A. Чистый standaloneUV98Plus1.16 BIN от производителя с моделью/ревизией/датой
+   иSHA256 либо уже существующий независимо идентифицированный образ.
+   Никакого повторного получения quarantinedEXE другим путём.
+   Структурно проверить preflight; отдельно доказать model/revision provenance.
+
+B. Если доступно аппаратное чтение: сначала подтвердить MCUмаркировку, ревизию
+   иSWDtestpads/Vref/GND. Затем review exactdebuggerconfig безauto-unlock.
+   При уже разрешённом чтении сохранить mainFlash целиком двумя проходами,
+   отдельно доступные служебныеобласти/идентификаторы, сравнитьSHA иvectors.
+   При readprotection остановить именно readbackветку без измененияFAP.
+   Не выполнять снижение FAP/RDP, unlock, mass erase или программирование.
+   Ни wiring, ни connectscript до проверки платы здесь не предлагаются.
+
+C. Из полученного exactloader разобрать dispatch/erase-loop/addressmapping/
+   duplicate-frame/finalize/entryhandoff. Тогда можно назвать реальные
+   erasedsectors и выбрать строго ограниченный application-only writer.
+   При отсутствии loadercode нужны независимые надёжные сведения разработчика
+   и recoveryvalidation на отдельном аппарате той же ревизии.
+
+D. Проверять возврат стока и запуск безработающего приложения отдельным
+   аппаратным этапом. ACK/собранныйELF/красивыйPNG не заменяют recoverytest.
+   Только после закрытия этих технических условий подготовить конкретный
+   image+writer+recovery bundle для первой установки. Авторизация дальнейшей
+   работы уже есть; остаются именно факты совместимости и восстановления.
+
+Полные pinnedsource URLs/blobSHA/localSHA256: upstream-provenance.json.
+Fullstatic caches остаются только в work/recovery-analysis, вне sourceZIP.

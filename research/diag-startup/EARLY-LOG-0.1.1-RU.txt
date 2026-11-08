@@ -1,0 +1,106 @@
+Диагностический ранний журнал 0.1.1, 2026-11-08
+
+Это описание текущего ASM startup. EVIDENCE-RU.txt сохраняет исторический
+контракт 0.1.0; отличия ниже имеют приоритет. Первая попытка на железе и возврат
+стока описаны в FIRST-LIVE-TEST-RU.txt в корне проекта. Для 0.1.1 здесь выполнены
+только сборка/эмуляция: COM не открывался, рация не прошивалась.
+
+Контракт до RAM
+early_log.s + pre_init.s включаются одной global_asm! декларацией. До .bss/.data
+нет Rust, SP, RAM, push/pop, BL или callee-saved r4-r11. Разрешены r0-r3/r12;
+LR сохраняется, __pre_init возвращается в Reset через BX LR.
+__diag_uart_byte использует частный ABI tail-branch: r0=байт, r3=Thumb-адрес
+продолжения; r1/r2 scratch; r12 содержит UART-ready и checksum. Адрес возврата
+задаётся MOVW/MOVT relocation + ORR bit0. Нет stack frame или вложенных calls.
+Linked auditor проверяет весь исполняемый граф, включая конкретные BX r3
+продолжения, неизменность r4-r11/SP и отсутствие отображённой SRAM.
+
+Family gate и сохранённые запреты
+До peripheral writes обязательны privileged Thread/MSP entry и
+DEBUG_SER_ID 0xE0042020 & 0xFF00 == 0x1200 (семейство F423).
+При другом семействе или entry context — WFI без UART и peripheral writes.
+На F423 перед UART отключаются/reset DMA1/2 и OTG: PA11 также USB pin.
+UART на PA11 разрешён до exact PID/revision/flash gate, чтобы увидеть
+ошибочное предположение о варианте MCU. Это НЕ разрешение RF GPIO.
+Для RF запросов по-прежнему обязательны:
+  PID 0x700A3243/0x700A3246; SERIES&0xFF07==0x1200; F_SIZE==256KiB;
+  LEXTEN==0 перед PC14/15; GPIO clocks readback; каждый GPIO LOCK guard.
+При отказе guard нет обхода, перепрошивки, записи калибровок или TX.
+Точные PID/revision/flash — ожидаемые значения, не физический readback станции.
+
+USART6
+Локальный vendor SDK:
+  libraries/drivers/src/at32f423_usart.c, usart_init:
+    USART6 питается от APB2; независимый HICK mux USART1/2/3 сюда не относится.
+  libraries/drivers/src/at32f423_crm.c, crm_clocks_freq_get (около923):
+    HICK 8/48MHz, direct divider, AHB/APB tables.
+  libraries/drivers/inc/at32f423_{crm,gpio,usart}.h:
+    APB2 gate/reset USART6 bit5; GPIOA gate bit0; PA11 MUXH AF8;
+    USART6 0x40011400, STS+0, DT+4, BAUD+8, CTRL1/2/3 +0xC/10/14.
+Связанный stock1.16: PA11/PA12 AF8 и USART6 подтверждены disassembly
+init0x0801460C, pin init0x08011CEC..0x08011D22, ACK helper0x0801C028.
+Более подробная трассировка и Rust драйвер: research/boot-log и crates/boot-log.
+
+ASM не меняет источник частоты, PLL или bus dividers для журнала. Дважды
+декодирует текущий divisor, сравнивает результат. Поддерживает direct HICK
+8/48MHz с документированными делителями либо строго известный HICK PLL48
+(PLL masked0x477FCF==0x31801, HICK/PLL ready, HICKDIV=1), с AHB/APB2 делителями.
+Требует совпадения selected/status source. Другой PLL, HEXT, switch in progress,
+невалидный divider, DIV<16/>65535 — без early UART, исходный startup продолжается.
+DIV=(nominal APB2+57600)/115200. Это расчёт, не измерение частоты. Два одинаковых
+DIV не являются блокировкой clock state; неизвестное железо всё ещё не доказано.
+
+GPIO только PA11: AF8, push-pull, moderate drive, no pulls; PA12 не меняется.
+GPIOA LOCK PA11 проверяется; locked TX даёт отсутствие журнала.
+USART6 reset; CTRL1=0x2008 (UE+TX), CTRL2/3=0. RX, USART IRQ, DMA и flow control
+не включаются. DT никогда не читается. TX poll TDBE и завершающий drain TC имеют
+предел8192 итерации каждый; watchdog не кормится, не выключается и не перенастраивается.
+Timeout отключает дальнейший ASM вывод, но не блокирует штатный путь takeover.
+Возможен обрыв кадра; отсутствие полного кадра не доказывает отсутствия запуска.
+После clock changes Rust обязан переинициализировать UART под новый APB2.
+
+Проводной формат, 115200 8N1
+  UV98D1 CCCCCCCC AAAAAAAA BBBBBBBB DDDDDDDD*SS\r\n
+Ровно47 байт; uppercase hex, четыре u32. SS=sum8 первых42 ASCII bytes.
+Checksum обнаруживает часть повреждений, не является authentication/CRC32.
+Три normal startup frames занимают номинально12.24ms только на линии;
+унаследованный короткий watchdog может прервать даже первый кадр.
+
+События
+00000001: family/UART ready; PID, raw SERIES_REVISION, flashKiB.
+00000002: все четыре RF/mute/backlight LOW группы записаны; те же identity fields.
+00000003: pre_init завершён, дальше Reset инициализирует RAM; identity fields.
+E1000001: exact PID отвергнут; identity fields.
+E1000002: flash size отвергнут; identity fields.
+E1000003: ICTR задаёт >8 NVIC banks; identity fields.
+E1000004: LEXT активен; identity fields.
+E1000005: GPIO clocks readback не совпал; identity fields.
+E1000006: GPIO locked; A=port address, B=LOCK register, D=required pin mask.
+E1000007: revision внутри F423 family отвергнута; identity fields.
+E1FF0000: terminal/exception; A=IPSR, B=CFSR, D=HFSR.
+
+Terminal путь
+HardFault/DefaultHandler/NMI переходят непосредственно в ASM без Rust/RAM.
+Сначала family и exact RF guards, DMA/USB остановка, RF LOW attempts; только
+затем UART init и fault frame. При ошибке exact guard RF попытка обрывается,
+но UART может сообщить IPSR/CFSR/HFSR, если family/clock/PA11 подходят.
+При неподдержанном family UART не трогается. После кадра WFI без WDT reload.
+Fault registers читаются best effort; это не atomic snapshot, не stacked PC/LR.
+Automatic exception stacking, неисправный стек, nested fault/lockup, NMI во время
+журнала и физическое поведение watchdog эмулятор не моделирует.
+Записанные LOW requests не доказывают электрическое RF-off.
+
+Проверка 0.1.1
+tools/check_diag_preinit.py:37 cases реального final linked ELF в Unicorn M4:
+  valid variants/IRQ banks; PID/revision/flash/LEXT/LOCK/context rejection;
+  direct HICK8/48/dividers, knownPLL48, unsupported source/PLL;
+  TDBE/TC timeout, busy bytes, partial13-byte frame, locked PA11;
+  terminal thread/HardFault/unknown identity/LEXT/LOCK, direct exception vectors;
+  checksum и точные event fields, RF attempts before terminal first UART byte,
+  PA12 field preservation, no UART RX/DMA/IRQ, no WDT writes, no SRAM/SP/calls.
+Reset prefix дополнительно проверен: VTOR/application MSP, first call __pre_init,
+никакого доступа к RAM до него. WFI перехватывается, не выполняется физически.
+Отчёт: validation/diag-preinit-bootlog-emulation.json; root final build повторяет
+проверку на экспортированном ELF и сохраняет early-machine-code-check.json.
+Офлайн PASS не подтверждает контакт кабеля, MCU/PCB identity, осциллятор, LCD,
+RF, получение UART байт на физическом COM или успешную загрузку 0.1.1.

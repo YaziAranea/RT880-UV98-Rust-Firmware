@@ -1,0 +1,15 @@
+[package]
+name = "uv98-sidekeys-at32"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Bounded single-channel AT32F423 PC2 auxiliary-key ADC polling"
+
+[features]
+default = []
+hardware = ["dep:at32f4xx-pac", "uv98-board-pins/hardware"]
+
+[dependencies]
+uv98-keys = { path = "../keys" }
+uv98-board-pins = { path = "../board-pins" }
+at32f4xx-pac = { version = "=0.4.0", default-features = false, features = ["at32f423"], optional = true }

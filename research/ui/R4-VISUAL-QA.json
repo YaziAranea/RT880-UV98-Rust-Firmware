@@ -1,0 +1,180 @@
+{
+  "kind": "host_image_visual_review",
+  "date": "2026-11-09",
+  "status": "passed",
+  "artifact_directory": "C:\\Users\\User\\Documents\\Codex\\2026-11-08\\https-github-com-morluto-rea-https\\outputs\\UV98-Rust-diagnostic-0.1.8-2026-11-09-r4-tx2-build2",
+  "binary_sha256": "d1c2c4ddd0422ad9ae4828360f62ae5ae306db888432e9faaa185024fb64be3b",
+  "preview_directory": "C:\\Users\\User\\Documents\\Codex\\2026-11-08\\https-github-com-morluto-rea-https\\outputs\\UV98-Rust-diagnostic-0.1.8-2026-11-09-r4-tx2-build2\\preview",
+  "reviewed_frame_count": 13,
+  "generated_frame_count": 60,
+  "observed_frames": [
+    {
+      "name": "02-menu.png",
+      "sha256": "28a47f88e81f67a08ae8d551e75db10948b599a66f1103738b48b88d8968db31",
+      "width": 240,
+      "height": 320,
+      "visually_inspected": true,
+      "result": "passed"
+    },
+    {
+      "name": "10-help.png",
+      "sha256": "c46beb551e3d8adfc08b0828e7ce9f9f64b55b5f2bfec8a3967048e45ba589cf",
+      "width": 240,
+      "height": 320,
+      "visually_inspected": true,
+      "result": "passed"
+    },
+    {
+      "name": "11-about.png",
+      "sha256": "bd74089206e61b6cf92fc793a6d2b47af3e29b09ca9ee1d596b41ea08df2ce87",
+      "width": 240,
+      "height": 320,
+      "visually_inspected": true,
+      "result": "passed"
+    },
+    {
+      "name": "51-receive-menu-group.png",
+      "sha256": "50cb67c0a0aa30e8078eca909c0fdc1a1b9cd5971859d0b0737b77dd59387f58",
+      "width": 240,
+      "height": 320,
+      "visually_inspected": true,
+      "result": "passed"
+    },
+    {
+      "name": "52-SIMULATED-spectrum-no-data.png",
+      "sha256": "56314f71c65fcaa3589c2c3633ec7d91945e06d97882d93a8c6fcd63a4fe3846",
+      "width": 240,
+      "height": 320,
+      "visually_inspected": true,
+      "result": "passed"
+    },
+    {
+      "name": "53-SIMULATED-spectrum-full-sweep.png",
+      "sha256": "6fdcb9dacfb93d49e5321bad11a18924424e35deae10878bc3de02f843025617",
+      "width": 240,
+      "height": 320,
+      "visually_inspected": true,
+      "result": "passed"
+    },
+    {
+      "name": "54-SIMULATED-spectrum-partial-and-peaks.png",
+      "sha256": "640f2b6e3d9a93fefb783bbbca97590d055d28c7a9402487a5e32998e42159ba",
+      "width": 240,
+      "height": 320,
+      "visually_inspected": true,
+      "result": "passed"
+    },
+    {
+      "name": "55-SIMULATED-spectrum-cursor.png",
+      "sha256": "0e41e66e7aa88db3a3400b552fb274fb53d86fd7d9b6fe1b2111ba3625c3a52a",
+      "width": 240,
+      "height": 320,
+      "visually_inspected": true,
+      "result": "passed"
+    },
+    {
+      "name": "56-SIMULATED-spectrum-restoring.png",
+      "sha256": "f76d853c0c3940235d972b81e80adff1b2bfa1713fc5842a59879a94dcdfe041",
+      "width": 240,
+      "height": 320,
+      "visually_inspected": true,
+      "result": "passed"
+    },
+    {
+      "name": "57-SIMULATED-spectrum-frequency-accepted.png",
+      "sha256": "275279a4e031ad10946b401dac112579f571f6ab4aa7f9052f18ecb531b9b284",
+      "width": 240,
+      "height": 320,
+      "visually_inspected": true,
+      "result": "passed"
+    },
+    {
+      "name": "58-SIMULATED-long-zero-spectrum-request.png",
+      "sha256": "56314f71c65fcaa3589c2c3633ec7d91945e06d97882d93a8c6fcd63a4fe3846",
+      "width": 240,
+      "height": 320,
+      "visually_inspected": true,
+      "result": "passed"
+    },
+    {
+      "name": "59-ten-digit-bindings-zero.png",
+      "sha256": "44b3f14ee1c13fffd990548445eb37bc69e05b2b60fefcdaa01f6e49ee9aed9f",
+      "width": 240,
+      "height": 320,
+      "visually_inspected": true,
+      "result": "passed"
+    },
+    {
+      "name": "60-zero-spectrum-assignment.png",
+      "sha256": "e643489dbb52101953a037ecb63c6761313e37e5619c4802a706028d19a1e6bf",
+      "width": 240,
+      "height": 320,
+      "visually_inspected": true,
+      "result": "passed"
+    }
+  ],
+  "pipeline_verification": {
+    "file": "C:\\Users\\User\\Documents\\Codex\\2026-11-08\\https-github-com-morluto-rea-https\\outputs\\UV98-Rust-diagnostic-0.1.8-2026-11-09-r4-tx2-build2\\verification.json",
+    "status": "passed"
+  },
+  "observed_findings": {
+    "text_clipping": false,
+    "overlapping_controls": false,
+    "portrait_geometry": true,
+    "revision_018_r4_visible": true,
+    "menu_categories_match_actual_contents": true,
+    "direct_fm_am_entry": true,
+    "both_home_frequencies_large_and_fixed_A_above_B": true,
+    "unknown_spectrum_empty": true,
+    "fresh_cyan_previous_gray_peaks_yellow": true,
+    "cursor_frequency_and_raw_readout_agree": true,
+    "sweeping_header_explicitly_muted": true,
+    "restore_header_explicit": true,
+    "long_zero_documented": true,
+    "physical_digit_zero_not_ten_in_assignment": true,
+    "all_ten_bindings_visible_by_paging": true
+  },
+  "host_simulation_checks": [
+    {
+      "action": "compact spectrum protocol and stable publication",
+      "bins": 81,
+      "current_vs_previous_sweep_distinguished": true,
+      "cursor_pixel_bytes": 16800,
+      "engine_bytes_host": 472,
+      "frequency_after_restore_10hz": 43296250,
+      "menu_commit_waits_for_full_receive_restore_ack": true,
+      "physical_rf_operations": false,
+      "plot_bytes_host": 364,
+      "ptt_stops_spectrum_without_tx": true,
+      "scale": "raw0..511",
+      "snapshot_replacement_blocked_during_pending_frame": true,
+      "synthetic_rssi_only": true,
+      "unknown_data_has_no_synthetic_noise": true
+    },
+    {
+      "action": "long0 spectrum shortcut",
+      "all_ten_digits_assignable": true,
+      "default_digit0": "Spectrum",
+      "digits1to9_defaults_unchanged": true,
+      "labels_use_digit0_not_binding10": true,
+      "long_zero_no_numeric_entry": true,
+      "long_zero_requests_backend_without_fabricated_measurements": true
+    }
+  ],
+  "app_bytes_on_host": 11304,
+  "resolved_since_preview01": [
+    "corrected category labels КНОПКИ and СВЕТ / СИСТЕМА",
+    "PTT/EXIT while accepted-frequency restore is pending replaces its ticket and cancels selection",
+    "long0 Spectrum assignment and revision marker",
+    "confirmed muted-sweep header with actual TX/fault priority"
+  ],
+  "physical_display_observed": false,
+  "physical_rf_measured": false,
+  "spectrum_data": "explicitly synthetic demo through compact Engine and App",
+  "source_changed_during_final_review": false,
+  "limits": [
+    "PNG review is not LCD hardware validation",
+    "raw0..511 is not calibrated dBm or S units",
+    "sweep speed, microphone voice and receiver sensitivity require physical confirmation"
+  ]
+}

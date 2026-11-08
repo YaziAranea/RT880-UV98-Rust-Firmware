@@ -1,0 +1,160 @@
+GPS, отдельный Si47-приёмник, модем и ANC: ограниченный аудит 2026-11-09.
+Проверка исходного Thumb и первичных схем. Без COM, радио и изменения калибровок.
+
+Основа проверки
+---------------
+Образ ../reference-firmware/RT-880_Upgrade_V1_16_250915.nicsure.bin,
+SHA256 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc.
+Адреса относятся к ../hardware_readback/rt880-116-linear.asm.
+Воспроизводимый независимый от Rust oracle: derive_aux_evidence.py.
+Результат aux-evidence.json: 256 baud, 10 UART init, 4 I2C wrapper,
+5 library-query, 256 denoise sanitization, 4 external-modem cases — PASS.
+MMIO намеренно не отображён. Подменены только указанные SDK/I2C-функции,
+задержки и точные GPIO store-инструкции. Это не измерение установленной платы.
+
+1. GPS
+------
+Пользователь подтверждает наличие GPS. Модель собственного модуля неизвестна.
+Связанная фотография C:/Users/User/Desktop/USB/rt880/new_880_gps.jpg показывает
+ATGM336H; переносить её маркировку на пользовательскую плату нельзя.
+
+RT880 V2, MCU pin17: GPS-RXD = PA3. Сверено с локальной схемой
+../hardware_readback/band-path-mcu-bottom.png и AT32F423 LQFP64 pinout.
+USART2 base40004400. SDK пример usart/transfer_by_dma_interrupt/src/main.c
+настраивает PA3 AF7 для USART2_RX; здесь передатчик UART не требуется.
+Stock0802480C(baud): init8bit/1stop, TX bit3=0, RX bit2=1,
+RXNE interrupt code000C0005 enable1, UART UEN enable1.
+Обработчик080244E4 соответствует vector54/IRQ38, vectorvalue080244E5.
+
+CPS MainForm.cs12333..12334/12856..12857:
+CFG+214(0xD6) enable; CFG+215(0xD7) baud index.
+Stock08012FD0 проверен для всех256 байтов:
+0 4800; 1 9600; 2 14400; 3 19200; 4 38400; 5 56000;
+6 57600; 7 115200; 8 128000; 9 256000; остальные9600.
+
+Stock GPS-on0800F30E..F318 и08012612..1261C:
+PB9 HIGH (GPIOB SET40020418 mask0200), затем08002F30(1).
+GPS-off0800F338..F344/0801264A..12656: PB9 LOW, затем08002F30(0).
+Это доказанный запрос питания/включения узла в GPS-ветке стока;
+электрическая отдельность его питания от модема не доказана.
+08002F30(1): PA2 input, pull-up.
+08002F30(0): PA0/PA1/PF1 LOW, PA2 input, pull-down.
+Следовательно нельзя копировать весь helper без владения модемными пинами.
+
+GPS IRQ использует буфер100B, '$' в начале и '*HH' в конце;
+checksum0801B2D4. Диспетчер08024562..245A4 сравнивает позиции3..5
+с RMC/GGA, talker GP/GN/BD на этом уровне не ограничивает.
+Завершение принятия после*HH, до CRLF. Новый строгий parser может ждать CRLF,
+но должен учитывать эту разницу при сравнении со стоком.
+Полевая семантика обработчика08011EFC здесь полностью не восстановлена.
+
+2. Si47 / Si4732
+---------------
+Локальная si4732sch.jpg показывает U650 SI4732A10, RST9, SENB10,
+SCLK11, SDIO12, RCLK13, AMI8, FMI6, LOUT1/ROUT16.
+MCU-конец RST на этом фрагменте отсутствует: GPIO reset пока НЕ установлен.
+
+Stock0801EADC: PC0/PC1 AF7, I2C1 base40005400;
+packed GPIO config0300000001010201 означает pins3, open-drain1,
+pull-up1, mux mode2, drive1. Это старый packed ABI; не копировать его
+структуру в современный SDK без перевода полей.
+Handle20008324. Write0801F05C→0802569E передаёт wireaddress22;
+read0801EAB4→080255E8 передаёт23. Оба SDK timeout2000.
+Итого 7-bit адрес11, не23. PC0/PC1 не пересекаются с ADC PC2.
+Старая V2 схема SCK1080/SDA1080 на PB8/PB9 относится к другому приёмнику;
+перенос её шины сюда противоречит исполняемому стоку1.16.
+
+Stock0801E14C начало:0801FC70(10), PC5 HIGH в0801E162, wait100ms,
+потом FM0801E910 / AM0801E7E0 / SSB0801EC08 согласно записи приёмника.
+PC5 pin25 в схеме называется FM-POWER-EN. Это запрос питания,
+не доказанный самостоятельный reset. Закрытие08011914: командаPOWER_DOWN
+через0801E724, wait100ms, PC5 LOW, затем0801E2BC(10).
+PC5/PC4 уже принадлежат RadioControl: будущий драйвер должен сериализовать
+переход тракта; второй независимый владелец этих GPIO недопустим.
+
+Идентификация0801EBC0 использует template0802EC96:
+length03, payload01 1F 05 = POWER_UP/FUNC15 library ID, XOSCEN1,
+analog output05. Stock: delay1, send, delay500, read1 до первого успешного
+I2C, delay1/read8/delay1/read1/delay1. Это не GET_REV и не запись patch.
+Skyworks AN332, страницы72–73:
+https://www.skyworksinc.com/-/media/Skyworks/SL/documents/public/application-notes/AN332.pdf
+FUNC15 возвращает library ID и переходит в powerdown; 8B с учётом STATUS.
+Поля ответа STATUS/PN/FWMAJOR/FWMINOR/reserved/reserved/CHIPREV/LIBRARYID.
+
+Oracle проверил реальные недостатки stock query: игнорируется ошибка send,
+ERR в status не проверяется; отсутствие I2C ответа вызывает бесконечный retry.
+Synthetic no-response case остановлен только бюджетом эмулятора5000 инструкций.
+Новый код ОБЯЗАН иметь timeout каждой транзакции, общий deadline, CTS/ERR
+проверку и сохранить ответ8B до дальнейшего чтения. Не вызывать стоковый loop.
+Наличие Si4732 на пользовательской плате ответом ещё не подтверждено.
+
+3. APRS и цифровой модем
+-----------------------
+CPS MainForm.cs12469..12475/13133..13141: CFG3309(0xCED) APRS enable,
+3316(0xCF4) linked channel,3317(0xCF5) RX mute; рядом callsign/path fields.
+Сохранённые пользовательские значения и координаты в этот отчёт не включены.
+
+V2 netnames: PF1(pin6)=868CS; PA0(pin14)=868SDA;
+PA1(pin15)=868SCK; PA2(pin16)=868REPLY SDA. Эти имена не означают LoRa.
+Stock08005E90 передаёт MSB first через PA0/PA1, PF1 select active-low.
+Stock08005C04 oracle даёт CS-обрамлённые команды:
+01; E0 11 80; E0 11 40; E1 02 1C; E2 ((30|setting<<1)&FF) 3E.
+Паузы100,50,25,5,10,100ms; setting читаетсяRAM200039EC+F2.
+08005DE0 перед TX byte опрашивает E6 bit1000, затем пишет E3+byte;
+08005E6C передаёт последовательность байтов с возвратом при ошибке.
+Набор адресов соответствует C-BUS CMX868/868A:01 reset, E0 control,
+E1 transmit mode,E2 receive mode,E3 TXdata,E6 status. Подтверждение:
+локальные CMX868_ds.pdf/CMX868A_ds.pdf и индексированный первичный PDF CML
+https://cmlmicro.com/Content/Downloads/CMX868A_ds.pdf (прямое открытие09.11
+даёт404; локальная копия сохранена). Сам набор команд не определяет модель.
+
+Есть второй backend: boot08003542..3558 читает PB4 и кладёт200011FC.
+08021800 при0 идёт в C-BUS5DA0/5E6C, при1 включаетPC3, TMR3(40000400).
+TMR3 IRQ0802152C (IRQ29): TX переключаетPF1 черезTOG4002142C;
+RX читаетPA2 и собирает временные интервалы/байты. Это цифровая модуляция
+через GPIO, не поток PCM. Точная роль второго внешнего узла не установлена.
+GPS может работать при ещё не реализованном APRS. Автобикон не разрешён
+одним фактом GPS fix; RXdecode, frame/FCS и calibrated TX нужны отдельно.
+
+4. ANC / NR / NB
+----------------
+V2: PC3 pin11 = ANC POWER-EN, J507 выводит BT-MICI/AUDIO,
+RXTS-SW/PC4 управляет U501 BL1555 аналоговым переключателем.
+Основной AF OUT4819→U501→AUDIO тракт аналоговый.
+PA5 pin21 = TONE, stock использует DAC2/TMR2 для генерации звука;
+это не доказательство возможности обработать входящий звук MCU.
+В текущем Rust нет receive PCM capture/ADC-DMA/audio DAC stream.
+ADC1 PC2 читает кнопки, не аудио. PA4 — LCD backlight, не свободный DAC1.
+
+CPS optional label降噪開關(選配), MainForm.cs4666; переключательCFG264
+в12356/12869, ON/OFF наполнение14086..14089. Stock0801E0D6..1E0E6
+обнуляетCFG+108 при любом ненулевом значении: проверены все256 входов.
+Потребитель этого флага в ограниченном поиске не найден.
+PC3 дополнительно активируется08021858..218A8 в цифровом backend,
+поэтому старую метку ANC нельзя превратить в unconditional GPIO HIGH.
+Маркировка GS8724 на связанной фотографии не доказывает комплектацию,
+алгоритмы, направление обработки или управляющий протокол своей платы.
+Полный NR/NB/устранение импульсных помех требует сначала доказанного
+ANC-модуля либо receive ADC→DSP→DAC тракта с частотой, задержкой и bypass.
+Настройки squelch/monitor/AM AGC сами по себе не являются DSP NR/NB.
+
+5. Следующие ограниченные проверки (предложение; не выполнялись)
+---------------------------------------------------------------
+A. Сейчас: pure no_std NMEA parser, checksum/CRLF, bounded line,
+RMC/GGA GP/GN/BD, invalid fix, overflow/resync, координаты по диапазону,
+возраст/утрата fix. Тесты синтетические, без личных координат.
+B. GPS hardware: отдельное владение PA3/PB9; TX UART отключён;
+скорость из проверенногоCFG, bounded RX drain и общий deadline10s.
+UI/RF продолжают обслуживаться, счётчикиframing/overrun/checksum видимы.
+Проверить зависимость PA2, не копировать изменения PA0/PA1/PF1 вслепую.
+На остановке выключить UART RX/IRQ и запрос узла согласно единому владельцу.
+C. Si47: сначала сверить revision/power/reset ownership, затем отдельный
+manual probe при muted audio и TX off. PC5 HIGH,100ms, I2C init,
+один01 1F 05, boundedCTS/ERR и8B response; безproperty/patch/NORwrites.
+Успех/ошибка завершают probe, освобождают bus и возвращают питание/тракт
+к согласованному состоянию; полное RX restore через существующий runtime.
+D. APRS: сначала определить выбранный модемный backend и RX-only transport;
+далее AX.25/frame/FCS offline vectors. Без авто-TX и без использования GPS
+координат в эфире до отдельной интеграции с общими TX/PTT/TOT guards.
+E. NR/NB: отдельный аудит аналоговой разводки/модуля; затем измеримый
+аудиотест с bypass. Отображать функцию как работающую до этого нельзя.

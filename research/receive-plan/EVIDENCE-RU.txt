@@ -1,0 +1,143 @@
+RX configuration fragments and explicit new composition
+2026-11-08. Offline machine-code evidence; no device/COM/MMIO/flash.
+
+Reference
+
+RT-880_Upgrade_V1_16_250915.nicsure.bin, 251904 bytes, base08002800.
+SHA256 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc.
+https://raw.githubusercontent.com/nicsure/RT880-FlasherX/master/RT-880_Upgrade_V1_16_250915.bin
+This is a related RT880 image, not this user's exact UV98 MCU readback.
+
+1. Frequency and calibration
+
+Primary 08004B88 calls selector08012A30(original frequency, mode0).
+Secondary 08003CCC calls the same selector(original frequency, mode1).
+Both then read u16LE at20003064, selected band's record+0:
+  corrected = (original_code + raw_offset - 32768) modulo2^32;
+  write register38 = corrected low16;
+  write register39 = corrected high16.
+Primary writes A via1E660; secondary writes B via1E6D4.
+The selection is based on ORIGINAL frequency, before correction.
+No register30 operation, delay, PLL-lock read or RF-ready assertion occurs
+in either frequency setter. A failure between38/39 can leave a partial word.
+
+The full selector was executed in this oracle. Only its SPI read25D30 serves
+a synthetic112-byte record. Branch priority, shared boundaries, clamped point
+index, record-offset arithmetic and selected table reads are original Thumb.
+Cache startsFF, sourceflag200010E9=0; one fresh record read is required per case.
+Detailed selector evidence and all unsupported-frequency behavior remain in
+research/frequency and research/band-switch, not redefined here.
+
+2. Bandwidth helper08004228
+
+  raw argument ==1: write A43=4048;
+  all other arguments: write A43=3028.
+Both BL instructions target1E660 (chipA), including when called from the
+secondary-path caller03F58. A corresponding B43 writer was NOT established.
+The primary entry1F828 reads channel[3] and calls4228 at1F842.
+Oracle width.csv covers all256 raw byte values.
+The planned typed Width should accept only0/1: for raw2, this helper chooses
+the wide word while the calibration-choice slice below chooses narrow data.
+
+3. Ordinary calibrated noise/squelch slice
+
+Slice08004CCA stops at08004D5C before AFC. Its ordinary path requires
+RAM200011F9==0; it follows the current-channel pointer at200010EC.
+  channel[3]==0: selected noise2000081D, squelch2000081F;
+  channel[3]!=0: selected noise2000081E, squelch20000820.
+Those four bytes were filled by the actual frequency selector from band
+record+30/+40/+50/+60 at the selected point. No interpolation is introduced.
+
+Order: helper04ECC -> A4F, then helper04F60 -> A78.
+Both read level=config[200035EC+A4] without a local range check.
+Tables at08026370/0802637B, valid documented indices0..10:
+  noise offsets: 10,10,9,8,7,6,5,4,3,2,1;
+  squelch offsets: 0,0,2,4,6,10,16,22,28,34,38.
+Each output word has highbyte=u8(cal+2+offset), lowbyte=u8(cal-4+offset).
+STRB truncation gives modulo256 arithmetic, not saturation.
+
+Level0 does NOT suppress either register write. Independent status helper
+080051E4 returns1 immediately when config[A4]==0; otherwise it reads A0C
+bit1 and ORs software flag20001120. Therefore level0's user-facing off/open
+behavior must not be equated to a hardware-disable command in these words.
+
+RAM11F9!=0 takes a different path: config[B5] forms4F and config[B4] forms78,
+highbyte=config byte, lowbyte=max(byte-6,0). That override is OUTSIDE the new
+ordinary calibrated plan. No fallback or substitution is silently added.
+
+4. What the full stock primary RX caller actually orders
+
+Entry0801F828: optional PA13 LOW, wake57C4, bandwidth4228,
+compander reset4518, RX caller04BF0.
+Wake57C4 depends on RAM1124 and may already enable RX/path before this.
+
+04BF0 conditional prelude: if RAM1125==3, tail-tone handling, TX gates05318,
+PAcode04F0C(0), delay8380(20). Other reset calls depend on RAM1125>0.
+Then frequency04B88 at04C50; tone/decoder settings; 4D/4E settings;
+ordinary4F/78 or manual override; AFC73; RX-start04FA0; RX-path04FF0.
+No unconditional30=0 before38/39 appears in this caller.
+Do not infer a safe universal takeover or a ready receiver from this sequence.
+
+Primary04FA0 and secondary03E3C are matching RX-start fragments:
+  respective chip37=1F0F;
+  delay8380(10);
+  chip30=0200;
+  chip30=BFF1.
+Oracle rx-start.csv captures both. The10 is recorded as the helper argument,
+not a measured wall-clock delay. Neither fragment polls PLL lock.
+Secondary03E3C alone does not prove a full symmetric B receive procedure;
+reviewed secondary caller03F58 also invokes TX-gate/power paths.
+Only B FrequencyPlan is justified by the present bounded composition work.
+
+5. RX gates/relay and deliberately limited new plan
+
+04FF0 reads A33 fresh, writes (prior&FFCC)|route-mask, then sets PF0.
+The same original helper is executed; two exact PF0 stores are captured and
+skipped while MMIO stays unmapped. Full evidence is in research/band-switch.
+These requests preserve TX bits3/2 and do not establish RF-off.
+
+New harness composition, in exact order:
+  4228 -> 04B88 -> slice04CCA..04D5C -> 04FF0.
+Observed events: A43,A38,A39,A4F,A78,readA33,writeA33,PF0.
+This CONCATENATION IS NEW POLICY, not a trace of one complete stock function.
+Each individual fragment executes original Thumb without replacing formulas.
+The new configuration plan deliberately omits stock wake, tones, compander,
+AGC, 4D/4E, AFC,37/30 RX-start, PA-gating and end-to-end RF readiness.
+Completing its bus writes means requests were delivered; settling, physical
+path state and a working/calibrated receiver require separate qualification.
+
+6. Reproducible oracle/fixtures
+
+derive_oracle.py uses pinned StockArm/Unicorn2.1.4. Only RX Flash and RW RAM
+are mapped. No boot, serial, native execution of firmware, or hardware access.
+Interceptions: SPIread25D30, RFwriteA/B, RFreadA33 supplied prior seed,
+delay8380 for start fragments; exact PF0 store PCs507C/5086; stop4D5C.
+All substitutions are explicit; selector/width/threshold/masking formulas run.
+
+composition.csv:432 cases,3456 events. Columns:
+  case,frequency_10hz,width,level,raw_offset,prior_reg33,step,
+  kind,target,address,value.
+Inputs:12 boundary/representative frequencies, widths0/1, levels0/1/10,
+offsets0000/8000/FFFF, priorA33=0000/A5A5. Events include the fresh A33 read.
+
+frequency.csv:72 A/B cases; same12 frequencies and3 offsets.
+width.csv:256 raw width values; rx-start.csv:2 chip-specific fragments.
+composition-inputs.json records actual SPI addresses and four selected bytes.
+SHA256 for every fixture, including that JSON, is in oracle-summary.json.
+
+synthetic-calibration-{0000,8000,ffff}.hex: text hex of4096 bytes, NOT user data.
+Start allFF; byte0=9A;15 records at32+slot*112. Each record byte[i] is
+(slot*17+i*3+5)&255, then bytes0..1 replaced by the indicated offsetLE.
+These files supply test INPUTS. Expected outputs are machine observations,
+not the same generator formula duplicated from the Rust implementation.
+
+No Rust/Cargo/source outside this research directory was changed by this task.
+Sibling adds composition tests; root owns crate implementation/build.
+Repeat with Python3+Unicorn2.1.4, optional environment paths:
+  UV98_STOCK_REFERENCE: pinned BIN;
+  UV98_RUST_PROJECT: project root;
+  python research/receive-plan/derive_oracle.py
+
+Bounded disassembly in this directory: width.asm, primary-rx-entry.asm,
+primary-rx-caller.asm, primary/secondary-rx-start.asm, squelch-status.asm.
+Literal pools may appear as instructions in a linear listing; they are data.

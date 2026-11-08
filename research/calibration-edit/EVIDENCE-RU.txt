@@ -1,0 +1,169 @@
+Редактирование сохранённых калибровок: схема и сохранность
+=======================================================
+
+Статус и границы
+---------------
+crates/calibration-edit — чистая модель локального документа, no_std,
+forbid(unsafe_code), без alloc/IO/COM/прошивки. Document содержит неизменный
+импортированный original4096 и рабочую копию4096: суммарно8192байта.
+Clone копирует обе области явно; это модель host CPS, не обещание приемлемого
+расхода RAM/стека для прошивки. Undo history и файловое сохранение — внешний
+host слой. В этом модуле физическая запись калибровок отсутствует.
+
+Начальная проверка использует Calibration::parse: ровно4096байт и marker0x9A.
+Контрольная сумма блока неизвестна. Эта проверка не обнаруживает произвольное
+повреждение остальных байтов, не подтверждает модель аппарата или RF-точность.
+Источник, исходный SHA256 и отдельная резервная копия остаются обязательными
+данными происхождения, которые ведёт host приложение.
+
+Источники
+---------
+1. Radio Tuning Software241219.exe, ранее зафиксированный SHA256:
+   121c8da8c698a986acbb75f1fed68f46b25bcd940877d131dc1bd1047abf2848.
+   Статическая декомпиляция ILSpy8.2.0.7535:
+   work/tuning-analysis/decompiled/UV5118_4819_Tune/MainForm.cs.
+   Перепроверенный SHA256 этого CS:
+   c6d7ef5d8efd4e1cd51b7d058f4d6002769266e1e9fb8a187694f87a0dfed4a9.
+   FillBand15694..15742, SaveBand15744..15795,
+   ReadDataToUI15797..15859, SaveTuneData15878..15931.
+   Общие поля, записи32+band*112, маски UI и hidden table points прочитаны
+   из этих методов. В ходе данной задачи EXE не запускался.
+
+2. crates/calibration/src/lib.rs — существующий независимый readonly parser.
+   Подтверждённый пользовательский4096byte fixture stock UV98 Plus1.16:
+   SHA256 8906c3d9847eeeefe0ee6aad6aa4302949bd5e5984f3c64ed02edb8cf6fb0ff7.
+   Новая библиотека использует его только как один regression fixture;
+   исходные bytes не заменяются tuning defaults и не модифицируются.
+
+3. Related RT8801.16 application:
+   SHA256 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc.
+   Это не MCU-readback пользовательской UV98. Его bounded evidence:
+   research/frequency/EVIDENCE-RU.txt,
+   research/rf/RF-CONSUMPTION-AND-FORMULAS.txt,
+   research/general/findings.txt.
+   Метаданные Consumption описывают именно эти просмотренные пути.
+   TuningLayoutOnly не означает «никогда не используется».
+
+Общая схема
+-----------
+Все16-битные слова little-endian. Адреса относительно импортированного блока.
+Descriptor имеет Field, Group, offset, width, mask, shift, bias, min/max,
+русские label/detail, editable и Consumption. Дескриптор только информирует;
+запись принимает Field и заново разрешает его, произвольный offset/descriptor
+передать в writer нельзя.
+
+value = ((raw_word & mask) >> shift) + bias.
+При записи меняются только mask-биты. Остальные биты и байты сохраняются.
+min/max — пределы представления кода, не безопасный RF-диапазон.
+
+General:
+ offset  width mask/shift  value range        назначение
+ 0       1     FF/0        0..255             marker, только чтение
+ 1       1     FF/0        0..255             test mode, только чтение
+ 2       2     FFFF/0      0..65535           REG3E, полное сырое слово
+ 4,6     2     C000/14     0..3               expander/compressor mode
+ 4,6     2     3F80/7      0..127             expander/compressor AF
+ 4,6     2     007F/0      0..127             expander/compressor Noise
+ 8..11   1     FF/0        0..255             TX300/TX3k/RX300/RX3k raw
+ 12,14   2     FFFF/0      0..65535           VOX On/Off raw
+ 16..30  1     FF/0        0..255             15 battery raw points
+ 31      1     FF/0        -128..127          ADC offset-binary, bias−128
+
+Test mode: source ComboBoxScreen содержит Stop Test/Start Test (line6983),
+а не выбор дисплея. В related stock есть изменения режима/побочные эффекты.
+Поэтому это наблюдаемый control flag, не редактируемая RF-калибровка.
+
+Для band0..14 base=32+band*112:
+ +0      2     FFFF/0      -32768..32767      frequency offset-binary
+ Wide base+2, Narrow base+9 — семь байт:
+ +0      1     FF/0        0..255             MIC gain raw
+ +1      2     FFFF/0      0..65535           TX deviation FULL raw word
+ +3      1     7F/0        0..127             CTCSS code; bit7 preserved
+ +4      1     7F/0        0..127             DCS code; bit7 preserved
+ +5      2     03F0/4      0..63              volume Gain; upper6bits preserved
+ +5      2     000F/0      0..15              volume DAC; other bits preserved
+
+Шесть таблиц16байт: relative+16 High, +32 Low, +48 NoiseWide,
++64 SquelchWide, +80 NoiseNarrow, +96 SquelchNarrow. Каждая точка raw0..255.
+Исходный UI показывает по band:
+[8,16,10,16,15,16,16,16,16,16,16,16,16,16,12] точек каждой строки.
+Оставшиеся19*6=114 точек доступны для чтения, запрещены для правки.
+Это сознательная граница редактора по подтверждённым UI-полям, не заявление
+об абсолютной неиспользуемости всех этих байтов firmware.
+Хвост1712..4095 не интерпретируется и не имеет editable descriptors.
+
+Всего1666 descriptors, из них1550 editable; readonly116 — marker/testmode
+и114 скрытых точек. fields() ленивый ExactSizeIterator, без Vec.
+
+Полные слова против масок UI
+---------------------------
+Related stock0x080054E0/54FA/5512/5528 читает TX deviation как FULL u16.
+Поле TxDeviationRaw намеренно заменяет всё слово. GUI должен показывать
+полное значение; редактор не превращает его в low12bit/0x3000+code.
+
+Filters general8..11 читаются LDRB и передаются helper0x080038D0 без &7.
+Field::Filter — полный raw byte; вне switch работает наблюдавшийся fallback.
+Редактор не заменяет raw0xF0 на0 и не объявляет fallback хорошей настройкой.
+
+Legacy SaveBand переписывает TX deviation как0x3000+UIlow12 и volume как
+0xB000+(Gain<<4)+DAC, а SaveTuneData нормализует несколько других полей.
+Эти преобразования намеренно НЕ перенесены: выбор одного параметра должен
+оставлять непрошенные bytes/bits без изменений. Full-word изменения только
+там, где это явно указанное выбранное raw-поле.
+
+Consumption и labels диапазонов
+------------------------------
+Табличные строки/frequency offset/full deviation/filter подтверждены в
+related путях, описанных в прежних отчётах. MIC, volume, compander, REG3E,
+VOX tuning, battery table/ADC correction в рассмотренных применяющих путях
+не наблюдались либо подменялись отдельной конфигурацией/константами.
+
+Отдельно: selector0x08012CBE повторяет slot13 в последней частотной ветке;
+slot14 не выбирается этим selector. Поэтому descriptors band14 не получают
+RelatedStockTraced даже для структурно известных полей. Формат остаётся
+известен, применение конкретной записи15 не объявляется доказанным.
+
+band_label() возвращает точную подпись исходной tuning-вкладки:
+0 136-174; 1 400-480; 2 18-64; 3 64-136; 4 174-240;
+5 240-320; 6 320-400; 7 480-560; 8 560-640(660);
+9 840-920; 10 920-1000; 11 1000-1080; 12 1080-1160;
+13 1160-1240; 14 1240-1300.
+Источники Text: lines7034,7537,8073,8585,9121,9653,10189,10725,11261,
+11797,12335,12871,13407,13943,14479. Порядок ListAll16116..16130.
+Это labels исходного UI, НЕ таблица firmware selection boundaries и НЕ
+обещание диапазонов аппаратного RX/TX. Неоднозначность560-640(660) сохранена.
+
+Транзакции/сброс/экспорт
+----------------------
+set(Field,i32) — одиночная правка. apply(&[Change]) сначала проверяет ВСЕ
+индексы, разрешения, значения и пересечения масок, потом меняет bytes.
+Повтор одного поля запрещён даже при одинаковом значении. Непересекающиеся
+Gain/DAC или compander parts одного слова допустимы в одном batch.
+Ошибки оставляют original/working побайтно прежними. Третий4096byte буфер
+для atomic validation не нужен. Для не более1666 changes проверка пересечений
+ограничена; цена O(n²) — host-модель, не firmware realtime pipeline.
+
+apply возвращает число реально изменённых ПОЛЕЙ, не байтов. dirty_count/diff
+считают bytes относительно original; Diff выдаёт offsets по возрастанию.
+reset_field возвращает только mask выбранного editable поля к original;
+reset_all возвращает исходные4096bytes целиком. Это не factory defaults.
+original(), bytes(), export_bytes() дают только immutable borrowed access.
+Файловое сохранение/manifest/SHA256 выполняет host, а не эта библиотека.
+
+Проверки
+--------
+14 tests подготовлены; Cargo/test запускает root. Они проверяют:
+-1666 уникальных descriptors и независимую ожидаемую bit-coverage схему;
+-сопоставление всех bands/tables с существующим parser и реальным fixture;
+-каждое из1550 editable полей: разрешённая mask, original/unknown tail intact;
+-для каждого поля обе границы и отклонение min−1/max+1/i32 extremes;
+-raw full16/full8 без UI-масок, CTCSS/DCS bit7, volume reserved bits;
+-signed offset-binary, atomic bad batch, overlapping batch rejection;
+-shared-word disjoint masks/reset, readonly controls/hidden points;
+-sorted byte diff, Clone независимость, reset exact original;
+-length/marker-only import без checksum/default claims, hostile usize indices;
+-источник и порядок band labels, сохранение неоднозначной подписи.
+
+Данные calibration RF-performance, применение к радиостанции и восстановление
+изменённых калибровок этими тестами не проверяются. Наличие editable поля
+означает доказанную схему файла, а не рекомендацию менять заводской параметр.

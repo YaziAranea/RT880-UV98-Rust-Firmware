@@ -1,0 +1,8 @@
+[package]
+name = "uv98-codeplug"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Read-only borrowed sections of an RT880 CPS 1.10 .880dmf file"
+
+[dependencies]

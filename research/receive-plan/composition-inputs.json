@@ -1,0 +1,4754 @@
+[
+  {
+    "case": 0,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 1,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 2,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 3,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 4,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 5,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 6,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 7,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 8,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 9,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 10,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 11,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 12,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 13,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 14,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 15,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 16,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 17,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 18,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 19,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 20,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 21,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 22,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 23,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 24,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 25,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 26,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 27,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 28,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 29,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 30,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 31,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 32,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 33,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 34,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 35,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 183,
+    "selected_noise_narrow": 23,
+    "selected_squelch_wide": 231,
+    "selected_squelch_narrow": 71
+  },
+  {
+    "case": 36,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 37,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 38,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 39,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 40,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 41,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 42,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 43,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 44,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 45,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 46,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 47,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 48,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 49,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 50,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 51,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 52,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 53,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 54,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 55,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 56,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 57,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 58,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 59,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 60,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 61,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 62,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 63,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 64,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 65,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 66,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 67,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 68,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 69,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 70,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 71,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 192,
+    "selected_noise_narrow": 32,
+    "selected_squelch_wide": 240,
+    "selected_squelch_narrow": 80
+  },
+  {
+    "case": 72,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 73,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 74,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 75,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 76,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 77,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 78,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 79,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 80,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 81,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 82,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 83,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 84,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 85,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 86,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 87,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 88,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 89,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 90,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 91,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 92,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 93,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 94,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 95,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 96,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 97,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 98,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 99,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 100,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 101,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 102,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 103,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 104,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 105,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 106,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 107,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 201,
+    "selected_noise_narrow": 41,
+    "selected_squelch_wide": 249,
+    "selected_squelch_narrow": 89
+  },
+  {
+    "case": 108,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 109,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 110,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 111,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 112,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 113,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 114,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 115,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 116,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 117,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 118,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 119,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 120,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 121,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 122,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 123,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 124,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 125,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 126,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 127,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 128,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 129,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 130,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 131,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 132,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 133,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 134,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 135,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 136,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 137,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 138,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 139,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 140,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 141,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 142,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 143,
+    "spi_read": [
+      256,
+      112
+    ],
+    "selected_noise_wide": 210,
+    "selected_noise_narrow": 50,
+    "selected_squelch_wide": 2,
+    "selected_squelch_narrow": 98
+  },
+  {
+    "case": 144,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 145,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 146,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 147,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 148,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 149,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 150,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 151,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 152,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 153,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 154,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 155,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 156,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 157,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 158,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 159,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 160,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 161,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 162,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 163,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 164,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 165,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 166,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 167,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 168,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 169,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 170,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 171,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 172,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 173,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 174,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 175,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 176,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 177,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 178,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 179,
+    "spi_read": [
+      368,
+      112
+    ],
+    "selected_noise_wide": 200,
+    "selected_noise_narrow": 40,
+    "selected_squelch_wide": 248,
+    "selected_squelch_narrow": 88
+  },
+  {
+    "case": 180,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 181,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 182,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 183,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 184,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 185,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 186,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 187,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 188,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 189,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 190,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 191,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 192,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 193,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 194,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 195,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 196,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 197,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 198,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 199,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 200,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 201,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 202,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 203,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 204,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 205,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 206,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 207,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 208,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 209,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 210,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 211,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 212,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 213,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 214,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 215,
+    "spi_read": [
+      32,
+      112
+    ],
+    "selected_noise_wide": 155,
+    "selected_noise_narrow": 251,
+    "selected_squelch_wide": 203,
+    "selected_squelch_narrow": 43
+  },
+  {
+    "case": 216,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 217,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 218,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 219,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 220,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 221,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 222,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 223,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 224,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 225,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 226,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 227,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 228,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 229,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 230,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 231,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 232,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 233,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 234,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 235,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 236,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 237,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 238,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 239,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 240,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 241,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 242,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 243,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 244,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 245,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 246,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 247,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 248,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 249,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 250,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 251,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 243,
+    "selected_noise_narrow": 83,
+    "selected_squelch_wide": 35,
+    "selected_squelch_narrow": 131
+  },
+  {
+    "case": 252,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 253,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 254,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 255,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 256,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 257,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 258,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 259,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 260,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 261,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 262,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 263,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 264,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 265,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 266,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 267,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 268,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 269,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 270,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 271,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 272,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 273,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 274,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 275,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 276,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 277,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 278,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 279,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 280,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 281,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 282,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 283,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 284,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 285,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 286,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 287,
+    "spi_read": [
+      592,
+      112
+    ],
+    "selected_noise_wide": 246,
+    "selected_noise_narrow": 86,
+    "selected_squelch_wide": 38,
+    "selected_squelch_narrow": 134
+  },
+  {
+    "case": 288,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 289,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 290,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 291,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 292,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 293,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 294,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 295,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 296,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 297,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 298,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 299,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 300,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 301,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 302,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 303,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 304,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 305,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 306,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 307,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 308,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 309,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 310,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 311,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 312,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 313,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 314,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 315,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 316,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 317,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 318,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 319,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 320,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 321,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 322,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 323,
+    "spi_read": [
+      144,
+      112
+    ],
+    "selected_noise_wide": 184,
+    "selected_noise_narrow": 24,
+    "selected_squelch_wide": 232,
+    "selected_squelch_narrow": 72
+  },
+  {
+    "case": 324,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 325,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 326,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 327,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 328,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 329,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 330,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 331,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 332,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 333,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 334,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 335,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 336,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 337,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 338,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 339,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 340,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 341,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 342,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 343,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 344,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 345,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 346,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 347,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 348,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 349,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 350,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 351,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 352,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 353,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 354,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 355,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 356,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 357,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 358,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 359,
+    "spi_read": [
+      928,
+      112
+    ],
+    "selected_noise_wide": 74,
+    "selected_noise_narrow": 170,
+    "selected_squelch_wide": 122,
+    "selected_squelch_narrow": 218
+  },
+  {
+    "case": 360,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 361,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 362,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 363,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 364,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 365,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 366,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 367,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 368,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 369,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 370,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 371,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 372,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 373,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 374,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 375,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 376,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 377,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 378,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 379,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 380,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 381,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 382,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 383,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 384,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 385,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 386,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 387,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 388,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 389,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 390,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 391,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 392,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 393,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 394,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 395,
+    "spi_read": [
+      1040,
+      112
+    ],
+    "selected_noise_wide": 46,
+    "selected_noise_narrow": 142,
+    "selected_squelch_wide": 94,
+    "selected_squelch_narrow": 190
+  },
+  {
+    "case": 396,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 397,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 398,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 399,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 400,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 401,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 402,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 403,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 404,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 405,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 406,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 407,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 408,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 409,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 410,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 411,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 412,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 413,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 414,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 415,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 416,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 417,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 418,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 419,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 420,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 421,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 422,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 423,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 424,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 425,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 426,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 427,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 428,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 429,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 430,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  },
+  {
+    "case": 431,
+    "spi_read": [
+      1488,
+      112
+    ],
+    "selected_noise_wide": 150,
+    "selected_noise_narrow": 246,
+    "selected_squelch_wide": 198,
+    "selected_squelch_narrow": 38
+  }
+]

@@ -1,0 +1,12 @@
+[package]
+name = "uv98-rf-sequence"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Bounded stock-derived RF A cold, receive and FM transmit requests"
+
+[dependencies]
+uv98-calibration = { path = "../calibration" }
+uv98-stock-model = { path = "../stock-model" }
+uv98-band-plan = { path = "../band-plan" }
+uv98-receive = { path = "../receive" }

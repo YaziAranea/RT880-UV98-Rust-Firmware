@@ -1,0 +1,168 @@
+RF GPIO backend AT32F423: ownership, режимы и граница аппаратного применения
+2026-11-08. Код opt-in, host-модель и статический разбор; устройство не трогалось.
+
+Источники
+
+Related RT880 1.16 application, base08002800, 251904 bytes:
+SHA256 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc.
+Это НЕ MCU-readback пользовательской UV98 Plus, совместимость PCB не доказана.
+research/board/board-pin-init.asm: bounded11AC8 GPIO initialization.
+research/rf-startup/rf-bitbang.asm: direction/read/byte helpers.
+research/rf-startup/rf-bus-select.asm: A/B register wrappers.
+research/rf-bus/EVIDENCE-RU.txt: исходный транспорт и границы timing.
+research/rx-runtime/EVIDENCE-RU.txt: PF8 request polarity, RSSI/audio/RX helpers.
+
+Локальные первичные SDK/PAC:
+Desktop/USB/rt880/fw_lib/libraries/drivers/src/at32f423_gpio.c,
+Desktop/USB/rt880/fw_lib/libraries/drivers/inc/at32f423_gpio.h;
+crates.io at32f4xx-pac0.4.0, feature at32f423, GPIOA/C/F RegisterBlock и CRM.
+Vendor C использован для проверки полей/offset, не копировался в Rust.
+Related schematic RT880 V2.pdf SHA256:
+b7858c30fbe6eb8bf57967d57d9985b29951ccffa766ca5ac9240796c9fab32a.
+Схемные выводы ранее сохранены в research/band-switch и rf-startup.
+
+1. Фиксированные пины и регистры
+
+RF A/U201: CS PA8, SCK PF6, DATA PC9.
+  write0801E660/read0801E620/byte0801D8E8/readword0801D83C/direction0801D894.
+RF B/U400: CS PC7, SCK PC8, DATA PC6.
+  write0801E6D4/read0801E698/byte0801D7EC/readword0801D740/direction0801D79C.
+Control: PF0 UV/HF ANT-SW -> Q119 -> relayK200; PF8 AF MUTE.
+PB11 являетсяTX29/50M-SW, а не mute; PC15 HF-TXPOWER-EN.
+Новый backend не обращается кPB11,PC15,PC4,PC5 илиPB6PTT.
+
+PAC bases: GPIOA40020000, GPIOC40020800, GPIOF40021400.
+CFGR+00 (2bits/pin), OMODE+04 (1bit/pin), ODRVR+08 (2bits/pin),
+PULL+0C (2bits/pin), IDT+10, SCR+18, CLR+28.
+Живые уровни меняются32bit-store вSCR/CLR с одной16bitмаской.
+ODT целиком не записывается; mux registers иwhole-port reset не трогаются.
+IDT читается одним32bitvolatileload, затем маскируется только DATA bit.
+
+Stock init:
+11BF6..11C04: PA8;11C1A..11C2A: PCmask03C8 (включаетPC6/7/8/9);
+11C48..11C56: PF6. Параметры mode1/output, outtype0/push-pull,
+pull0/none, drive2. SDK именует drive2 MODERATE, неSTRONGER.
+PF0/PF8 входят в GPIOFmask0103 init11B90..11BA0 с теми жеoutputполями.
+
+Stock direction outputA1D8A0..1D8C0 иB1D7A8..1D7C8:
+mode1, outtype0, pull0, drive2. Input branches используютdefault25450:
+mode0, outtype0, pull0, drive1; drive1 называетсяSTRONGER, но outputdriver
+вinputmode отключён. Layout struct: pins+0,outtype+4,pull+5,mode+6,drive+7.
+Dynamic input переключает толькоDATApin, остальныеgpiofields сохраняются.
+
+2. Новая quiescent preparation, не verbatim stock boot
+
+Stock11C60..11C7C первоначально очищает CS/SCK/DATA. Такой CSLOW нельзя
+слепо переносить в takeover работающего аппарата. Наш constructor требует
+предварительно квалифицированные inactiveCSHIGH/PAinactive/poweredRF.
+
+Новый порядок:
+  DATA modeinput сначала отключает выходнойdriver, затемPP0/drive1/pull0;
+  latchCSHIGH, latchSCKLOW, latchDATALOW;
+  CS: PP0/drive2/pull0, modeoutput ПОСЛЕДНИМ;
+  SCK: те же поля, modeoutput последним;
+  DATA: те же поля, modeoutput последним.
+Это намеренно новый порядок с preload, не утверждение о trace стока.
+CS должен уже быть неактивен до входа; constructor не является процедурой
+безопасного захвата неизвестного loader/TX/power-up состояния.
+
+DATAinput runtime: outputdriver отключается до изменения иных полей.
+DATAoutput: сначала восстановить сохранённый latch, затемmodeoutputпоследним.
+Возвратoutput приCSLOW отвергается без registercalls. Это согласуется с
+rf-bus: A возвращаетoutput послеCSHIGH, B перед следующимCSLOW.
+Приcleanup доступныCSHIGH иDATAinput; PinError не блокирует эти запросы.
+NoDrop уPinEngine не выдаёт RF-off; штатный BusDrop делает boundedCS/DATArelease.
+
+3. Владелец GPIOF и совместимость существующих пинов
+
+Сохранён BoardPins::split(GPIOA,GPIOB,GPIOC,GPIOD).
+Его ReservedPins::with_rf(GPIOF) consumes reserved capability и wholeGPIOF,
+возвращая закрытые capability-типы:
+  RfPrimaryPins: A0100,C0200,F0040;
+  RfSecondaryPins: C01C0;
+  RfControlPins: F0101;
+  ReservedAfterRf: остальныеA/B/C/D/F.
+УReservedAfterRf нетwith_rf, поэтому второй наборRFtokens не создаётся.
+Capabilities неClone/Copy, поляprivate, PhantomData делаетих !Send/!Sync.
+Это ownershipоперация безMMIO. GPIOF физически не сбрасывается.
+NOR/LCD/keyscan не пересекаются; GPIOB вообще отсутствует вRFbackend.
+PF6 не пересекается сcontrolPF0/PF8.
+
+Каждый hardwarewrapper владеет своимcapability. RMW GPIO-конфигурации при
+этом всё равно требует сериализации со ВСЕМИ пользователями порта/CRM,
+включая владельцев других пинов. IRQ/DMA/rawpointer aliases запрещены
+unsafecontract. Разделениеtokens не превращает whole-registerRMW вatomic.
+
+4. API и аппаратные preconditions
+
+crates/rf-at32, uv98-rf-at32, no_std; defaultfeatureбезMMIO.
+engine::Registers задаёт read/write толькоconfigfields,atomicset/clear,input.
+PinEngine<Registers> и GuardedControl<Registers,Interlock> исполняют тот же
+код наhostmock. Извлечь их mutableRegisterbackend черезAPI нельзя.
+
+hardware feature:
+  PrimaryPins::unsafe from_prepared_quiescent(RfPrimaryPins,&mutCRM);
+  SecondaryPins::unsafe from_prepared_quiescent(RfSecondaryPins,&mutCRM);
+  Control<G>::unsafe from_prepared_quiescent(RfControlPins,&mutCRM,ControlLevels,G).
+ТольконужныеGPIOclockbits OR вAHBEN1,readback; ниclocktree,ниGPIOreset.
+PrimaryPins/SecondaryPins реализуютrf_bus::Pins; into_bus(delay) привязывает
+правильныйProfile. ПубличныйPins допускает manualBus::new, поэтому lifetime
+контракт явно требует не перепутатьprofile: Pairlabels не доказываютпроводку.
+
+Caller обязан установить exactMCU/PCB, unlockedpins, stableclock/power,
+отсутствие конкурирующих alternatefunctions/IRQ/DMA, quiescentRF/PA,
+готовностьприёмника и правильнуюbusвыборку. Constructor не устанавливает
+RFinit, supplies, PLL, shutdownTX, PA bias илирадиокалибровки.
+CRM/gpioMMIO по своему устройству не возвращает electricalACK; успешныйstore
+не подтверждает напряжение, фактическийконтактреле илипринятыйRFregisterword.
+
+ControlLevels содержит явныеinitialPF0/PF8levels. Они должны совпадать с
+уже квалифицированным состоянием. Constructor preloads beforeoutput,
+без high-Zpulse наrelay/audio и без неявного движенияреле.
+
+5. Interlock и audio semantics
+
+Interlock обязателен, permissivedefault отсутствует. Это bounded observational
+checkactualPTT/boardpreparedconditions, неcachedGUIbutton. Он не меняет
+RF/relayregisters/ownership. PB6 не дублируется: свежийPTT читается через
+существующего владельца, которыйadapter предоставляетвнешнемуinterlock.
+
+Control/GuardedControl реализуютreceive::BoardControl иAudioControl.
+PF0levelпроверяетinterlock передзапросом. PF8HIGH тоже требуетinterlock.
+PF8LOW остаётся доступенпослеегоотказа, чтобыstop/fault могли запроситьmute.
+set_audio_mute(true)->PF8LOW, false->PF8HIGH; этоstockrequestpolarity:
+  helper1F084..1F09A приclearaudiorequests пишетPF8LOW;
+  mainloop182D0..182DC приnonzerorequests пишетPF8HIGH;
+  1FC70 иFMcaller508C формируютrequestbits.
+МодельнеобъявляетPF8LOW гарантиейфизическойтишины илиRFoff.
+Clock/power/ownershipGPIO должны оставатьсядействительными и дляcleanup
+послеотказаreceiveinterlock. PC15/PB11/PAshutdown здесьнеисполняются.
+
+6. Timing boundary
+
+Delayprovider не добавлялся. RF bus вызываетcaller Delay поизученнымphase;
+оптические/электрическиеmicroseconds не выдумываются изпростогоаргумента10.
+В stockread SCKHIGH сразу следуетIDTsample и толькоПотомReadHighdelay.
+НовыйMMIO также имеетoneIDTread безsyntheticsetupdelay. Caller должен отдельно
+квалифицироватьactualedge-to-samplelatency, CPU/interrupts иchiprequirements.
+Это не hardwaretimingtest и не достаточноеусловиеработоспособногоприёмника.
+
+7. Подготовленные проверки
+
+8boundedcoretests: A/B allunownedconfig/latchbits across5seeds; конкретные
+ports/masks; inputreleasefirst/outputlast/preloads; dataonlyturnaround;
+неправильныедirections безI/O; actualrf-bus24risingrequests/readword/Arestore/
+Brelease; controlPF0/PF8only; guardrefusal сдоступнымPF8LOWcleanup.
+Boardpins: disjointmasktest иcompile-failownershipchecks.
+
+9-йintegrationtest связываетPinEngine<MockRegisters> ->rf_bus::Bus ->Pair
+сGuardedControl ->Runtime. ДоexplicitcurrentticketsettledACKнетListening/
+sample. ДалееactualGPIOframes подтверждаютA67raw01D2,A0Cbit1,FMaudio
+A47=6140/readA01=2/A48=B0C5 иPF8HIGH. StopприPTTblocked запрашиваетPF8LOW,
+безновыхRFframes. SecondaryB не затрагивается, controlrequestsсвереныточно.
+Это hostmock: ACKвtest — явныйsyntheticinput, не доказательствореальногоlock.
+
+ФактCargo/ARMbuild/testpassфиксируетосновнойbuild отдельно. Этот этап не
+запускалCOM,GPIOнааппарате,прошивальщик,не менял заводскиекалибровки.
+Stage0автоматическинеподключён. Аппаратныйbring-up иточнаяUV98идентификация
+остаютсяотдельным этапом; source/hashсборканезаменяетphysicalRXпроверку.

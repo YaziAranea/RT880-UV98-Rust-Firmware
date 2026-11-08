@@ -1,0 +1,15 @@
+[package]
+name = "uv98-keyscan-at32"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Opt-in conservative GPIO matrix/PTT scanner for related AT32F423 board"
+
+[features]
+default = []
+hardware = ["dep:at32f4xx-pac", "uv98-board-pins/hardware"]
+
+[dependencies]
+uv98-keys = { path = "../keys" }
+uv98-board-pins = { path = "../board-pins" }
+at32f4xx-pac = { version = "=0.4.0", default-features = false, features = ["at32f423"], optional = true }

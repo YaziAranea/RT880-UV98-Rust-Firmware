@@ -1,0 +1,123 @@
+COM-чтение CPS 0.2: независимый аудит, 2026-11-08 04:14 +06:00
+
+Этот аудит: только чтение локальных исходников/снимков и перечисление Windows
+устройств/процессов. COM-порт не открывался; приложения не завершались.
+Код/Cargo не изменялись.
+
+Текущее состояние Windows
+  HKLM\HARDWARE\DEVICEMAP\SERIALCOMM: \Device\Serial2 -> COM20.
+  Win32_PnPEntity: USB-SERIAL CH340 (COM20), Status OK, error code0.
+  DeviceID: USB\VID_1A86&PID_7523\<redacted-device-instance>
+  Win32_SerialPort показал только COM10 и пропустил COM20. Для UI-списка нельзя
+  использовать только этот класс: registry/PnP подтверждают наличие COM20.
+  Процессы/окна CPS, Tuning, UV98/RT880 при просмотре не обнаружены.
+  Это не доказывает свободный handle порта, соединение кабеля с радио,
+  включённую станцию, её режим или идентичность подключённой станции.
+
+Проверенные Python routines
+  work/uv98-calibration-reader/reader.py
+    SHA256 a1b589dd95970ecf162dc928edf2b9a5d189fec04838e09820e0d437ae87c234
+  work/uv98-calibration-reader/storage_reader.py
+    SHA256 3780358e904559253527ee16b8484947c7ce017a49ad698abb6f9fbc6827a086
+  Текущие хеши обоих readers, decoder и tests совпадают с provenance сохранённого
+  успешного чтения. Исходные EXE CPS/Tuning для этого аудита не запускались.
+
+Последовательность транспорта, фактически успешная на COM20
+  115200 baud, 8 data bits, no parity, 1 stop bit.
+  DTR=true, RTS=false; xonxoff/rtscts/dsrdtr=false.
+  Python задаёт DTR/RTS до port.open(); нельзя случайно принять иные defaults.
+  CONNECT: 34 52 05 10 9B; ожидаемый ответ один байт06.
+  Reader допускает максимум3CONNECT с timeout200ms; 00 допускается для повтора,
+  любой другой ответ отвергается. Фактические успешные полные сеансы: одинCONNECT.
+  READ(block): 52 hi lo sum8; hi/lo — big-endian u16 номер1024байтного блока.
+  sum8 = сумма предыдущих байтов по модулю256, не CRC.
+  Ответ: 52 hi lo +1024байта data +sum8, всего1028байт.
+  Проверять точную длину, все3байта header/address и sum(frame[0..1027])&255.
+  Чтение может приходить частями; reader собирает ровно1028 с общим deadline3s.
+  Write timeout1s, пауза между блоками20ms. Частичный write — ошибка.
+  После ACK сеанс завершается END: 34 52 05 EE 79; отдельного ACK не ждёт;
+  ждёт20ms, закрывает порт. Даже при read error делает bounded END/close.
+  Между двумя независимыми проходами: close/reopen и пауза200ms.
+  Нет command0x2A (установка времени), opcodes записи40/90..A3, flash/erase.
+
+Сохранённые реальные чтения, повторно проверены офлайн сейчас
+  Каталог: outputs/uv98-backup-2026-11-08.
+  Calibration: blocks0..3, два equal4096байтных чтения,
+    2026-11-07T20:47:18.703637Z..20:47:19.827105Z.
+    SHA256 8906c3d9847eeeefe0ee6aad6aa4302949bd5e5984f3c64ed02edb8cf6fb0ff7.
+  Probe: blocks0,3,8,859,1023,2047,4095; семь valid1028байтных ответов.
+  Full: два прохода blocks0..4095, каждый4194304байта.
+    2026-11-07T20:52:01.887474Z..21:07:37.805621Z; около7m48s на проход.
+    SHA256 обоих: 1e8f4c5c5373392a08a041da9132e22d21ad0dba4fca97b9bb4f21ade77c55a3.
+  Независимая перепроверка всех8192 frames: header/address/checksum valid;
+  frame payload соответствует сохранённому raw; оба raw hashes совпадают.
+  Каждый TX ровно16394байта = CONNECT +4096READ +END, без иных команд.
+  Каждый RX ровно4210689байт = ACK06 +4096frames; лишних байтов нет.
+  Calibration4096 точно совпадает с началом полного4MiB image.
+
+Обычный CPS READ и отображение в .880dmf/.98pdmf
+  CFG:      blocks8..11,    image0x02000..0x02FFF -> file0x00000..0x00FFF.
+  Channels: blocks16..63,   image0x04000..0x0FFFF -> file0x01000..0x0CFFF.
+  FM:       blocks856..859, image0xD6000..0xD6FFF -> file0x0D000..0x0DFFF.
+  Zones:    blocks112..239, image0x1C000..0x3BFFF -> file0x16000..0x35FFF.
+  Итого184блока /188416байт. Эти блоки включены в реально проверенное4MiB чтение.
+  Time: file0x0E000..0x15FFF,32768байт, штатный CPS READ не получает.
+  Поэтому полный221184байтный файл нельзя молча синтезировать из READ + нулей.
+  Рекомендуется обновлять4прочитанные секции в существующем неизменённом
+  документе, оставляя Time из него и явно указывая происхождение этой секции.
+  Без template сохранять отдельный snapshot с маской покрытия/provenance,
+  не объявлять его полноценным fresh CPS file или полным backup.
+
+Граница физического подтверждения
+  Related public RT8801.16, SHA256
+  eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc:
+  handler0801BDC8/READ0801BDE2..0801BE18 вычисляет block<<10;
+  helper08025D30 выдаёт SPI READ03+24bit address, без скрытого offset.
+  Host0..4095 соответствует main-array0x000000..0x3FFFFF в этом коде.
+  Это related RT880 binary, а не извлечённая прошивка MCU данного UV98Plus.
+  Application/bootloader MCU, protection/OTP, SPI security/SFDP, отдельные
+  GPS/APRS modules этим чтением не покрыты. Handler не ограничивает верхний
+  адрес: предел4095 должен обеспечивать host. Для CPS0.2 лучше fixed184allowlist.
+
+END caveat — сохранять точную формулировку
+  CONNECT не обнуляет dirty guard20001225 и backup kind20001227.
+  READ не меняет эти флаги и не вызывает запись.
+  END08024788..C0 при уже установленном guard может вызывать копирование:
+    kind1: calibration0x0000..0x0FFF ->backup0x1000..0x1FFF;
+    kind2: CFG/Channels/FM primary ->соответствующие externalSPI backups.
+  Проверенные ветки стирают/программируют externalSPI, не MCU flash.
+  Исходное состояние guard после power-on и все побочные ветки не доказаны.
+  Корректно: «Клиент не отправляет явных команд записи/стирания».
+  Некорректно: «Сеанс гарантированно не делает никаких физических записей».
+  Equal images доказывают стабильность прочитанных значений; перепрограммирование
+  тех же байтов не исключается. Не заменять END неизвестной последовательностью.
+
+Рекомендации live-read CPS0.2
+  1. Один явно выбранный порт и один worker. Без автооткрытия/автоперебора портов.
+     UI заранее показывает чтение; не переходить в bootloader/update mode.
+     Перед первым trial проверить питание/обычный режим радио и отсутствие
+     другого активного CPS/Tuning-сеанса. При ошибке занятости не убивать процесс.
+  2. Полностью фиксированный allowlist: CONNECT,184известных READ,END.
+     Никакой синхронизации часов, изменения baud, writes/defaults/config reset.
+     Одна outstanding request; timeout,wrong address,checksum,shortwrite ->stop.
+     Не искать следующий header внутри повреждённого payload; ошибка sum8 — stop.
+  3. Два прохода с отдельным reopen; сначала проверить length/header/checksum,
+     затем побайтовое равенство блоков. До этого не менять Document.
+     Если значения реально изменились — сохранить evidence и показать mismatch.
+  4. Cancellation между блоками либо bounded read deadline; cleanupEND/close
+     после подтверждённогоCONNECT. Не закрывать приложение до завершения worker.
+     Перед CONNECT не отправлять END наугад; failedACK не даёт verifiedsession.
+  5. Сохранить attemptedTX,rawRX,validatedframes,blockorder,timestamps,hashes,
+     ошибки/частичные данные и отдельно provenance непрочитанногоTime.
+     Не публиковать partial как verified; старые backup/исходныефайлы не заменять.
+  6. Применение verifiedsnapshot к существующему чистому документу — явнойкнопкой,
+     atomic transaction; только прочитанные4секции. Undo возвращает исходное.
+     Текущие калибровки0..3 при обычномCPS READ не запрашиваются/не заменяются.
+
+Первоисточники в workspace
+  work/uv98-calibration-reader/{reader.py,storage_reader.py}
+  work/cps-analysis/rt880-v110-decompiled/DM550_NOLCD/{MainForm,ReadForm,PortForm}.cs
+  outputs/uv98-backup-2026-11-08/{provenance,audit}.json
+  outputs/uv98-backup-2026-11-08/{calibration-read-01,storage-probe-01,storage-read-01}/manifest.json
+  outputs/uv98-backup-2026-11-08/evidence/rt880-116-read-mapping-evidence.txt
+  outputs/uv98-backup-2026-11-08/evidence/rt880-116-session-end-flags.txt
