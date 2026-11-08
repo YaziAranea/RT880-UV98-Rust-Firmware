@@ -104,9 +104,15 @@ Recovery image SHA256 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691d
 по расширению файла. Эти пути — указатели на исходники, не приглашение менять их.
 
 РЕПОЗИТОРИЙ И ГРАНИЦЫ ПУБЛИКАЦИИ
-Root создаёт отдельный private-репозиторий исходников/документов. Этот handoff
-не утверждает, что создание уже завершено: URL, visibility и commit фиксирует
-root в результате публикации. Не переводить автоматически в public.
+Создан отдельный private-репозиторий исходников/документов:
+https://github.com/YaziAranea/uv98-rust
+9 ноября 2026 CLI и GitHub connector подтвердили visibility=private.
+Первый опубликованный commit: d18fb22eee94193cbbb8eec698e452f583582418.
+Git-копия: work/github-private-uv98-rust/ от workspace; исходный рабочий проект
+остаётся work/uv98-rust-stage/. Автоматической синхронизации каталогов нет.
+Начать чтение GitHub с HANDOFF.md, README.md и BUILDING.md. Локальная квитанция
+с окончательным HEAD: outputs/github-private-publication-receipt-01.json.
+Не переводить автоматически в public.
 Личные NOR/.880dmf/полные calibration bytes и архивы, содержащие их, остаются
 локально. Existing source.zip/fixtures не считать автоматически готовой
 публичной выборкой. Публикуемый source set проверяется отдельно; отсутствующий
