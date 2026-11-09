@@ -2,6 +2,10 @@ UV98 Plus — передача проекта в следующий сеанс
 2026-11-09. Пользователь остановил разработку на сегодня.
 
 ЧИТАТЬ В ТАКОМ ПОРЯДКЕ
+0. Для новой модели без истории: MODEL-HANDOFF-RU.md и NEXT-MODEL-PROMPT.txt
+   в соседней Git-копии work/github-private-uv98-rust/ от workspace или в clone.
+   https://github.com/YaziAranea/uv98-rust/blob/main/MODEL-HANDOFF-RU.md
+   Это сводная точка входа; новый source handoff ZIP не равен старому release ZIP.
 1. AGENTS.md и FEATURES-NEXT-RU.txt — основной статус/41 стабильный ID/история.
 2. PRODUCT-ROADMAP-RU.txt — все цели пользователя, желаемый вид, приёмка,
    зависимости и отдельно предложения команды. Ничего не сокращать до одного спектра.
@@ -114,7 +118,10 @@ https://github.com/YaziAranea/uv98-rust
 Git-копия: work/github-private-uv98-rust/ от workspace; исходный рабочий проект
 остаётся work/uv98-rust-stage/. Автоматической синхронизации каталогов нет.
 Начать чтение GitHub с HANDOFF.md, README.md и BUILDING.md. Локальная квитанция
-с окончательным HEAD: outputs/github-private-publication-receipt-01.json.
+первой публикации: outputs/github-private-publication-receipt-01.json.
+Последующее исследование: outputs/reference-review-publication-receipt-01.json.
+Новый пакет для другой модели: outputs/UV98-handoff-2026-11-09/;
+точный commit, SHA архива и его состав — handoff-manifest.json внутри каталога.
 Не переводить автоматически в public.
 Личные NOR/.880dmf/полные calibration bytes и архивы, содержащие их, остаются
 локально. Existing source.zip/fixtures не считать автоматически готовой
