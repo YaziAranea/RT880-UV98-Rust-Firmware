@@ -1,3 +1,4 @@
+use crate::i18n::LocalizedText;
 use encoding_rs::GBK;
 use uv98_codeplug::channels::Tone;
 
@@ -10,16 +11,31 @@ pub fn decode_name(raw: &[u8]) -> (String, bool) {
     (text.into_owned(), errors)
 }
 
-pub fn encode_name(text: &str) -> Result<[u8; 16], String> {
+pub fn encode_name(text: &str) -> Result<[u8; 16], LocalizedText> {
     if text.chars().any(char::is_control) {
-        return Err("Имя не должно содержать управляющие символы".into());
+        return Err(msg!(
+            "Имя не должно содержать управляющие символы",
+            "Name must not contain control characters",
+            "Der Name darf keine Steuerzeichen enthalten"
+        )
+        .into());
     }
     let (encoded, _, errors) = GBK.encode(text);
     if errors {
-        return Err("В имени есть символы, которые не поддерживает кодировка CPS (GBK)".into());
+        return Err(msg!(
+            "В имени есть символы, которые не поддерживает кодировка CPS (GBK)",
+            "Name contains characters unsupported by CPS encoding (GBK)",
+            "Der Name enthält Zeichen, die von der CPS-Kodierung (GBK) nicht unterstützt werden"
+        )
+        .into());
     }
     if encoded.len() > 16 {
-        return Err(format!("Имя занимает {} байт; допустимо 16", encoded.len()));
+        return Err(msgf!(
+            "Имя занимает {} байт; допустимо 16",
+            "Name uses {} bytes; maximum 16",
+            "Name belegt {} Bytes; höchstens 16",
+            encoded.len()
+        ));
     }
     let mut raw = [0xFF; 16];
     raw[..encoded.len()].copy_from_slice(&encoded);
@@ -30,7 +46,7 @@ pub fn format_frequency(code: u32) -> String {
     format!("{}.{:05}", code / 100_000, code % 100_000)
 }
 
-pub fn parse_frequency(text: &str) -> Result<u32, String> {
+pub fn parse_frequency(text: &str) -> Result<u32, LocalizedText> {
     let normalized = text.trim().replace(',', ".");
     let mut parts = normalized.split('.');
     let whole = parts.next().unwrap_or("");
@@ -41,19 +57,47 @@ pub fn parse_frequency(text: &str) -> Result<u32, String> {
         || !whole.bytes().all(|c| c.is_ascii_digit())
         || !fraction.bytes().all(|c| c.is_ascii_digit())
     {
-        return Err("Частота: МГц, до пяти цифр после запятой; например 145.50000".into());
+        return Err(msg!(
+            "Частота: МГц, до пяти цифр после запятой; например 145.50000",
+            "Frequency: MHz, up to five decimal places; for example 145.50000",
+            "Frequenz: MHz, bis fünf Nachkommastellen; zum Beispiel 145.50000"
+        )
+        .into());
     }
-    let whole: u64 = whole.parse().map_err(|_| "Частота слишком велика")?;
+    let whole: u64 = whole.parse().map_err(|_| {
+        msg!(
+            "Частота слишком велика",
+            "Frequency is too large",
+            "Frequenz ist zu groß"
+        )
+    })?;
     let fraction: u64 = if fraction.is_empty() {
         0
     } else {
-        fraction.parse().map_err(|_| "Неверная частота")?
+        fraction.parse().map_err(|_| {
+            msg!(
+                "Неверная частота",
+                "Invalid frequency",
+                "Ungültige Frequenz"
+            )
+        })?
     };
     let result = whole
         .checked_mul(100_000)
         .and_then(|v| v.checked_add(fraction * 10u64.pow(5 - parts_fraction_length(&normalized))))
-        .ok_or("Частота слишком велика")?;
-    u32::try_from(result).map_err(|_| "Частота не помещается в формат CPS".into())
+        .ok_or(msg!(
+            "Частота слишком велика",
+            "Frequency is too large",
+            "Frequenz ist zu groß"
+        ))?;
+    u32::try_from(result).map_err(|_| {
+        msg!(
+            "Частота не помещается в формат CPS",
+            "Frequency does not fit the CPS format",
+            "Frequenz passt nicht in das CPS-Format"
+        )
+        .into()
+    })
 }
 
 fn parts_fraction_length(text: &str) -> u32 {
@@ -63,7 +107,7 @@ fn parts_fraction_length(text: &str) -> u32 {
 
 pub fn format_tone(raw: u16) -> String {
     match Tone::decode(raw) {
-        Some(Tone::None) => "Нет".into(),
+        Some(Tone::None) => String::new(),
         Some(Tone::Ctcss { tenths_hz }) => format!("{}.{:01}", tenths_hz / 10, tenths_hz % 10),
         Some(Tone::Dcs { code, inverted }) => {
             format!("D{code:03o}{}", if inverted { 'I' } else { 'N' })
@@ -72,24 +116,47 @@ pub fn format_tone(raw: u16) -> String {
     }
 }
 
-pub fn parse_tone(text: &str) -> Result<Tone, String> {
+pub fn parse_tone(text: &str) -> Result<Tone, LocalizedText> {
     let text = text.trim().to_uppercase().replace(',', ".");
-    if text.is_empty() || text == "НЕТ" || text == "NONE" {
+    if text.is_empty() || text == "НЕТ" || text == "NONE" || text == "AUS" || text == "KEIN" {
         return Ok(Tone::None);
     }
     let tone = if let Some(dcs) = text.strip_prefix('D') {
         if dcs.len() != 4 || !dcs.is_ascii() {
-            return Err("DCS: например D023N или D023I".into());
+            return Err(msg!(
+                "DCS: например D023N или D023I",
+                "DCS: for example D023N or D023I",
+                "DCS: zum Beispiel D023N oder D023I"
+            )
+            .into());
         }
         if !dcs[..3].bytes().all(|byte| (b'0'..=b'7').contains(&byte)) {
-            return Err("DCS: три восьмеричные цифры".into());
+            return Err(msg!(
+                "DCS: три восьмеричные цифры",
+                "DCS: three octal digits",
+                "DCS: drei Oktalziffern"
+            )
+            .into());
         }
         let inverted = match &dcs[3..] {
             "N" => false,
             "I" => true,
-            _ => return Err("DCS: последняя буква N или I".into()),
+            _ => {
+                return Err(msg!(
+                    "DCS: последняя буква N или I",
+                    "DCS: last letter must be N or I",
+                    "DCS: letzter Buchstabe muss N oder I sein"
+                )
+                .into())
+            }
         };
-        let code = u16::from_str_radix(&dcs[..3], 8).map_err(|_| "DCS: три восьмеричные цифры")?;
+        let code = u16::from_str_radix(&dcs[..3], 8).map_err(|_| {
+            msg!(
+                "DCS: три восьмеричные цифры",
+                "DCS: three octal digits",
+                "DCS: drei Oktalziffern"
+            )
+        })?;
         Tone::Dcs { code, inverted }
     } else {
         let mut parts = text.split('.');
@@ -101,17 +168,37 @@ pub fn parse_tone(text: &str) -> Result<Tone, String> {
             || !whole.bytes().all(|c| c.is_ascii_digit())
             || !fraction.bytes().all(|c| c.is_ascii_digit())
         {
-            return Err("Тон: Нет, CTCSS 67.0 или DCS D023N/D023I".into());
+            return Err(msg!(
+                "Тон: Нет, CTCSS 67.0 или DCS D023N/D023I",
+                "Tone: blank, CTCSS 67.0 or DCS D023N/D023I",
+                "Ton: leer, CTCSS 67.0 oder DCS D023N/D023I"
+            )
+            .into());
         }
-        let whole: u16 = whole.parse().map_err(|_| "Неверный CTCSS")?;
-        let fraction: u16 = fraction.parse().map_err(|_| "Неверный CTCSS")?;
+        let whole: u16 = whole
+            .parse()
+            .map_err(|_| msg!("Неверный CTCSS", "Invalid CTCSS", "Ungültiger CTCSS"))?;
+        let fraction: u16 = fraction
+            .parse()
+            .map_err(|_| msg!("Неверный CTCSS", "Invalid CTCSS", "Ungültiger CTCSS"))?;
         let tenths_hz = whole
             .checked_mul(10)
             .and_then(|v| v.checked_add(fraction))
-            .ok_or("CTCSS слишком велик")?;
+            .ok_or(msg!(
+                "CTCSS слишком велик",
+                "CTCSS is too large",
+                "CTCSS ist zu groß"
+            ))?;
         Tone::Ctcss { tenths_hz }
     };
-    tone.encode().map_err(|error| error.to_string())?;
+    tone.encode().map_err(|error| match error {
+        uv98_codeplug::channels::ChannelError::CtcssOutOfRange { tenths_hz } => msgf!(
+            "Код CTCSS {tenths_hz} превышает предел 4095 (409,5 Гц)",
+            "CTCSS code {tenths_hz} exceeds 4095 (409.5 Hz)",
+            "CTCSS-Code {tenths_hz} überschreitet 4095 (409,5 Hz)"
+        ),
+        other => LocalizedText::from(other.to_string()),
+    })?;
     Ok(tone)
 }
 

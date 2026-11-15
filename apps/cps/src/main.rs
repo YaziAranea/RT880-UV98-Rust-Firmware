@@ -1,4 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#[macro_use]
+mod i18n;
+mod preferences;
+mod settings_i18n;
+use i18n::{Language, LocalizedText};
 mod calibration_io;
 mod calibration_pane;
 mod calibration_report;
@@ -10,6 +15,8 @@ mod firmware_windows;
 mod navigation_pane;
 mod radio;
 mod text_codec;
+#[cfg(test)]
+mod ui_language_tests;
 use eframe::egui::{self, Color32, RichText};
 use std::path::PathBuf;
 use text_codec::{
@@ -25,6 +32,29 @@ use uv98_cps_core::{zone_display_members, Document, ZoneDisplayError};
 
 const TITLE: &str = concat!("UV98 CPS — ", env!("CARGO_PKG_VERSION"));
 const FIELDS: [Field; 24] = Field::ALL;
+
+fn configure_style(ctx: &egui::Context) {
+    let mut style = (*ctx.global_style()).clone();
+    style.visuals = egui::Visuals::dark();
+    style.visuals.panel_fill = Color32::from_rgb(20, 31, 37);
+    style.visuals.window_fill = Color32::from_rgb(25, 39, 46);
+    style.visuals.extreme_bg_color = Color32::from_rgb(13, 23, 29);
+    style.visuals.selection.bg_fill = Color32::from_rgb(26, 105, 112);
+    style.visuals.widgets.active.bg_fill = Color32::from_rgb(32, 119, 125);
+    style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(36, 72, 80);
+    style.spacing.item_spacing = egui::vec2(10.0, 8.0);
+    style.spacing.button_padding = egui::vec2(12.0, 7.0);
+    style
+        .text_styles
+        .insert(egui::TextStyle::Body, egui::FontId::proportional(16.0));
+    style
+        .text_styles
+        .insert(egui::TextStyle::Button, egui::FontId::proportional(16.0));
+    style
+        .text_styles
+        .insert(egui::TextStyle::Heading, egui::FontId::proportional(23.0));
+    ctx.set_global_style(style);
+}
 
 fn main() -> eframe::Result {
     let mut arguments = std::env::args_os().skip(1);
@@ -56,27 +86,9 @@ fn main() -> eframe::Result {
         TITLE,
         options,
         Box::new(move |cc| {
-            let mut style = (*cc.egui_ctx.global_style()).clone();
-            style.visuals = egui::Visuals::dark();
-            style.visuals.panel_fill = Color32::from_rgb(20, 31, 37);
-            style.visuals.window_fill = Color32::from_rgb(25, 39, 46);
-            style.visuals.extreme_bg_color = Color32::from_rgb(13, 23, 29);
-            style.visuals.selection.bg_fill = Color32::from_rgb(26, 105, 112);
-            style.visuals.widgets.active.bg_fill = Color32::from_rgb(32, 119, 125);
-            style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(36, 72, 80);
-            style.spacing.item_spacing = egui::vec2(10.0, 8.0);
-            style.spacing.button_padding = egui::vec2(12.0, 7.0);
-            style
-                .text_styles
-                .insert(egui::TextStyle::Body, egui::FontId::proportional(16.0));
-            style
-                .text_styles
-                .insert(egui::TextStyle::Button, egui::FontId::proportional(16.0));
-            style
-                .text_styles
-                .insert(egui::TextStyle::Heading, egui::FontId::proportional(23.0));
-            cc.egui_ctx.set_global_style(style);
+            configure_style(&cc.egui_ctx);
             let mut app = App::default();
+            app.set_language(preferences::load());
             if let Some(path) = initial {
                 app.load(path);
             }
@@ -156,7 +168,7 @@ impl ChannelDraft {
     fn changed(&self) -> bool {
         self.current != self.initial
     }
-    fn patch(&self) -> Result<ChannelPatch, String> {
+    fn patch(&self) -> Result<ChannelPatch, LocalizedText> {
         let a = &self.initial;
         let b = &self.current;
         let mut patch = ChannelPatch::default();
@@ -170,14 +182,25 @@ impl ChannelDraft {
             patch.tx_frequency_code = Some(edited_frequency(&b.tx)?);
         }
         if b.mode != a.mode {
-            patch.operation_mode =
-                Some(OperationMode::decode(b.mode).ok_or("Выберите режим RX/TX")?);
+            patch.operation_mode = Some(OperationMode::decode(b.mode).ok_or(msg!(
+                "Выберите режим RX/TX",
+                "Select RX/TX mode",
+                "RX/TX-Modus wählen"
+            ))?);
         }
         if b.bandwidth != a.bandwidth {
-            patch.bandwidth = Some(Bandwidth::decode(b.bandwidth).ok_or("Выберите полосу")?);
+            patch.bandwidth = Some(Bandwidth::decode(b.bandwidth).ok_or(msg!(
+                "Выберите полосу",
+                "Select bandwidth",
+                "Bandbreite wählen"
+            ))?);
         }
         if b.power != a.power {
-            patch.power = Some(Power::decode(b.power).ok_or("Выберите мощность")?);
+            patch.power = Some(Power::decode(b.power).ok_or(msg!(
+                "Выберите мощность",
+                "Select power",
+                "Leistung wählen"
+            ))?);
         }
         if b.scan != a.scan {
             patch.scan_add = Some(b.scan);
@@ -192,12 +215,17 @@ impl ChannelDraft {
         Ok(patch)
     }
 }
-fn edited_frequency(text: &str) -> Result<u32, String> {
+fn edited_frequency(text: &str) -> Result<u32, LocalizedText> {
     let code = parse_frequency(text)?;
     if (1_800_000..66_000_000).contains(&code) || (84_000_000..100_000_000).contains(&code) {
         Ok(code)
     } else {
-        Err("Как в исходном CPS: 18 ≤ МГц < 660 или 840 ≤ МГц < 1000".into())
+        Err(msg!(
+            "Как в исходном CPS: 18 ≤ МГц < 660 или 840 ≤ МГц < 1000",
+            "As in the original CPS: 18 ≤ MHz < 660 or 840 ≤ MHz < 1000",
+            "Wie in der Original-CPS: 18 ≤ MHz < 660 oder 840 ≤ MHz < 1000"
+        )
+        .into())
     }
 }
 #[derive(Clone, PartialEq, Eq)]
@@ -250,6 +278,8 @@ impl SettingsDraft {
 }
 
 struct App {
+    language: Language,
+    language_error: Option<LocalizedText>,
     document: Option<Document>,
     source: Option<PathBuf>,
     last_export: Vec<u8>,
@@ -262,7 +292,7 @@ struct App {
     zone_draft: Option<ZoneDraft>,
     settings_draft: Option<SettingsDraft>,
     navigation_draft: Option<navigation_pane::Draft>,
-    notice: String,
+    notice: LocalizedText,
     notice_error: bool,
     pending_action: Option<Action>,
     close_allowed: bool,
@@ -273,6 +303,8 @@ struct App {
 impl Default for App {
     fn default() -> Self {
         Self {
+            language: Language::default(),
+            language_error: None,
             document: None,
             source: None,
             last_export: Vec::new(),
@@ -285,7 +317,12 @@ impl Default for App {
             zone_draft: None,
             settings_draft: None,
             navigation_draft: None,
-            notice: "Откройте сохранённый файл .880dmf или .98pdmf".into(),
+            notice: msg!(
+                "Откройте сохранённый файл .880dmf или .98pdmf",
+                "Open a saved .880dmf or .98pdmf file",
+                "Eine gespeicherte .880dmf- oder .98pdmf-Datei öffnen"
+            )
+            .into(),
             notice_error: false,
             pending_action: None,
             close_allowed: false,
@@ -296,7 +333,13 @@ impl Default for App {
     }
 }
 impl App {
-    fn message(&mut self, text: impl Into<String>, error: bool) {
+    fn set_language(&mut self, language: Language) {
+        self.language = language;
+        self.radio.set_language(language);
+        self.firmware.set_language(language);
+        self.calibrations.set_language(language);
+    }
+    fn message(&mut self, text: impl Into<LocalizedText>, error: bool) {
         self.notice = text.into();
         self.notice_error = error;
     }
@@ -324,19 +367,19 @@ impl App {
     fn navigation_allowed(&mut self) -> bool {
         if self.firmware.busy() {
             self.message(
-                "Дождитесь завершения записи на вкладке «Прошивка». Не отключайте рацию и кабель.",
+                msg!("Дождитесь завершения записи на вкладке «Прошивка». Не отключайте рацию и кабель.", "Wait for writing to finish on the Firmware tab. Keep the radio and cable connected.", "Warten Sie auf den Abschluss im Reiter Firmware. Funkgerät und Kabel nicht trennen."),
                 true,
             );
             false
         } else if self.radio.busy() {
             self.message(
-                "Дождитесь завершения чтения или нажмите «Отменить» на вкладке «Резервные копии».",
+                msg!("Дождитесь завершения чтения или нажмите «Отменить» на вкладке «Резервные копии».", "Wait for reading to finish or press Cancel on the Backups tab.", "Lesen abwarten oder im Reiter Sicherungen auf Abbrechen klicken."),
                 true,
             );
             false
         } else if self.pending_form() {
             self.message(
-                "В форме есть изменения. Нажмите «Применить» или «Сбросить форму» перед переходом.",
+                msg!("В форме есть изменения. Нажмите «Применить» или «Сбросить форму» перед переходом.", "The form has changes. Apply or reset the form before navigating.", "Das Formular enthält Änderungen. Vor dem Wechsel übernehmen oder zurücksetzen."),
                 true,
             );
             false
@@ -362,7 +405,7 @@ impl App {
             let result = calibration_io::load(&path).and_then(|loaded| {
                 self.calibrations.load_bytes(
                     &loaded.bytes,
-                    path.display().to_string(),
+                    calibration_io::source_label(&path, loaded.extracted_from_nor),
                     loaded.source_sha256,
                 )
             });
@@ -387,11 +430,26 @@ impl App {
                 self.search.clear();
                 self.refresh_forms();
                 self.message(
-                    "Файл открыт. Изменения сохраняются отдельной копией.",
+                    msg!(
+                        "Файл открыт. Изменения сохраняются отдельной копией.",
+                        "File opened. Changes are saved to a separate copy.",
+                        "Datei geöffnet. Änderungen werden als separate Kopie gespeichert."
+                    ),
                     false,
                 );
             }
-            Err(error) => self.message(format!("Не удалось открыть файл: {error}"), true),
+            Err(error) => self.message(
+                LocalizedText::from_fn(|language| {
+                    trf!(
+                        language,
+                        "Не удалось открыть файл: {error}",
+                        "Could not open file: {error}",
+                        "Datei konnte nicht geöffnet werden: {error}",
+                        error = error.as_str(language)
+                    )
+                }),
+                true,
+            ),
         }
     }
     fn refresh_forms(&mut self) {
@@ -432,7 +490,11 @@ impl App {
         }
         if self.radio.busy() {
             self.message(
-                "Чтение ещё выполняется. Сначала дождитесь завершения или отмените его.",
+                msg!(
+                    "Чтение ещё выполняется. Сначала дождитесь завершения или отмените его.",
+                    "Reading is still in progress. Wait for it to finish or cancel it first.",
+                    "Lesen läuft noch. Zuerst den Abschluss abwarten oder abbrechen."
+                ),
                 true,
             );
             return;
@@ -448,6 +510,7 @@ impl App {
         }
     }
     fn perform_action(&mut self, action: Action, ctx: &egui::Context) {
+        let language = self.language;
         if self.firmware.busy() {
             if matches!(action, Action::Close) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -460,14 +523,29 @@ impl App {
                 self.radio.cancel();
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             }
-            self.message("Ожидается завершение чтения и закрытие COM-порта.", true);
+            self.message(
+                msg!(
+                    "Ожидается завершение чтения и закрытие COM-порта.",
+                    "Waiting for reading to finish and the COM port to close.",
+                    "Warten auf das Leseende und das Schließen des COM-Ports."
+                ),
+                true,
+            );
             return;
         }
         match action {
             Action::Open => {
                 if let Some(path) = rfd::FileDialog::new()
-                    .set_title("Открыть файл CPS")
-                    .add_filter("Файлы CPS", &["880dmf", "98pdmf"])
+                    .set_title(tr!(
+                        language,
+                        "Открыть файл CPS",
+                        "Open CPS file",
+                        "CPS-Datei öffnen"
+                    ))
+                    .add_filter(
+                        tr!(language, "Файлы CPS", "CPS files", "CPS-Dateien"),
+                        &["880dmf", "98pdmf"],
+                    )
                     .pick_file()
                 {
                     self.load(path);
@@ -482,11 +560,19 @@ impl App {
                     document.revert_all();
                 }
                 self.refresh_forms();
-                self.message("Восстановлено содержимое исходного файла.", false);
+                self.message(
+                    msg!(
+                        "Восстановлено содержимое исходного файла.",
+                        "Original file contents restored.",
+                        "Inhalt der Originaldatei wiederhergestellt."
+                    ),
+                    false,
+                );
             }
         }
     }
     fn save_copy(&mut self) {
+        let language = self.language;
         if !self.navigation_allowed() {
             return;
         }
@@ -494,8 +580,16 @@ impl App {
             return;
         };
         let mut dialog = rfd::FileDialog::new()
-            .set_title("Сохранить новую копию CPS")
-            .add_filter("Файлы CPS", &["880dmf", "98pdmf"]);
+            .set_title(tr!(
+                language,
+                "Сохранить новую копию CPS",
+                "Save a new CPS copy",
+                "Neue CPS-Kopie speichern"
+            ))
+            .add_filter(
+                tr!(language, "Файлы CPS", "CPS files", "CPS-Dateien"),
+                &["880dmf", "98pdmf"],
+            );
         if let Some(source) = &self.source {
             if let Some(parent) = source.parent() {
                 dialog = dialog.set_directory(parent);
@@ -512,13 +606,12 @@ impl App {
         match result {
             Ok(()) => {
                 self.last_export = bytes;
-                self.message(format!("Копия сохранена: {}", path.display()), false);
+                self.message(msgf!("Копия сохранена: {}", "Copy saved: {}", "Kopie gespeichert: {}", path.display()), false);
             }
             Err(error) => self.message(
-                format!(
-                    "Не удалось сохранить копию: {error}. Проверьте файл {} перед использованием.",
-                    path.display()
-                ),
+                LocalizedText::from_fn(|language| trf!(language, "Не удалось сохранить копию: {error}. Проверьте файл {} перед использованием.", "Could not save copy: {error}. Check file {} before using it.", "Kopie nicht gespeichert: {error}. Datei {} vor der Verwendung prüfen.",
+                    path.display(), error=error.as_str(language)
+                )),
                 true,
             ),
         }
@@ -527,13 +620,21 @@ impl App {
         if self.radio.busy() || self.firmware.busy() {
             return;
         }
-        let result = (|| -> Result<usize, String> {
-            let draft = self.channel_draft.as_ref().ok_or("Канал не выбран")?;
+        let result = (|| -> Result<usize, LocalizedText> {
+            let draft = self.channel_draft.as_ref().ok_or(msg!(
+                "Канал не выбран",
+                "No channel selected",
+                "Kein Kanal ausgewählt"
+            ))?;
             let patch = draft.patch()?;
             let index = draft.index;
             self.document
                 .as_mut()
-                .ok_or("Файл не открыт")?
+                .ok_or(msg!(
+                    "Файл не открыт",
+                    "No file open",
+                    "Keine Datei geöffnet"
+                ))?
                 .apply(|bytes| {
                     channels::patch_channel(
                         &mut bytes[CHANNELS_OFFSET..CHANNELS_OFFSET + CHANNELS_LEN],
@@ -542,7 +643,7 @@ impl App {
                     )
                 })
                 .map(|summary| summary.changed_bytes)
-                .map_err(|error| error.to_string())
+                .map_err(|error| LocalizedText::from(error.to_string()))
         })();
         self.finish_edit(result);
     }
@@ -550,8 +651,12 @@ impl App {
         if self.radio.busy() || self.firmware.busy() {
             return;
         }
-        let result = (|| -> Result<usize, String> {
-            let draft = self.zone_draft.as_ref().ok_or("Зона не выбрана")?;
+        let result = (|| -> Result<usize, LocalizedText> {
+            let draft = self.zone_draft.as_ref().ok_or(msg!(
+                "Зона не выбрана",
+                "No zone selected",
+                "Keine Zone ausgewählt"
+            ))?;
             let name = if draft.current.name != draft.initial.name {
                 Some(encode_name(&draft.current.name)?)
             } else {
@@ -560,7 +665,7 @@ impl App {
             let members = if draft.current.members != draft.initial.members {
                 if draft.members_error.is_some() {
                     return Err(
-                        "Состав зоны не изменён: исходный заголовок или ссылки противоречивы."
+                        msg!("Состав зоны не изменён: исходный заголовок или ссылки противоречивы.", "Zone members unchanged: the original header or references are inconsistent.", "Zoneninhalt unverändert: Originalkopf oder Verweise sind widersprüchlich.")
                             .into(),
                     );
                 }
@@ -571,12 +676,20 @@ impl App {
             let index = draft.index;
             self.document
                 .as_mut()
-                .ok_or("Файл не открыт")?
-                .apply(|bytes| -> Result<(), String> {
+                .ok_or(msg!(
+                    "Файл не открыт",
+                    "No file open",
+                    "Keine Datei geöffnet"
+                ))?
+                .apply(|bytes| -> Result<(), LocalizedText> {
                     let mut zones =
                         ZonesMut::parse(&mut bytes[ZONES_OFFSET..ZONES_OFFSET + ZONES_LEN])
                             .map_err(|error| format!("{error:?}"))?;
-                    let mut zone = zones.zone(index).ok_or("Неверный индекс зоны")?;
+                    let mut zone = zones.zone(index).ok_or(msg!(
+                        "Неверный индекс зоны",
+                        "Invalid zone index",
+                        "Ungültiger Zonenindex"
+                    ))?;
                     if let Some(name) = name {
                         zone.set_name_raw(&name);
                     }
@@ -600,14 +713,22 @@ impl App {
         if self.radio.busy() || self.firmware.busy() {
             return;
         }
-        let result = (|| -> Result<usize, String> {
-            let draft = self.settings_draft.as_ref().ok_or("Настройки недоступны")?;
+        let result = (|| -> Result<usize, LocalizedText> {
+            let draft = self.settings_draft.as_ref().ok_or(msg!(
+                "Настройки недоступны",
+                "Settings unavailable",
+                "Einstellungen nicht verfügbar"
+            ))?;
             let initial = draft.initial;
             let current = draft.current;
             self.document
                 .as_mut()
-                .ok_or("Файл не открыт")?
-                .apply(|bytes| -> Result<(), String> {
+                .ok_or(msg!(
+                    "Файл не открыт",
+                    "No file open",
+                    "Keine Datei geöffnet"
+                ))?
+                .apply(|bytes| -> Result<(), LocalizedText> {
                     let mut settings = SettingsMut::parse(&mut bytes[..CFG_LEN])
                         .map_err(|error| format!("{error:?}"))?;
                     for index in 0..FIELDS.len() {
@@ -623,11 +744,11 @@ impl App {
         })();
         self.finish_edit(result);
     }
-    fn finish_edit(&mut self, result: Result<usize, String>) {
+    fn finish_edit(&mut self, result: Result<usize, LocalizedText>) {
         match result {
             Ok(changed) => {
                 self.refresh_forms();
-                self.message(format!("Применено. Изменено байт: {changed}. Для записи файла нажмите «Сохранить копию»."), false);
+                self.message(msgf!("Применено. Изменено байт: {changed}. Для записи файла нажмите «Сохранить копию».", "Applied. Changed bytes: {changed}. Use Save copy to write the file.", "Übernommen. Geänderte Bytes: {changed}. Zum Schreiben der Datei Kopie speichern wählen."), false);
             }
             Err(error) => self.message(error, true),
         }
@@ -637,12 +758,17 @@ impl App {
         if self.radio.busy() || self.firmware.busy() {
             return;
         }
-        let result = (|| -> Result<usize, String> {
-            let draft = self
-                .navigation_draft
-                .as_ref()
-                .ok_or("Настройки GPS/APRS недоступны")?;
-            draft.apply(self.document.as_mut().ok_or("Файл не открыт")?)
+        let result = (|| -> Result<usize, LocalizedText> {
+            let draft = self.navigation_draft.as_ref().ok_or(msg!(
+                "Настройки GPS/APRS недоступны",
+                "GPS/APRS settings unavailable",
+                "GPS/APRS-Einstellungen nicht verfügbar"
+            ))?;
+            draft.apply(self.document.as_mut().ok_or(msg!(
+                "Файл не открыт",
+                "No file open",
+                "Keine Datei geöffnet"
+            ))?)
         })();
         self.finish_edit(result);
     }
@@ -651,14 +777,21 @@ impl App {
         let mut action = navigation_pane::Action::default();
         egui::CentralPanel::default().show(ui, |ui| {
             if let Some(draft) = &mut self.navigation_draft {
-                action = draft.show(ui);
+                action = draft.show(ui, self.language);
             }
         });
         if action.apply {
             self.apply_navigation();
         } else if action.reset {
             self.refresh_forms();
-            self.message("Форма GPS/APRS возвращена к данным документа.", false);
+            self.message(
+                msg!(
+                    "Форма GPS/APRS возвращена к данным документа.",
+                    "GPS/APRS form reset to document values.",
+                    "GPS/APRS-Formular auf die Dokumentwerte zurückgesetzt."
+                ),
+                false,
+            );
         }
     }
 }
@@ -679,7 +812,7 @@ impl App {
                 return;
             }
             if !self.can_apply_snapshot() {
-                self.message("Для применения снимка откройте файл CPS без правок. Непрочитанная секция Time будет сохранена из этого файла.", true);
+                self.message(msg!("Для применения снимка откройте файл CPS без правок. Непрочитанная секция Time будет сохранена из этого файла.", "To apply a snapshot, open a CPS file without edits. The unread Time section will be retained from that file.", "Zum Übernehmen einer Sicherung eine unveränderte CPS-Datei öffnen. Der ungelesene Bereich Time bleibt aus dieser Datei erhalten."), true);
                 return;
             }
             let result = radio::apply_to_document(
@@ -689,7 +822,7 @@ impl App {
             match result {
                 Ok(changed) => {
                     self.refresh_forms();
-                    self.message(format!("Снимок применён: {changed} изменённых байт. Секция Time сохранена из исходного файла. Сохраните отдельную копию."), false);
+                    self.message(msgf!("Снимок применён: {changed} изменённых байт. Секция Time сохранена из исходного файла. Сохраните отдельную копию.", "Snapshot applied: {changed} bytes changed. Time section retained from the original file. Save a separate copy.", "Sicherung übernommen: {changed} Bytes geändert. Time-Bereich aus der Originaldatei erhalten. Separate Kopie speichern."), false);
                 }
                 Err(error) => self.message(error, true),
             }
@@ -699,7 +832,32 @@ impl App {
         let ctx = ui.ctx().clone();
         let busy = self.radio.busy() || self.firmware.busy();
         egui::Panel::top("toolbar").show(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Язык / Language / Sprache");
+                let mut chosen = self.language;
+                egui::ComboBox::from_id_salt("cps_language_selector")
+                    .width(140.0)
+                    .selected_text(chosen.autonym())
+                    .show_ui(ui, |ui| {
+                        for candidate in Language::ALL {
+                            ui.selectable_value(&mut chosen, candidate, candidate.autonym());
+                        }
+                    });
+                if chosen != self.language {
+                    self.set_language(chosen);
+                    self.language_error = preferences::save(chosen).err();
+                    ctx.request_repaint();
+                }
+                ui.small("PRE-ALPHA");
+            });
+            if let Some(error) = &self.language_error {
+                ui.colored_label(
+                    Color32::from_rgb(255, 172, 133),
+                    error.as_str(self.language),
+                );
+            }
+            let language = self.language;
+            ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new("UV98 CPS").size(23.0).strong());
                 ui.label(
                     RichText::new(concat!(env!("CARGO_PKG_VERSION"), " · RUST / CPS"))
@@ -707,7 +865,10 @@ impl App {
                 );
                 ui.separator();
                 if ui
-                    .add_enabled(!busy, egui::Button::new("Открыть…"))
+                    .add_enabled(
+                        !busy,
+                        egui::Button::new(tr!(language, "Открыть…", "Open…", "Öffnen…")),
+                    )
                     .clicked()
                 {
                     self.request_action(Action::Open, &ctx);
@@ -715,7 +876,12 @@ impl App {
                 if ui
                     .add_enabled(
                         self.document.is_some() && !busy,
-                        egui::Button::new("Сохранить копию CPS…"),
+                        egui::Button::new(tr!(
+                            language,
+                            "Сохранить копию CPS…",
+                            "Save CPS copy…",
+                            "CPS-Kopie speichern…"
+                        )),
                     )
                     .clicked()
                 {
@@ -723,7 +889,15 @@ impl App {
                 }
                 let undo = self.document.as_ref().map_or(0, Document::undo_depth);
                 if ui
-                    .add_enabled(undo > 0 && !busy, egui::Button::new("Отменить правку CPS"))
+                    .add_enabled(
+                        undo > 0 && !busy,
+                        egui::Button::new(tr!(
+                            language,
+                            "Отменить правку CPS",
+                            "Undo CPS edit",
+                            "CPS-Änderung rückgängig"
+                        )),
+                    )
                     .clicked()
                     && self.navigation_allowed()
                 {
@@ -731,19 +905,41 @@ impl App {
                         document.undo();
                     }
                     self.refresh_forms();
-                    self.message("Последняя правка отменена.", false);
+                    self.message(
+                        msg!(
+                            "Последняя правка отменена.",
+                            "Last edit undone.",
+                            "Letzte Änderung rückgängig gemacht."
+                        ),
+                        false,
+                    );
                 }
             });
             ui.horizontal_wrapped(|ui| {
                 for (tab, label) in [
-                    (Tab::Channels, "Каналы"),
-                    (Tab::Zones, "Зоны"),
-                    (Tab::Settings, "Настройки"),
+                    (Tab::Channels, tr!(language, "Каналы", "Channels", "Kanäle")),
+                    (Tab::Zones, tr!(language, "Зоны", "Zones", "Zonen")),
+                    (
+                        Tab::Settings,
+                        tr!(language, "Настройки", "Settings", "Einstellungen"),
+                    ),
                     (Tab::Navigation, "GPS / APRS"),
-                    (Tab::Calibration, "Калибровки"),
-                    (Tab::Changes, "Изменения"),
-                    (Tab::Radio, "Резервные копии"),
-                    (Tab::Firmware, "Прошивка"),
+                    (
+                        Tab::Calibration,
+                        tr!(language, "Калибровки", "Calibration", "Kalibrierung"),
+                    ),
+                    (
+                        Tab::Changes,
+                        tr!(language, "Изменения", "Changes", "Änderungen"),
+                    ),
+                    (
+                        Tab::Radio,
+                        tr!(language, "Резервные копии", "Backups", "Sicherungen"),
+                    ),
+                    (
+                        Tab::Firmware,
+                        tr!(language, "Прошивка", "Firmware", "Firmware"),
+                    ),
                 ] {
                     if ui
                         .add_enabled(
@@ -764,33 +960,38 @@ impl App {
                     if self.unsaved() {
                         ui.colored_label(
                             Color32::from_rgb(245, 190, 100),
-                            "● Есть несохранённые правки",
+                            tr!(
+                                language,
+                                "● Есть несохранённые правки",
+                                "● Unsaved changes",
+                                "● Ungespeicherte Änderungen"
+                            ),
                         );
                     }
                 }
             });
         });
         egui::Panel::bottom("status").show(ui, |ui| {
+            let language = self.language;
             if self.tab == Tab::Calibration {
                 ui.small(
-                    "Калибровки сохраняются отдельно от файла каналов. Запись в станцию отключена.",
+                    tr!(language, "Калибровки сохраняются отдельно от файла каналов. Запись в станцию отключена.", "Calibration is saved separately from the channel file. Writing calibration to the radio is disabled.", "Kalibrierung wird getrennt von der Kanaldatei gespeichert. Schreiben der Kalibrierung ins Funkgerät ist deaktiviert."),
                 );
             } else if self.tab == Tab::Firmware {
-                ui.small("Прошивка запускается только кнопкой «Записать прошивку» после проверки файла и подготовки загрузчика.");
+                ui.small(tr!(language, "Прошивка запускается только кнопкой «Записать прошивку» после проверки файла и подготовки загрузчика.", "Flashing starts only with Write firmware, after checking the file and preparing the bootloader.", "Flashen startet nur mit Firmware schreiben, nach Dateiprüfung und Vorbereitung des Bootloaders."));
             } else if !self.notice.is_empty() {
                 let color = if self.notice_error {
                     Color32::from_rgb(255, 172, 133)
                 } else {
                     Color32::from_rgb(153, 214, 203)
                 };
-                ui.colored_label(color, &self.notice);
+                ui.colored_label(color, self.notice.as_str(language));
             }
             ui.horizontal(|ui| {
-                ui.small("Файлы CPS и калибровки · Чтение рации · Прошивка приложения MCU");
+                ui.small(tr!(language, "Файлы CPS и калибровки · Чтение рации · Прошивка приложения MCU", "CPS and calibration files · Radio readout · MCU application flashing", "CPS- und Kalibrierdateien · Funkgerät auslesen · MCU-Anwendung flashen"));
                 if let Some(document) = &self.document {
                     ui.separator();
-                    ui.small(format!(
-                        "{} байт · {} изменено от исходника",
+                    ui.small(trf!(language, "{} байт · {} изменено от исходника", "{} bytes · {} changed from original", "{} Bytes · {} gegenüber Original geändert",
                         FILE_LEN,
                         document.dirty_bytes()
                     ));
@@ -800,6 +1001,7 @@ impl App {
     }
 
     fn channels_ui(&mut self, ui: &mut egui::Ui) {
+        let language = self.language;
         let mut rows = Vec::new();
         let mut active_count = 0;
         if let Some(document) = &self.document {
@@ -818,9 +1020,9 @@ impl App {
                 }
                 let (name, _) = decode_name(channel.name_raw());
                 let name = if !active {
-                    "(пусто)".into()
+                    tr!(language, "(пусто)", "(empty)", "(leer)").into()
                 } else if name.is_empty() {
-                    "(без имени)".into()
+                    tr!(language, "(без имени)", "(unnamed)", "(ohne Namen)").into()
                 } else {
                     name
                 };
@@ -850,15 +1052,31 @@ impl App {
             .size_range(300.0..=580.0)
             .resizable(true)
             .show(ui, |ui| {
-                ui.heading("Каналы");
+                ui.heading(tr!(language, "Каналы", "Channels", "Kanäle"));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.search)
-                        .hint_text("Поиск: имя, частота, номер")
+                        .hint_text(tr!(
+                            language,
+                            "Поиск: имя, частота, номер",
+                            "Search: name, frequency, number",
+                            "Suche: Name, Frequenz, Nummer"
+                        ))
                         .desired_width(f32::INFINITY),
                 );
-                ui.checkbox(&mut self.active_only, "Только заполненные");
-                ui.small(format!(
+                ui.checkbox(
+                    &mut self.active_only,
+                    tr!(
+                        language,
+                        "Только заполненные",
+                        "Populated only",
+                        "Nur belegte"
+                    ),
+                );
+                ui.small(trf!(
+                    language,
                     "Найдено: {} · заполнено: {active_count} / 1024",
+                    "Found: {} · populated: {active_count} / 1024",
+                    "Gefunden: {} · belegt: {active_count} / 1024",
                     rows.len()
                 ));
                 ui.separator();
@@ -890,37 +1108,38 @@ impl App {
             egui::ScrollArea::vertical().id_salt("channel_form_scroll").show(ui, |ui| {
                 let mut apply = false; let mut reset = false;
                 if let Some(draft) = &mut self.channel_draft {
-                    ui.heading(format!("Канал {}", draft.index + 1));
-                    ui.label("Измените нужные поля и нажмите «Применить»."); ui.add_space(8.0);
-                    if draft.name_errors { ui.colored_label(Color32::YELLOW, "В исходном имени есть неизвестные GBK-байты. Без редактирования имя сохранится точно."); }
+                    ui.heading(trf!(language, "Канал {}", "Channel {}", "Kanal {}", draft.index + 1));
+                    ui.label(tr!(language, "Измените нужные поля и нажмите «Применить».", "Edit the required fields, then apply.", "Gewünschte Felder ändern und übernehmen.")); ui.add_space(8.0);
+                    if draft.name_errors { ui.colored_label(Color32::YELLOW, tr!(language, "В исходном имени есть неизвестные GBK-байты. Без редактирования имя сохранится точно.", "The original name contains unknown GBK bytes. If not edited, it is preserved exactly.", "Der Originalname enthält unbekannte GBK-Bytes. Ohne Bearbeitung bleibt er exakt erhalten.")); }
                     egui::Grid::new("channel_fields").num_columns(2).spacing([20.0, 12.0]).show(ui, |ui| {
-                        text_row(ui, "Имя", &mut draft.current.name);
-                        text_row(ui, "Приём, МГц", &mut draft.current.rx);
-                        text_row(ui, "Передача, МГц", &mut draft.current.tx);
-                        ui.label("Режим RX/TX"); choice(ui, "channel_mode", &mut draft.current.mode, &[(0, "Приём и передача"), (1, "Только приём"), (2, "Только передача")]); ui.end_row();
-                        ui.label("Полоса"); choice(ui, "channel_band", &mut draft.current.bandwidth, &[(0, "Широкая"), (1, "Узкая")]); ui.end_row();
-                        ui.label("Мощность"); choice(ui, "channel_power", &mut draft.current.power, &[(0, "Низкая"), (1, "Средняя"), (2, "Высокая")]); ui.end_row();
-                        ui.label("Сканирование"); ui.checkbox(&mut draft.current.scan, "Включать канал"); ui.end_row();
-                        text_row(ui, "Тон приёма", &mut draft.current.rx_tone);
-                        text_row(ui, "Тон передачи", &mut draft.current.tx_tone);
+                        text_row(ui, tr!(language, "Имя", "Name", "Name"), &mut draft.current.name);
+                        text_row(ui, tr!(language, "Приём, МГц", "Receive, MHz", "Empfang, MHz"), &mut draft.current.rx);
+                        text_row(ui, tr!(language, "Передача, МГц", "Transmit, MHz", "Senden, MHz"), &mut draft.current.tx);
+                        ui.label(tr!(language, "Режим RX/TX", "RX/TX mode", "RX/TX-Modus")); choice(ui, language, "channel_mode", &mut draft.current.mode, &[(0, tr!(language, "Приём и передача", "Receive and transmit", "Empfang und Senden")), (1, tr!(language, "Только приём", "Receive only", "Nur Empfang")), (2, tr!(language, "Только передача", "Transmit only", "Nur Senden"))]); ui.end_row();
+                        ui.label(tr!(language, "Полоса", "Bandwidth", "Bandbreite")); choice(ui, language, "channel_band", &mut draft.current.bandwidth, &[(0, tr!(language, "Широкая", "Wide", "Breit")), (1, tr!(language, "Узкая", "Narrow", "Schmal"))]); ui.end_row();
+                        ui.label(tr!(language, "Мощность", "Power", "Leistung")); choice(ui, language, "channel_power", &mut draft.current.power, &[(0, tr!(language, "Низкая", "Low", "Niedrig")), (1, tr!(language, "Средняя", "Medium", "Mittel")), (2, tr!(language, "Высокая", "High", "Hoch"))]); ui.end_row();
+                        ui.label(tr!(language, "Сканирование", "Scanning", "Suchlauf")); ui.checkbox(&mut draft.current.scan, tr!(language, "Включать канал", "Include channel", "Kanal einbeziehen")); ui.end_row();
+                        tone_row(ui, language, tr!(language, "Тон приёма", "RX tone", "Empfangston"), &mut draft.current.rx_tone);
+                        tone_row(ui, language, tr!(language, "Тон передачи", "TX tone", "Sendeton"), &mut draft.current.tx_tone);
                     });
                     ui.add_space(8.0);
-                    ui.small("Тоны: Нет · CTCSS 67.0 · DCS D023N или D023I");
-                    ui.small("Имя: до 16 байт GBK. Частоты: до пяти знаков после запятой.");
-                    ui.small("Неизвестные значения сохраняются, пока вы не измените соответствующее поле."); ui.add_space(16.0);
+                    ui.small(tr!(language, "Тоны: Нет · CTCSS 67.0 · DCS D023N или D023I", "Tones: blank = none · CTCSS 67.0 · DCS D023N or D023I", "Töne: leer = aus · CTCSS 67.0 · DCS D023N oder D023I"));
+                    ui.small(tr!(language, "Имя: до 16 байт GBK. Частоты: до пяти знаков после запятой.", "Name: up to 16 GBK bytes. Frequencies: up to five decimal places.", "Name: bis 16 GBK-Bytes. Frequenzen: bis fünf Nachkommastellen."));
+                    ui.small(tr!(language, "Неизвестные значения сохраняются, пока вы не измените соответствующее поле.", "Unknown values are retained until you edit the corresponding field.", "Unbekannte Werte bleiben erhalten, bis das betreffende Feld geändert wird.")); ui.add_space(16.0);
                     ui.horizontal(|ui| {
-                        apply = ui.add_enabled(draft.changed(), egui::Button::new("Применить канал")).clicked();
-                        reset = ui.add_enabled(draft.changed(), egui::Button::new("Сбросить форму")).clicked();
-                        if draft.changed() { ui.label("Форма ещё не применена"); }
+                        apply = ui.add_enabled(draft.changed(), egui::Button::new(tr!(language, "Применить канал", "Apply channel", "Kanal übernehmen"))).clicked();
+                        reset = ui.add_enabled(draft.changed(), egui::Button::new(tr!(language, "Сбросить форму", "Reset form", "Formular zurücksetzen"))).clicked();
+                        if draft.changed() { ui.label(tr!(language, "Форма ещё не применена", "Form not yet applied", "Formular noch nicht übernommen")); }
                     });
-                } else { ui.heading("Выберите заполненный канал"); ui.label("Создание новых каналов появится в следующей версии."); }
-                if reset { self.refresh_forms(); self.message("Форма сброшена; файл не изменён.", false); }
+                } else { ui.heading(tr!(language, "Выберите заполненный канал", "Select a populated channel", "Belegten Kanal wählen")); ui.label(tr!(language, "Создание новых каналов появится в следующей версии.", "Creating new channels is not implemented yet.", "Das Erstellen neuer Kanäle ist noch nicht implementiert.")); }
+                if reset { self.refresh_forms(); self.message(msg!("Форма сброшена; файл не изменён.", "Form reset; file unchanged.", "Formular zurückgesetzt; Datei unverändert."), false); }
                 if apply { self.apply_channel(); }
             });
         });
     }
 
     fn zones_ui(&mut self, ui: &mut egui::Ui) {
+        let language = self.language;
         let rows = self
             .document
             .as_ref()
@@ -933,7 +1152,7 @@ impl App {
                             (
                                 index,
                                 if name.is_empty() {
-                                    "(без имени)".into()
+                                    tr!(language, "(без имени)", "(unnamed)", "(ohne Namen)").into()
                                 } else {
                                     name
                                 },
@@ -953,8 +1172,13 @@ impl App {
             .size_range(280.0..=500.0)
             .resizable(true)
             .show(ui, |ui| {
-                ui.heading("Зоны");
-                ui.small("256 зон · до 200 каналов в каждой");
+                ui.heading(tr!(language, "Зоны", "Zones", "Zonen"));
+                ui.small(tr!(
+                    language,
+                    "256 зон · до 200 каналов в каждой",
+                    "256 zones · up to 200 channels each",
+                    "256 Zonen · je bis zu 200 Kanäle"
+                ));
                 ui.separator();
                 egui::ScrollArea::vertical()
                     .id_salt("zones_scroll")
@@ -987,33 +1211,34 @@ impl App {
             egui::ScrollArea::vertical().id_salt("zone_form_scroll").show(ui, |ui| {
                 let mut apply = false; let mut reset = false;
                 if let Some(draft) = &mut self.zone_draft {
-                    ui.heading(format!("Зона {}", draft.index + 1));
-                    if draft.name_errors { ui.colored_label(Color32::YELLOW, "В имени есть неизвестные GBK-байты. Без редактирования они сохранятся."); }
-                    ui.label("Имя зоны"); ui.add(egui::TextEdit::singleline(&mut draft.current.name).desired_width(350.0)); ui.add_space(10.0);
-                    ui.label("Номера каналов в нужном порядке");
+                    ui.heading(trf!(language, "Зона {}", "Zone {}", "Zone {}", draft.index + 1));
+                    if draft.name_errors { ui.colored_label(Color32::YELLOW, tr!(language, "В имени есть неизвестные GBK-байты. Без редактирования они сохранятся.", "The name contains unknown GBK bytes. They are retained if not edited.", "Der Name enthält unbekannte GBK-Bytes. Ohne Bearbeitung bleiben sie erhalten.")); }
+                    ui.label(tr!(language, "Имя зоны", "Zone name", "Zonenname")); ui.add(egui::TextEdit::singleline(&mut draft.current.name).desired_width(350.0)); ui.add_space(10.0);
+                    ui.label(tr!(language, "Номера каналов в нужном порядке", "Channel numbers in the desired order", "Kanalnummern in gewünschter Reihenfolge"));
                     if let Some(error) = draft.members_error {
-                        ui.colored_label(Color32::YELLOW, zone_members_error(error));
-                        ui.small("Редактор состава заблокирован. Исходные байты сохранены; имя можно изменить отдельно.");
+                        ui.colored_label(Color32::YELLOW, zone_members_error(error, language));
+                        ui.small(tr!(language, "Редактор состава заблокирован. Исходные байты сохранены; имя можно изменить отдельно.", "Member editing is locked. Original bytes are retained; the name can be changed separately.", "Bearbeitung der Mitglieder gesperrt. Originalbytes bleiben erhalten; der Name kann separat geändert werden."));
                     }
                     ui.add_enabled(draft.members_error.is_none(), egui::TextEdit::multiline(&mut draft.current.members).desired_rows(10).desired_width(f32::INFINITY));
-                    ui.small("Номера 1–1024 через запятую или пробел. Не более 200 записей.");
-                    ui.small("Правка имени сохраняет состав зоны. Правка списка заменяет его целиком."); ui.add_space(16.0);
+                    ui.small(tr!(language, "Номера 1–1024 через запятую или пробел. Не более 200 записей.", "Numbers 1–1024, separated by commas or spaces. At most 200 entries.", "Nummern 1–1024, durch Komma oder Leerzeichen getrennt. Höchstens 200 Einträge."));
+                    ui.small(tr!(language, "Правка имени сохраняет состав зоны. Правка списка заменяет его целиком.", "Editing the name retains zone members. Editing the list replaces it entirely.", "Eine Namensänderung erhält die Zonenmitglieder. Eine Listenänderung ersetzt die gesamte Liste.")); ui.add_space(16.0);
                     ui.horizontal(|ui| {
-                        apply = ui.add_enabled(draft.changed(), egui::Button::new("Применить зону")).clicked();
-                        reset = ui.add_enabled(draft.changed(), egui::Button::new("Сбросить форму")).clicked();
-                        if draft.changed() { ui.label("Форма ещё не применена"); }
+                        apply = ui.add_enabled(draft.changed(), egui::Button::new(tr!(language, "Применить зону", "Apply zone", "Zone übernehmen"))).clicked();
+                        reset = ui.add_enabled(draft.changed(), egui::Button::new(tr!(language, "Сбросить форму", "Reset form", "Formular zurücksetzen"))).clicked();
+                        if draft.changed() { ui.label(tr!(language, "Форма ещё не применена", "Form not yet applied", "Formular noch nicht übernommen")); }
                     });
                 }
-                if reset { self.refresh_forms(); self.message("Форма сброшена; файл не изменён.", false); }
+                if reset { self.refresh_forms(); self.message(msg!("Форма сброшена; файл не изменён.", "Form reset; file unchanged.", "Formular zurückgesetzt; Datei unverändert."), false); }
                 if apply { self.apply_zone(); }
             });
         });
     }
 
     fn settings_ui(&mut self, ui: &mut egui::Ui) {
+        let language = self.language;
         egui::CentralPanel::default().show(ui, |ui| {
-            ui.heading("Общие настройки");
-            ui.label("24 настройки по логике штатного CPS: звук, подсветка, блокировка, сканирование и энергосбережение.");
+            ui.heading(tr!(language, "Общие настройки", "General settings", "Allgemeine Einstellungen"));
+            ui.label(tr!(language, "24 настройки по логике штатного CPS: звук, подсветка, блокировка, сканирование и энергосбережение.", "24 settings following the original CPS: sound, lighting, locking, scanning and power saving.", "24 Einstellungen wie in der Original-CPS: Ton, Beleuchtung, Sperre, Suchlauf und Energiesparen."));
             ui.add_space(16.0);
             let mut apply = false;
             let mut reset = false;
@@ -1025,16 +1250,16 @@ impl App {
                     .show(ui, |ui| {
                         for index in 0..FIELDS.len() {
                             let field = FIELDS[index];
-                            ui.label(format!("{} / {}", field.group_ru(), field.label_ru()));
+                            ui.label(format!("{} / {}", settings_i18n::group(field, language), settings_i18n::label(field, language)));
                             egui::ComboBox::from_id_salt(("setting", index))
                                 .width(230.0)
-                                .selected_text(setting_label(field, draft.current[index]))
+                                .selected_text(setting_label(field, draft.current[index], language))
                                 .show_ui(ui, |ui| {
                                     for code in 0..=field.max_code() {
                                         ui.selectable_value(
                                             &mut draft.current[index],
                                             code,
-                                            setting_label(field, code),
+                                            setting_label(field, code, language),
                                         );
                                     }
                                 });
@@ -1045,19 +1270,19 @@ impl App {
                 ui.add_space(16.0);
                 ui.horizontal(|ui| {
                     apply = ui
-                        .add_enabled(draft.changed(), egui::Button::new("Применить настройки"))
+                        .add_enabled(draft.changed(), egui::Button::new(tr!(language, "Применить настройки", "Apply settings", "Einstellungen übernehmen")))
                         .clicked();
                     reset = ui
-                        .add_enabled(draft.changed(), egui::Button::new("Сбросить форму"))
+                        .add_enabled(draft.changed(), egui::Button::new(tr!(language, "Сбросить форму", "Reset form", "Formular zurücksetzen")))
                         .clicked();
                     if draft.changed() {
-                        ui.label("Форма ещё не применена");
+                        ui.label(tr!(language, "Форма ещё не применена", "Form not yet applied", "Formular noch nicht übernommen"));
                     }
                 });
             }
             if reset {
                 self.refresh_forms();
-                self.message("Форма сброшена; файл не изменён.", false);
+                self.message(msg!("Форма сброшена; файл не изменён.", "Form reset; file unchanged.", "Formular zurückgesetzt; Datei unverändert."), false);
             }
             if apply {
                 self.apply_settings();
@@ -1066,6 +1291,7 @@ impl App {
     }
 
     fn changes_ui(&mut self, ui: &mut egui::Ui) {
+        let language = self.language;
         let ctx = ui.ctx().clone();
         let Some(document) = &self.document else {
             return;
@@ -1074,25 +1300,57 @@ impl App {
         let dirty_bytes = document.dirty_bytes();
         let mut reset = false;
         egui::CentralPanel::default().show(ui, |ui| {
-            ui.heading("Изменения относительно исходного файла");
+            ui.heading(tr!(
+                language,
+                "Изменения относительно исходного файла",
+                "Changes from the original file",
+                "Änderungen gegenüber der Originaldatei"
+            ));
             ui.horizontal(|ui| {
-                ui.label(format!("{dirty_bytes} байт · {} секций", changes.len()));
+                ui.label(trf!(
+                    language,
+                    "{dirty_bytes} байт · {} секций",
+                    "{dirty_bytes} bytes · {} sections",
+                    "{dirty_bytes} Bytes · {} Bereiche",
+                    changes.len()
+                ));
                 reset = ui
-                    .add_enabled(dirty_bytes != 0, egui::Button::new("Вернуть исходный файл"))
+                    .add_enabled(
+                        dirty_bytes != 0,
+                        egui::Button::new(tr!(
+                            language,
+                            "Вернуть исходный файл",
+                            "Restore original file",
+                            "Originaldatei wiederherstellen"
+                        )),
+                    )
                     .clicked();
             });
-            ui.small("Адреса ниже — позиции байтов в сохранённом файле CPS.");
+            ui.small(tr!(
+                language,
+                "Адреса ниже — позиции байтов в сохранённом файле CPS.",
+                "Addresses below are byte offsets in the saved CPS file.",
+                "Die folgenden Adressen sind Byte-Positionen in der gespeicherten CPS-Datei."
+            ));
             ui.separator();
             egui::ScrollArea::vertical()
                 .id_salt("changes_scroll")
                 .show(ui, |ui| {
                     if changes.is_empty() {
-                        ui.label("Применённых изменений нет.");
+                        ui.label(tr!(
+                            language,
+                            "Применённых изменений нет.",
+                            "No applied changes.",
+                            "Keine übernommenen Änderungen."
+                        ));
                     }
                     for section in &changes {
-                        egui::CollapsingHeader::new(format!(
+                        egui::CollapsingHeader::new(trf!(
+                            language,
                             "{} · {} байт · {} участков",
-                            section_name(section.section),
+                            "{} · {} bytes · {} spans",
+                            "{} · {} Bytes · {} Abschnitte",
+                            section_name(section.section, language),
                             section.changed_bytes,
                             section.ranges.len()
                         ))
@@ -1123,6 +1381,7 @@ impl App {
     }
 
     fn confirmation(&mut self, ctx: &egui::Context) {
+        let language = self.language;
         let Some(action) = self.pending_action else {
             return;
         };
@@ -1130,19 +1389,19 @@ impl App {
         let mut cancelled = false;
         egui::Modal::new(egui::Id::unique("unsaved_confirmation")).show(ctx, |ui| {
             ui.set_width(480.0);
-            ui.heading(if matches!(action, Action::Reset) { "Вернуть исходный файл?" } else { "Есть несохранённые изменения" }); ui.add_space(8.0);
+            ui.heading(if matches!(action, Action::Reset) { tr!(language, "Вернуть исходный файл?", "Restore original file?", "Originaldatei wiederherstellen?") } else { tr!(language, "Есть несохранённые изменения", "Unsaved changes", "Ungespeicherte Änderungen") }); ui.add_space(8.0);
             if matches!(action, Action::Reset) {
-                ui.label("Все применённые правки будут отменены. История отмены очистится. Сохранённые копии останутся на диске.");
+                ui.label(tr!(language, "Все применённые правки будут отменены. История отмены очистится. Сохранённые копии останутся на диске.", "All applied edits will be reverted. Undo history will be cleared. Saved copies will remain on disk.", "Alle übernommenen Änderungen werden zurückgesetzt. Der Rückgängig-Verlauf wird gelöscht. Gespeicherte Kopien bleiben auf dem Datenträger."));
             } else {
-                if self.pending_form() { ui.label("В форме есть неприменённые правки. Они будут потеряны."); }
-                if self.unsaved() { ui.label("Последние применённые изменения ещё не сохранены в отдельную копию."); }
-                if matches!(action, Action::Close) && self.calibrations.unsaved() { ui.label("Есть несохранённая рабочая копия калибровок. Сохраните её на вкладке «Калибровки» перед закрытием."); }
-                ui.label(if matches!(action, Action::Close) { "Закрыть приложение без сохранения?" } else { "Продолжить открытие другого файла без сохранения текущих правок?" });
+                if self.pending_form() { ui.label(tr!(language, "В форме есть неприменённые правки. Они будут потеряны.", "The form has unapplied edits. They will be lost.", "Das Formular enthält nicht übernommene Änderungen. Diese gehen verloren.")); }
+                if self.unsaved() { ui.label(tr!(language, "Последние применённые изменения ещё не сохранены в отдельную копию.", "The latest applied changes have not been saved to a separate copy.", "Die letzten übernommenen Änderungen wurden noch nicht als separate Kopie gespeichert.")); }
+                if matches!(action, Action::Close) && self.calibrations.unsaved() { ui.label(tr!(language, "Есть несохранённая рабочая копия калибровок. Сохраните её на вкладке «Калибровки» перед закрытием.", "Calibration working copy is unsaved. Save it on the Calibration tab before closing.", "Die Arbeitskopie der Kalibrierung ist ungespeichert. Vor dem Schließen im Reiter Kalibrierung speichern.")); }
+                ui.label(if matches!(action, Action::Close) { tr!(language, "Закрыть приложение без сохранения?", "Close the application without saving?", "Anwendung ohne Speichern schließen?") } else { tr!(language, "Продолжить открытие другого файла без сохранения текущих правок?", "Open another file without saving current edits?", "Andere Datei öffnen, ohne die aktuellen Änderungen zu speichern?") });
             }
             ui.add_space(12.0);
             ui.horizontal(|ui| {
-                cancelled = ui.button("Вернуться").clicked();
-                confirmed = ui.button(if matches!(action, Action::Reset) { "Вернуть исходный" } else { "Продолжить без сохранения" }).clicked();
+                cancelled = ui.button(tr!(language, "Вернуться", "Go back", "Zurück")).clicked();
+                confirmed = ui.button(if matches!(action, Action::Reset) { tr!(language, "Вернуть исходный", "Restore original", "Original wiederherstellen") } else { tr!(language, "Продолжить без сохранения", "Continue without saving", "Ohne Speichern fortfahren") }).clicked();
             });
         });
         if cancelled {
@@ -1169,7 +1428,7 @@ impl eframe::App for App {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.radio.cancel();
                 self.pending_action = None;
-                self.message("Чтение отменяется. Дождитесь завершения и закрытия COM-порта, затем закройте окно снова.", true);
+                self.message(msg!("Чтение отменяется. Дождитесь завершения и закрытия COM-порта, затем закройте окно снова.", "Reading is being cancelled. Wait for completion and COM port closure, then close the window again.", "Lesen wird abgebrochen. Abschluss und Schließen des COM-Ports abwarten, dann das Fenster erneut schließen."), true);
             } else if self.pending_form() || self.unsaved() || self.calibrations.unsaved() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.pending_action = Some(Action::Close);
@@ -1182,6 +1441,7 @@ impl eframe::App for App {
             self.tab = Tab::Radio;
         }
         self.toolbar(ui);
+        let language = self.language;
         if self.tab == Tab::Radio {
             self.radio_ui(ui);
         } else if self.tab == Tab::Firmware {
@@ -1204,14 +1464,14 @@ impl eframe::App for App {
             egui::CentralPanel::default().show(ui, |ui| {
                 ui.add_space(70.0);
                 ui.vertical_centered(|ui| {
-                    ui.heading("Ваши каналы — в отдельной рабочей копии");
+                    ui.heading(tr!(language, "Ваши каналы — в отдельной рабочей копии", "Your channels in a separate working copy", "Ihre Kanäle in einer separaten Arbeitskopie"));
                     ui.add_space(12.0);
                     ui.label(
-                        "Откройте .880dmf или .98pdmf, отредактируйте каналы, зоны и настройки.",
+                        tr!(language, "Откройте .880dmf или .98pdmf, отредактируйте каналы, зоны и настройки.", "Open .880dmf or .98pdmf to edit channels, zones and settings.", ".880dmf oder .98pdmf öffnen, um Kanäle, Zonen und Einstellungen zu bearbeiten."),
                     );
-                    ui.label("Исходный файл сохраняется. Результат записывается под новым именем.");
+                    ui.label(tr!(language, "Исходный файл сохраняется. Результат записывается под новым именем.", "The original file is retained. Results are saved under a new name.", "Die Originaldatei bleibt erhalten. Das Ergebnis wird unter einem neuen Namen gespeichert."));
                     ui.add_space(24.0);
-                    if ui.button("Открыть файл CPS…").clicked() {
+                    if ui.button(tr!(language, "Открыть файл CPS…", "Open CPS file…", "CPS-Datei öffnen…")).clicked() {
                         self.request_action(Action::Open, &ctx);
                     }
                 });
@@ -1232,17 +1492,33 @@ impl eframe::App for App {
     }
 }
 
+fn tone_row(ui: &mut egui::Ui, language: Language, label: &str, value: &mut String) {
+    ui.label(label);
+    ui.add(
+        egui::TextEdit::singleline(value)
+            .desired_width(270.0)
+            .hint_text(tr!(language, "Нет", "None", "Aus")),
+    );
+    ui.end_row();
+}
 fn text_row(ui: &mut egui::Ui, label: &str, value: &mut String) {
     ui.label(label);
     ui.add(egui::TextEdit::singleline(value).desired_width(270.0));
     ui.end_row();
 }
-fn choice(ui: &mut egui::Ui, id: &str, raw: &mut u8, choices: &[(u8, &str)]) {
+fn choice(ui: &mut egui::Ui, language: Language, id: &str, raw: &mut u8, choices: &[(u8, &str)]) {
     let selected = choices
         .iter()
         .find(|(code, _)| code == raw)
         .map(|(_, label)| (*label).to_string())
-        .unwrap_or_else(|| format!("Неизвестно (0x{raw:02X})"));
+        .unwrap_or_else(|| {
+            trf!(
+                language,
+                "Неизвестно (0x{raw:02X})",
+                "Unknown (0x{raw:02X})",
+                "Unbekannt (0x{raw:02X})"
+            )
+        });
     egui::ComboBox::from_id_salt(id)
         .width(270.0)
         .selected_text(selected)
@@ -1252,59 +1528,92 @@ fn choice(ui: &mut egui::Ui, id: &str, raw: &mut u8, choices: &[(u8, &str)]) {
             }
         });
 }
-fn zone_members_error(error: ZoneDisplayError) -> String {
+fn zone_members_error(error: ZoneDisplayError, language: Language) -> String {
     match error {
         ZoneDisplayError::HeaderMismatch { first, second } => {
-            format!("Счётчики зоны не совпадают: {first} и {second}.")
+            trf!(
+                language,
+                "Счётчики зоны не совпадают: {first} и {second}.",
+                "Zone counts disagree: {first} and {second}.",
+                "Zonenzähler weichen ab: {first} und {second}."
+            )
         }
         ZoneDisplayError::HeaderCount { declared } => {
-            format!("Недопустимый счётчик зоны: {declared}; максимум 200.")
+            trf!(
+                language,
+                "Недопустимый счётчик зоны: {declared}; максимум 200.",
+                "Invalid zone count: {declared}; maximum 200.",
+                "Ungültiger Zonenzähler: {declared}; höchstens 200."
+            )
         }
         ZoneDisplayError::MemberCode { slot, code } => {
-            format!("Неизвестная ссылка в позиции {}: 0x{code:04X}.", slot + 1)
+            trf!(
+                language,
+                "Неизвестная ссылка в позиции {}: 0x{code:04X}.",
+                "Unknown reference at position {}: 0x{code:04X}.",
+                "Unbekannter Verweis an Position {}: 0x{code:04X}.",
+                slot + 1
+            )
         }
         ZoneDisplayError::CountMismatch { declared, found } => {
-            format!("Заголовок указывает {declared} каналов, сохранено ссылок: {found}.")
+            trf!(
+                language,
+                "Заголовок указывает {declared} каналов, сохранено ссылок: {found}.",
+                "Header declares {declared} channels; stored references: {found}.",
+                "Kopf gibt {declared} Kanäle an; gespeicherte Verweise: {found}."
+            )
         }
     }
 }
 
-fn parse_members(text: &str) -> Result<Vec<u16>, String> {
+fn parse_members(text: &str) -> Result<Vec<u16>, LocalizedText> {
     let mut members = Vec::new();
     for item in text
         .split(|character: char| character.is_whitespace() || character == ',' || character == ';')
         .filter(|item| !item.is_empty())
     {
-        let number: u16 = item
-            .parse()
-            .map_err(|_| format!("Неверный номер канала: {item}"))?;
+        let number: u16 = item.parse().map_err(|_| {
+            msgf!(
+                "Неверный номер канала: {item}",
+                "Invalid channel number: {item}",
+                "Ungültige Kanalnummer: {item}"
+            )
+        })?;
         if !(1..=1024).contains(&number) {
-            return Err(format!("Номер канала {number} вне диапазона 1–1024"));
+            return Err(msgf!(
+                "Номер канала {number} вне диапазона 1–1024",
+                "Channel number {number} is outside 1–1024",
+                "Kanalnummer {number} liegt außerhalb von 1–1024"
+            ));
         }
         if members.len() == MEMBER_COUNT {
-            return Err("В зоне может быть не более 200 записей".into());
+            return Err(msg!(
+                "В зоне может быть не более 200 записей",
+                "A zone can contain at most 200 entries",
+                "Eine Zone kann höchstens 200 Einträge enthalten"
+            )
+            .into());
         }
         members.push(number - 1);
     }
     Ok(members)
 }
-fn setting_label(field: Field, code: u8) -> String {
-    if code > field.max_code() {
-        return format!("Неизвестно (0x{code:02X})");
-    }
-    field
-        .choice_label(code)
-        .map(str::to_owned)
-        .unwrap_or_else(|| code.to_string())
+fn setting_label(field: Field, code: u8, language: Language) -> String {
+    settings_i18n::choice(field, code, language)
 }
 
-fn section_name(section: Section) -> &'static str {
+fn section_name(section: Section, language: Language) -> &'static str {
     match section {
-        Section::Cfg => "Настройки (CFG)",
-        Section::Channels => "Каналы",
+        Section::Cfg => tr!(
+            language,
+            "Настройки (CFG)",
+            "Settings (CFG)",
+            "Einstellungen (CFG)"
+        ),
+        Section::Channels => tr!(language, "Каналы", "Channels", "Kanäle"),
         Section::Fm => "FM",
         Section::Time => "Time",
-        Section::Zones => "Зоны",
+        Section::Zones => tr!(language, "Зоны", "Zones", "Zonen"),
     }
 }
 fn hex(bytes: &[u8]) -> String {

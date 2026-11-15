@@ -13,27 +13,27 @@ Diese Anleitung beschreibt die erste Vorbereitung eines UV-98 Plus / der untersu
 3. Mit der originalen CPS für das eigene Modell das Gerät auslesen und die ursprüngliche `.880dmf`- oder `.98pdmf`-Datei speichern. Eine vorhandene Originaldatei wie `999.880dmf` unverändert aufbewahren.
 4. Original-CPS, Radio Tuning Software und andere Programme schließen, die das Kabel verwenden. Vor dem ersten Auslesen mit unserer CPS das Gerät für 3 Sekunden ausschalten und wieder normal starten.
 5. Einen Ordner anlegen, etwa `Dokumente/UV98-backup-2026-11-16`. Sinnvolle Unterordner: `01-original`, `02-calibration`, `03-nor`, `04-settings`, `05-recovery`. Die ursprüngliche CPS-Datei in `01-original` ablegen.
-6. Das [R37-Paket mit CPS 0.6.1](https://github.com/YaziAranea/uv98-rust/releases/tag/r37) vollständig entpacken. `UV98-CPS.exe` starten und **«Резервные копии» (Sicherungen)** öffnen. Den tatsächlichen COM-Port über **«Обновить список» (Aktualisieren) → «Доступные порты» (Verfügbare Ports)** wählen. Frühere Angaben wie COM20/COM21 sind keine Vorgabe für Ihren Rechner.
+6. Das [R37-Paket mit CPS 0.7.0](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37-CPS-0.7.0-2026-11-16.zip) vollständig entpacken. `UV98-CPS.exe` starten, unter **Язык / Language / Sprache** die Option **Deutsch** wählen und **Sicherungen** öffnen. Den tatsächlichen COM-Port über **Liste aktualisieren → Verfügbare Ports** wählen. Frühere Angaben wie COM20/COM21 sind keine Vorgabe für Ihren Rechner.
 
-Die unten zitierten Schaltflächen entsprechen der derzeit russischen Windows-CPS. Modell, originale Firmwareversion und bekannte Platinenrevision in einer kurzen Textdatei bei den Sicherungen notieren.
+Die Sprachwahl ist stets in der Symbolleiste sichtbar. Alle acht Reiter und bereits angezeigte Statusmeldungen wechseln sofort die Sprache. Ungespeicherte Änderungen bleiben erhalten. CPS speichert die Sprachwahl im Windows-Benutzerprofil. Titel und Filter der Dateidialoge folgen der CPS-Sprache. Die Standardschaltflächen folgen der Windows-Sprache. Das Paket enthält dieselbe R37-Firmware-BIN. Das CPS-Update erfordert kein erneutes Flashen.
+
+Modell, originale Firmwareversion und bekannte Platinenrevision in einer kurzen Textdatei bei den Sicherungen notieren.
 
 ## 2. Drei Lesevorgänge ausführen
 
-Vor jedem Vorgang mit **«Папка для снимков…» (Sicherungsordner)** den passenden Unterordner wählen. CPS legt darin ein neues Verzeichnis `UV98-read-…` an. Das gesamte Verzeichnis aufbewahren.
+Vor jedem Vorgang mit **Ordner für Abbilder…** den passenden Unterordner wählen. CPS legt darin ein neues Verzeichnis `UV98-read-…` an. Das gesamte Verzeichnis aufbewahren.
 
 | Reihenfolge | CPS-Schaltfläche | Erwartete Dateien |
 |---|---|---|
-| 1 | **Считать калибровки (4 КиБ)** — Kalibrierung lesen | `calibration.bin`, genau **4096 Byte**: die individuellen Werksdaten dieses Geräts. |
-| 2 | **Считать память настроек (4 МиБ)** — Einstellungsspeicher lesen | `storage-address-space.bin`, genau **4194304 Byte**, zusätzlich `calibration.bin`: der über das Protokoll lesbare externe NOR-Adressraum. |
-| 3 | **Считать каналы, настройки и калибровки** — Kanäle, Einstellungen und Kalibrierung lesen | `calibration.bin`, `cfg.bin`, `channels.bin`, `zones.bin`, `fm.bin`: getrennte Datenbereiche. |
+| 1 | **Kalibrierung lesen (4 KiB)** | `calibration.bin`, genau **4096 Byte**: die individuellen Werksdaten dieses Geräts. |
+| 2 | **Einstellungsspeicher lesen (4 MiB)** | `storage-address-space.bin`, genau **4194304 Byte**, zusätzlich `calibration.bin`: der über das Protokoll lesbare externe NOR-Adressraum. |
+| 3 | **Kanäle, Einstellungen und Kalibrierung lesen** | `calibration.bin`, `cfg.bin`, `channels.bin`, `zones.bin`, `fm.bin`: getrennte Datenbereiche. |
 
 Der zweite Vorgang dauert am längsten. **Beide Durchläufe** abwarten. Während des Lesens das Funkgerät nicht bedienen und keine Einstellungen ändern.
 
 Nach **jedem** Vorgang muss folgende Meldung erscheinen:
 
-> Два чтения совпали. Снимок и журнал сохранены. Порт закрыт.
-
-Das bedeutet: „Beide Lesevorgänge stimmen überein. Sicherung und Protokoll gespeichert. Port geschlossen.“
+> Beide Lesedurchläufe stimmen überein. Abbild und Protokoll wurden gespeichert. Der Port ist geschlossen.
 
 `manifest.json`, `started.json` und `pass-*.bin` zusammen mit den Datendateien aufbewahren. Eine erfolgreiche `manifest.json` enthält:
 
@@ -73,7 +73,7 @@ Das untersuchte Profil verwendet Originalversion 1.16: [Dateiseite im Archiv von
 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc
 ```
 
-Die Datei mit dem Namen `RT-880_Upgrade_V1_16_250915.bin` im Ordner `recovery` neben `UV98-CPS.exe` ablegen; den Ordner bei Bedarf anlegen. **«Сохранить заводской BIN 1.16…» (Werks-BIN 1.16 speichern)** kann dann eine separate Kopie erzeugen; CPS prüft den SHA. Die Original-BIN kann auch direkt auf der Firmware-Seite ausgewählt werden. Keine andere Version nur auf diesen Dateinamen umbenennen.
+Die Datei mit dem Namen `RT-880_Upgrade_V1_16_250915.bin` im Ordner `recovery` neben `UV98-CPS.exe` ablegen; den Ordner bei Bedarf anlegen. **Werks-BIN 1.16 speichern…** kann dann eine separate Kopie erzeugen; CPS prüft den SHA. Die Original-BIN kann auch direkt auf der Firmware-Seite ausgewählt werden. Keine andere Version nur auf diesen Dateinamen umbenennen.
 
 ## 4. Kompatibilität vor dem Flashen prüfen
 
@@ -81,8 +81,8 @@ R37 ist für das untersuchte AT32F423-Platinenprofil vorgesehen. Ein ähnliches 
 
 Für eine bestätigte kompatible Platine eine persönliche BIN vorbereiten. **Ein Rust-Compiler wird dafür nicht benötigt.**
 
-1. **«Прошивка» (Firmware)** in unserer CPS öffnen. Die ursprüngliche `UV98-r37.bin` aus dem aktuellen Paket auswählen.
-2. **«Подготовить образ для моей рации…» (Image für mein Funkgerät vorbereiten)** anklicken.
+1. **Firmware** in unserer CPS öffnen. Die ursprüngliche `UV98-r37.bin` aus dem aktuellen Paket auswählen.
+2. **Image für mein Funkgerät vorbereiten…** anklicken.
 3. **`manifest.json` der vollständigen 4-MiB-NOR-Sicherung** auswählen, die mit „Einstellungsspeicher lesen (4 MiB)“ erstellt wurde. Das Manifest auswählen, nicht `storage-address-space.bin` selbst. Eine reine Kalibrierungssicherung reicht nicht aus.
 4. Einen übergeordneten Ordner für neue Images wählen, etwa `Dokumente/UV98-personal`. CPS erstellt darin ein neues Verzeichnis `UV98-personal-…`.
 5. Die erfolgreiche Vorbereitung abwarten. Es entstehen `firmware/UV98-personal.bin` und `firmware/catalog.json`; CPS wählt die neue BIN automatisch zum Flashen aus.
@@ -99,9 +99,9 @@ Erst nach erfolgreicher Vorbereitung, bestätigter Platinenkompatibilität und S
 ## 5. Ein kompatibles Image installieren
 
 1. Das gesamte Paket entpacken. CPS prüft BIN-Dateien anhand von `firmware/catalog.json`; eine einzelne Datei neben einer beliebigen alten CPS reicht nicht.
-2. **«Прошивка» (Firmware)** in CPS öffnen und die vorbereitete `UV98-personal.bin` wählen. Namen und SHA256 prüfen; CPS vergleicht sie mit dem neuen persönlichen Katalog.
+2. **Firmware** in CPS öffnen und die vorbereitete `UV98-personal.bin` wählen. Namen und SHA256 prüfen; CPS vergleicht sie mit dem neuen persönlichen Katalog.
 3. Das Gerät ausschalten. Die **obere PTT** gedrückt halten, einschalten und PTT nach 2–3 Sekunden loslassen. Beim untersuchten Gerät zeigt der originale Bootloader einen schwarzen Bildschirm und eine grüne LED.
-4. Den COM-Port des Kabels wählen. Die Bestätigung zur Bootloader-Bereitschaft markieren und **«Записать прошивку» (Firmware schreiben)** einmal anklicken.
+4. Den COM-Port des Kabels wählen. Die Bestätigung zur Bootloader-Bereitschaft markieren und **Firmware schreiben** einmal anklicken.
 5. Auf die ausdrückliche Abschlussmeldung warten. Während des Schreibens weder ausschalten noch das Kabel abziehen oder CPS schließen.
 6. Nach Abschluss für 3 Sekunden ausschalten und **ohne PTT** starten. Anzeige, Tasten und Empfang prüfen. Das Vorgangsprotokoll aufbewahren.
 

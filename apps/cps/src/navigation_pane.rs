@@ -1,5 +1,6 @@
 //! Local CFG edits only. Offsets follow RT880 CPS1.10 MainForm.cs; unrelated
 //! bytes, unedited unknown values and original comments are retained verbatim.
+use crate::i18n::{Language, LocalizedText};
 use eframe::egui::{self, Color32};
 use uv98_codeplug::CFG_LEN;
 use uv98_cps_core::Document;
@@ -107,43 +108,77 @@ impl Draft {
         self.initial != self.current
     }
 
-    pub fn apply(&self, document: &mut Document) -> Result<usize, String> {
+    pub fn apply(&self, document: &mut Document) -> Result<usize, LocalizedText> {
         document
             .apply(|bytes| self.patch(&mut bytes[..CFG_LEN]))
             .map(|summary| summary.changed_bytes)
     }
 
-    fn patch(&self, cfg: &mut [u8]) -> Result<(), String> {
+    fn patch(&self, cfg: &mut [u8]) -> Result<(), LocalizedText> {
         if cfg.len() != CFG_LEN {
-            return Err("Неверная длина CFG".into());
+            return Err(msg!(
+                "Неверная длина CFG",
+                "Invalid CFG length",
+                "Ungültige CFG-Länge"
+            ));
         }
         let a = &self.initial;
         let b = &self.current;
         for (offset, before, after, max, label) in [
-            (GPS_ENABLE, a.gps, b.gps, 1, "GPS"),
-            (GPS_BAUD, a.baud, b.baud, 9, "Скорость GPS"),
-            (APRS_ENABLE, a.aprs, b.aprs, 1, "APRS"),
-            (CALL + 6, a.ssid, b.ssid, 15, "SSID"),
-            (TX_LEVEL, a.level, b.level, 7, "Уровень TX"),
-            (LINK, a.link, b.link, 6, "Привязка APRS"),
+            (GPS_ENABLE, a.gps, b.gps, 1, msg!("GPS", "GPS", "GPS")),
+            (
+                GPS_BAUD,
+                a.baud,
+                b.baud,
+                9,
+                msg!("Скорость GPS", "GPS baud rate", "GPS-Baudrate"),
+            ),
+            (APRS_ENABLE, a.aprs, b.aprs, 1, msg!("APRS", "APRS", "APRS")),
+            (CALL + 6, a.ssid, b.ssid, 15, msg!("SSID", "SSID", "SSID")),
+            (
+                TX_LEVEL,
+                a.level,
+                b.level,
+                7,
+                msg!("Уровень TX", "TX level", "TX-Pegel"),
+            ),
+            (
+                LINK,
+                a.link,
+                b.link,
+                6,
+                msg!(
+                    "Привязка APRS",
+                    "APRS channel assignment",
+                    "APRS-Kanalzuordnung"
+                ),
+            ),
             (
                 PATH[0] + 6,
                 a.path_ssid[0],
                 b.path_ssid[0],
                 15,
-                "SSID пути 1",
+                msg!("SSID пути 1", "Path 1 SSID", "SSID für Pfad 1"),
             ),
             (
                 PATH[1] + 6,
                 a.path_ssid[1],
                 b.path_ssid[1],
                 15,
-                "SSID пути 2",
+                msg!("SSID пути 2", "Path 2 SSID", "SSID für Pfad 2"),
             ),
         ] {
             if before != after {
                 if after > max {
-                    return Err(format!("{label}: выберите поддерживаемое значение"));
+                    return Err(LocalizedText::from_fn(|language| {
+                        trf!(
+                            language,
+                            "{label}: выберите поддерживаемое значение",
+                            "{label}: choose a supported value",
+                            "{label}: Wählen Sie einen unterstützten Wert",
+                            label = label.as_str(language),
+                        )
+                    }));
                 }
                 cfg[offset] = after;
             }
@@ -152,8 +187,13 @@ impl Draft {
             encode_call(&b.call, b.ssid, false, &mut cfg[CALL..CALL + 6])?;
         }
         if b.call != a.call || b.ssid != a.ssid {
-            Address::new(&cfg[CALL..CALL + 6], cfg[CALL + 6])
-                .map_err(|_| "Позывной: 1–6 латинских букв/цифр и SSID 0–15")?;
+            Address::new(&cfg[CALL..CALL + 6], cfg[CALL + 6]).map_err(|_| {
+                msg!(
+                    "Позывной: 1–6 латинских букв/цифр и SSID 0–15",
+                    "Callsign: 1–6 Latin letters or digits and SSID 0–15",
+                    "Rufzeichen: 1–6 lateinische Buchstaben oder Ziffern und SSID 0–15",
+                )
+            })?;
         }
         for index in 0..2 {
             if b.paths[index] != a.paths[index] {
@@ -168,14 +208,16 @@ impl Draft {
                 && !matches!(cfg[PATH[index]], 0 | 0xff | b' ')
             {
                 Address::new(&cfg[PATH[index]..PATH[index] + 6], cfg[PATH[index] + 6])
-                    .map_err(|_| "Путь APRS: 1–6 латинских букв/цифр и SSID 0–15")?;
+                    .map_err(|_| INVALID_PATH)?;
             }
         }
         if b.comment != a.comment {
             if !valid_comment(&b.comment) {
-                return Err(
-                    "Новый комментарий: до 32 печатных символов ASCII без переносов строк".into(),
-                );
+                return Err(msg!(
+                    "Новый комментарий: до 32 печатных символов ASCII без переносов строк",
+                    "New comment: up to 32 printable ASCII characters without line breaks",
+                    "Neuer Kommentar: bis zu 32 druckbare ASCII-Zeichen ohne Zeilenumbrüche",
+                ));
             }
             cfg[COMMENT..COMMENT + COMMENT_LEN].fill(0xff);
             cfg[COMMENT..COMMENT + b.comment.len()].copy_from_slice(b.comment.as_bytes());
@@ -184,63 +226,127 @@ impl Draft {
         // normalize any unchanged bytes or reject unrelated GPS-only edits.
         if b.aprs == 1 && b.aprs != a.aprs {
             Address::new(&cfg[CALL..CALL + 6], cfg[CALL + 6])
-                .map_err(|_| "Для APRS задайте позывной 1–6 латинских букв/цифр и SSID 0–15")?;
+                .map_err(|_| msg!(
+                    "Для APRS задайте позывной 1–6 латинских букв/цифр и SSID 0–15",
+                    "APRS requires a callsign with 1–6 Latin letters or digits and SSID 0–15",
+                    "APRS benötigt ein Rufzeichen mit 1–6 lateinischen Buchstaben oder Ziffern und SSID 0–15",
+                ))?;
             for offset in PATH {
                 if !matches!(cfg[offset], 0 | 0xff | b' ') {
                     Address::new(&cfg[offset..offset + 6], cfg[offset + 6])
-                        .map_err(|_| "Путь APRS: 1–6 латинских букв/цифр и SSID 0–15")?;
+                        .map_err(|_| INVALID_PATH)?;
                 }
             }
         }
         Ok(())
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui) -> Action {
+    pub fn show(&mut self, ui: &mut egui::Ui, language: Language) -> Action {
         ui.heading("GPS / APRS");
-        ui.label("Параметры открытого файла CPS. «Применить в файл» меняет только документ на компьютере.");
-        ui.small("Сохраните отдельную .880dmf / .98pdmf. Перенос CFG в рацию выполняется штатной CPS; запись настроек R35 в NOR здесь не реализована.");
+        ui.label(tr!(language,
+            "Параметры открытого файла CPS. «Применить в файл» меняет только документ на компьютере.",
+            "Settings for the open CPS file. “Apply to document” changes the document on this computer only.",
+            "Einstellungen der geöffneten CPS-Datei. „Auf Dokument anwenden“ ändert nur das Dokument auf diesem Computer.",
+        ));
+        ui.small(tr!(language,
+            "Сохраните отдельную .880dmf / .98pdmf. Перенос CFG в рацию выполняется штатной CPS; запись настроек R35 в NOR здесь не реализована.",
+            "Save a separate .880dmf / .98pdmf file. Use the stock CPS to transfer CFG to the radio. This tool cannot write R35 settings to NOR.",
+            "Speichern Sie eine separate .880dmf- oder .98pdmf-Datei. Übertragen Sie die CFG mit der Original-CPS auf das Funkgerät. Dieses Programm kann die R35-Einstellungen nicht in den NOR-Flash schreiben.",
+        ));
+        let toggle = &[
+            tr!(language, "Выключен", "Off", "Aus"),
+            tr!(language, "Включён", "On", "Ein"),
+        ];
         ui.add_space(10.0);
         egui::ScrollArea::vertical().id_salt("navigation_scroll")
             .max_height((ui.available_height()-70.0).max(160.0)).show(ui, |ui| {
             egui::Grid::new("navigation_fields").num_columns(2).spacing([24.0,12.0]).show(ui, |ui| {
-                ui.label("GPS / питание"); choice(ui,"nav_gps",&mut self.current.gps,&["Выключен","Включён"]); ui.end_row();
-                ui.label("GPS / скорость UART"); choice(ui,"nav_baud",&mut self.current.baud,&BAUDS); ui.end_row();
-                ui.label("APRS / разрешение"); choice(ui,"nav_aprs",&mut self.current.aprs,&["Выключен","Включён"]); ui.end_row();
-                ui.label("Позывной (без суффикса SSID)");
+                ui.label(tr!(language, "GPS / питание", "GPS power", "GPS-Stromversorgung"));
+                choice(ui, language, "nav_gps", &mut self.current.gps, toggle);
+                ui.end_row();
+                ui.label(tr!(language, "GPS / скорость UART", "GPS UART baud rate", "GPS-UART-Baudrate"));
+                choice(ui, language, "nav_baud", &mut self.current.baud, &BAUDS);
+                ui.end_row();
+                ui.label(tr!(language, "APRS / разрешение", "APRS enable", "APRS aktivieren"));
+                choice(ui, language, "nav_aprs", &mut self.current.aprs, toggle);
+                ui.end_row();
+                ui.label(tr!(language, "Позывной (без суффикса SSID)", "Callsign (without SSID suffix)", "Rufzeichen (ohne SSID-Suffix)"));
                 ui.horizontal(|ui| {
                     ui.add(egui::TextEdit::singleline(&mut self.current.call).desired_width(160.0).hint_text("N0CALL"));
                     ui.label("SSID"); number(ui,"nav_ssid",&mut self.current.ssid,15);
                 }); ui.end_row();
                 for index in 0..2 {
-                    ui.label(format!("Путь {} (пусто — не использовать)",index+1));
+                    ui.label(trf!(language, "Путь {} (пусто — не использовать)", "Path {} (leave blank to omit)", "Pfad {} (bei Nichtgebrauch leer lassen)", index + 1));
                     ui.horizontal(|ui| {
                         ui.add(egui::TextEdit::singleline(&mut self.current.paths[index]).desired_width(160.0).hint_text("WIDE1"));
                         ui.label("SSID"); number(ui,if index==0 {"path_ssid_0"}else{"path_ssid_1"},&mut self.current.path_ssid[index],15);
                     }); ui.end_row();
                 }
-                ui.label("Комментарий APRS / имя станции");
-                ui.add(egui::TextEdit::singleline(&mut self.current.comment).desired_width(420.0).hint_text("До 32 символов ASCII")); ui.end_row();
-                ui.label("Уровень модуляции CMX (не RF-мощность)"); choice(ui,"nav_level",&mut self.current.level,&LEVELS); ui.end_row();
-                ui.label("Привязка APRS в стоковой прошивке"); choice(ui,"nav_link",&mut self.current.link,&LINKS); ui.end_row();
+                ui.label(tr!(language, "Комментарий APRS / имя станции", "APRS comment / station name", "APRS-Kommentar / Stationsname"));
+                ui.add(egui::TextEdit::singleline(&mut self.current.comment).desired_width(420.0).hint_text(tr!(language, "До 32 символов ASCII", "Up to 32 ASCII characters", "Bis zu 32 ASCII-Zeichen")));
+                ui.end_row();
+                ui.label(tr!(language, "Уровень модуляции CMX (не RF-мощность)", "CMX modulation level (separate from RF power)", "CMX-Modulationspegel (unabhängig von der HF-Leistung)"));
+                choice(ui, language, "nav_level", &mut self.current.level, &LEVELS);
+                ui.end_row();
+                ui.label(tr!(language, "Привязка APRS в стоковой прошивке", "APRS channel assignment in stock firmware", "APRS-Kanalzuordnung in der Original-Firmware"));
+                choice(ui, language, "nav_link", &mut self.current.link, &LINKS);
+                ui.end_row();
             });
             ui.add_space(12.0);
             if self.original_comment_needs_preservation && self.current.comment == self.initial.comment {
-                ui.colored_label(Color32::from_rgb(245,190,100),"Исходный комментарий длиннее 32 символов или содержит не-ASCII. Он сохранится побайтно, пока вы его не измените.");
+                ui.colored_label(Color32::from_rgb(245,190,100), tr!(language,
+                    "Исходный комментарий длиннее 32 символов или содержит не-ASCII. Он сохранится побайтно, пока вы его не измените.",
+                    "The original comment exceeds 32 characters or contains non-ASCII characters. Its bytes are preserved until you edit it.",
+                    "Der ursprüngliche Kommentar ist länger als 32 Zeichen oder enthält Zeichen außerhalb von ASCII. Seine Bytes bleiben bis zur Bearbeitung erhalten.",
+                ));
             }
-            ui.small("Позывные при явном редактировании переводятся в верхний регистр. Неизвестные значения остаются неизменными, пока не выбран новый вариант.");
-            ui.small("R35: ручной маяк передаётся на частоте TX активного A/B, показанной на экране APRS. Стоковая привязка A/B/C сохраняется для совместимости, но не управляет этим ручным маяком.");
-            ui.small("Комментарий — текст в APRS. Select V передаёт числовой ID, а не текстовое имя. Автоматический маяк от одного появления GPS-позиции не запускается.");
+            ui.small(tr!(language,
+                "Позывные при явном редактировании переводятся в верхний регистр. Неизвестные значения остаются неизменными, пока не выбран новый вариант.",
+                "Edited callsigns are converted to uppercase. Unknown values are preserved until you select a replacement.",
+                "Bearbeitete Rufzeichen werden in Großbuchstaben umgewandelt. Unbekannte Werte bleiben erhalten, bis Sie einen Ersatz auswählen.",
+            ));
+            ui.small(tr!(language,
+                "R35: ручной маяк передаётся на частоте TX активного A/B, показанной на экране APRS. Стоковая привязка A/B/C сохраняется для совместимости, но не управляет этим ручным маяком.",
+                "R35 sends manual beacons on the active A/B TX frequency shown on the APRS screen. The stock A/B/C assignment is retained for compatibility and does not control this beacon.",
+                "R35 sendet manuelle Baken auf der TX-Frequenz des aktiven A/B-Kanals, die im APRS-Bildschirm angezeigt wird. Die ursprüngliche A/B/C-Zuordnung bleibt aus Kompatibilitätsgründen erhalten und steuert diese Bake nicht.",
+            ));
+            ui.small(tr!(language,
+                "Комментарий — текст в APRS. Select V передаёт числовой ID, а не текстовое имя. Автоматический маяк от одного появления GPS-позиции не запускается.",
+                "APRS transmits the comment as text. Select V sends a numeric ID. Acquiring a GPS fix alone does not trigger a beacon.",
+                "APRS überträgt den Kommentar als Text. Select V sendet eine numerische ID. Eine ermittelte GPS-Position allein löst keine Bake aus.",
+            ));
         });
         let mut action = Action::default();
         ui.horizontal(|ui| {
             action.apply = ui
-                .add_enabled(self.changed(), egui::Button::new("Применить в файл"))
+                .add_enabled(
+                    self.changed(),
+                    egui::Button::new(tr!(
+                        language,
+                        "Применить в файл",
+                        "Apply to document",
+                        "Auf Dokument anwenden"
+                    )),
+                )
                 .clicked();
             action.reset = ui
-                .add_enabled(self.changed(), egui::Button::new("Сбросить форму"))
+                .add_enabled(
+                    self.changed(),
+                    egui::Button::new(tr!(
+                        language,
+                        "Сбросить форму",
+                        "Reset form",
+                        "Formular zurücksetzen"
+                    )),
+                )
                 .clicked();
             if self.changed() {
-                ui.label("Форма ещё не применена");
+                ui.label(tr!(
+                    language,
+                    "Форма ещё не применена",
+                    "Form changes are pending",
+                    "Formularänderungen stehen aus"
+                ));
             }
         });
         action
@@ -250,7 +356,13 @@ impl Draft {
 fn valid_comment(text: &str) -> bool {
     text.len() <= 32 && text.bytes().all(|b| (0x20..=0x7e).contains(&b))
 }
-fn encode_call(text: &str, ssid: u8, optional: bool, out: &mut [u8]) -> Result<(), String> {
+const INVALID_PATH: LocalizedText = msg!(
+    "Путь APRS: 1–6 латинских букв/цифр и SSID 0–15",
+    "APRS path: 1–6 Latin letters or digits and SSID 0–15",
+    "APRS-Pfad: 1–6 lateinische Buchstaben oder Ziffern und SSID 0–15",
+);
+
+fn encode_call(text: &str, ssid: u8, optional: bool, out: &mut [u8]) -> Result<(), LocalizedText> {
     if text.is_empty() && optional {
         out.fill(0xff);
         return Ok(());
@@ -260,17 +372,35 @@ fn encode_call(text: &str, ssid: u8, optional: bool, out: &mut [u8]) -> Result<(
         || !text.bytes().all(|b| b.is_ascii_alphanumeric())
         || ssid > 15
     {
-        return Err("Позывной/путь: 1–6 латинских букв или цифр; SSID 0–15".into());
+        return Err(msg!(
+            "Позывной/путь: 1–6 латинских букв или цифр; SSID 0–15",
+            "Callsign/path: 1–6 Latin letters or digits and SSID 0–15",
+            "Rufzeichen/Pfad: 1–6 lateinische Buchstaben oder Ziffern und SSID 0–15",
+        ));
     }
     let upper = text.to_ascii_uppercase();
-    Address::new(upper.as_bytes(), ssid).map_err(|_| "Недопустимый позывной")?;
+    Address::new(upper.as_bytes(), ssid).map_err(|_| {
+        msg!(
+            "Недопустимый позывной",
+            "Invalid callsign",
+            "Ungültiges Rufzeichen"
+        )
+    })?;
     out.fill(0xff);
     out[..upper.len()].copy_from_slice(upper.as_bytes());
     Ok(())
 }
-fn choice(ui: &mut egui::Ui, id: &str, current: &mut u8, labels: &[&str]) {
+fn choice(ui: &mut egui::Ui, language: Language, id: &str, current: &mut u8, labels: &[&str]) {
     let selected = labels.get(usize::from(*current)).map_or_else(
-        || format!("Неизвестное значение {} — сохранить", *current),
+        || {
+            trf!(
+                language,
+                "Неизвестное значение {} — сохранить",
+                "Unknown value {} (keep)",
+                "Unbekannter Wert {} (beibehalten)",
+                *current
+            )
+        },
         |v| (*v).to_owned(),
     );
     egui::ComboBox::from_id_salt(id)

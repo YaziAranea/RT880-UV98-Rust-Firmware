@@ -1,6 +1,7 @@
 //! Application-only iRadio writer, ported from the locally proven pinned writer.
 //! No read probe exists in this loader: the first command starts erase.
 //! Images must match the release catalog; no padding, relocation, END or retries.
+use crate::i18n::{Language, LocalizedText};
 use serde_json::json;
 pub mod profile;
 use sha2::{Digest, Sha256};
@@ -15,20 +16,38 @@ pub const IMAGE_BYTES: usize = 251_904;
 pub const BLOCKS: usize = IMAGE_BYTES / 1024;
 const TIMEOUT: Duration = Duration::from_secs(5);
 const PROFILE: &str = "iradio-uv98-app-v1";
+const PERSONAL_LABEL_SUFFIX: &str = " · личный профиль";
 
 #[derive(Clone)]
 pub struct PreparedImage {
     pub path: PathBuf,
-    pub label: String,
+    label: String,
+    personalized: bool,
     pub sha256: String,
     pub bytes_len: usize,
     bytes: Vec<u8>,
     tx_sha256: String,
     catalog: PathBuf,
 }
+impl PreparedImage {
+    pub fn display_label(&self, lang: Language) -> String {
+        if self.personalized {
+            if let Some(source_label) = self.label.strip_suffix(PERSONAL_LABEL_SUFFIX) {
+                return trf!(
+                    lang,
+                    "{source_label} · личный профиль",
+                    "{source_label} · personal profile",
+                    "{source_label} · persönliches Profil",
+                );
+            }
+        }
+        self.label.clone()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Progress {
-    pub phase: String,
+    pub phase: LocalizedText,
     pub completed_blocks: usize,
     pub total_blocks: usize,
     pub destructive_started: bool,
@@ -46,24 +65,34 @@ fn ms() -> u128 {
         .unwrap_or_default()
         .as_millis()
 }
-fn bounded_read(path: &Path, max: usize) -> Result<Vec<u8>, String> {
+fn bounded_read(path: &Path, max: usize) -> Result<Vec<u8>, LocalizedText> {
     let file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     if file.metadata().map_err(|e| e.to_string())?.len() > max as u64 {
-        return Err("Файл слишком большой".into());
+        return Err(msg!(
+            "Файл слишком большой",
+            "File is too large",
+            "Datei ist zu groß"
+        ));
     }
     let mut bytes = Vec::new();
     file.take(max as u64 + 1)
         .read_to_end(&mut bytes)
         .map_err(|e| e.to_string())?;
     if bytes.len() > max {
-        return Err("Размер файла изменился при чтении".into());
+        return Err(msg!(
+            "Размер файла изменился при чтении",
+            "File size changed while reading",
+            "Dateigröße hat sich beim Lesen geändert"
+        ));
     }
     Ok(bytes)
 }
-fn validate_structure(data: &[u8]) -> Result<(), String> {
+fn validate_structure(data: &[u8]) -> Result<(), LocalizedText> {
     if data.len() != IMAGE_BYTES {
-        return Err(format!(
-            "Нужен полный application BIN: {IMAGE_BYTES} байт. Дополнение/обрезка запрещены."
+        return Err(msgf!(
+            "Нужен полный application BIN: {IMAGE_BYTES} байт. Дополнение/обрезка запрещены.",
+            "A complete application BIN of {IMAGE_BYTES} bytes is required. Padding and truncation are prohibited.",
+            "Erforderlich ist eine vollständige Anwendungs-BIN mit {IMAGE_BYTES} Byte. Auffüllen und Kürzen sind unzulässig.",
         ));
     }
     let sp = u32::from_le_bytes(data[..4].try_into().unwrap());
@@ -75,24 +104,42 @@ fn validate_structure(data: &[u8]) -> Result<(), String> {
         || !(0x0800_2808..0x0804_0000).contains(&(reset & !1))
     {
         return Err(
-            "BIN не соответствует приложению UV98: векторы SP/Reset вне допустимого окна".into(),
+            msg!(
+                "BIN не соответствует приложению UV98: векторы SP/Reset вне допустимого окна",
+                "BIN does not match a UV98 application: SP/Reset vectors are outside the allowed range",
+                "BIN passt nicht zur UV98-Anwendung: SP-/Reset-Vektoren liegen außerhalb des zulässigen Bereichs",
+            ),
         );
     }
     Ok(())
 }
-pub fn export_stock(destination: &Path) -> Result<(), String> {
+pub fn export_stock(destination: &Path) -> Result<(), LocalizedText> {
     const STOCK_SHA256: &str = "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc";
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
     let source = exe
         .parent()
-        .ok_or("Нет каталога CPS")?
+        .ok_or_else(|| {
+            msg!(
+                "Нет каталога CPS",
+                "CPS directory not found",
+                "CPS-Verzeichnis fehlt"
+            )
+        })?
         .join("recovery/RT-880_Upgrade_V1_16_250915.bin");
     if !source.is_file() {
-        return Err("Заводской BIN не входит в публичный комплект. Поместите свой RT-880_Upgrade_V1_16_250915.bin в папку recovery рядом с CPS; файл будет проверен по SHA256. Это файл восстановления, не чтение MCU рации.".into());
+        return Err(msg!(
+            "Заводской BIN не входит в публичный комплект. Поместите свой RT-880_Upgrade_V1_16_250915.bin в папку recovery рядом с CPS; файл будет проверен по SHA256. Это файл восстановления, не чтение MCU рации.",
+            "The public bundle omits the stock BIN. Place your RT-880_Upgrade_V1_16_250915.bin in the recovery folder beside CPS. CPS checks the SHA256. This file is for recovery and contains no MCU readout from your radio.",
+            "Das öffentliche Paket enthält keine Werks-BIN. Legen Sie Ihre RT-880_Upgrade_V1_16_250915.bin in den Ordner recovery neben CPS. CPS prüft die SHA256-Prüfsumme. Die Datei dient zur Wiederherstellung und enthält keinen MCU-Auszug Ihres Funkgeräts.",
+        ));
     }
     let bytes = bounded_read(&source, IMAGE_BYTES)?;
     if hash(&bytes) != STOCK_SHA256 {
-        return Err("SHA256 заводского образа не совпадает с комплектом".into());
+        return Err(msg!(
+            "SHA256 заводского образа не совпадает с комплектом",
+            "Stock image SHA256 does not match the bundle",
+            "SHA256 des Werks-Images stimmt nicht mit dem Paket überein"
+        ));
     }
     let mut file = OpenOptions::new()
         .create_new(true)
@@ -102,16 +149,22 @@ pub fn export_stock(destination: &Path) -> Result<(), String> {
     if let Err(error) = file.write_all(&bytes).and_then(|_| file.sync_all()) {
         drop(file);
         let _ = fs::remove_file(destination);
-        return Err(format!("{}: {error}", destination.display()));
+        return Err(format!("{}: {error}", destination.display()).into());
     }
     Ok(())
 }
 
-pub fn prepare(path: &Path) -> Result<PreparedImage, String> {
+pub fn prepare(path: &Path) -> Result<PreparedImage, LocalizedText> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let catalog = exe
         .parent()
-        .ok_or("Нет каталога CPS")?
+        .ok_or_else(|| {
+            msg!(
+                "Нет каталога CPS",
+                "CPS directory not found",
+                "CPS-Verzeichnis fehlt"
+            )
+        })?
         .join("firmware/catalog.json");
     prepare_with_catalog(path, &catalog).or_else(|original_error| {
         if path
@@ -146,29 +199,56 @@ pub fn default_image(base: &Path) -> Option<PathBuf> {
     prepare_with_catalog(&path, &catalog).ok()?;
     Some(path)
 }
-pub fn prepare_with_catalog(path: &Path, catalog: &Path) -> Result<PreparedImage, String> {
+pub fn prepare_with_catalog(path: &Path, catalog: &Path) -> Result<PreparedImage, LocalizedText> {
     let bytes = bounded_read(path, IMAGE_BYTES)?;
     validate_structure(&bytes)?;
     let sha256 = hash(&bytes);
     let catalog_data: serde_json::Value = serde_json::from_slice(&bounded_read(catalog, 65536)?)
-        .map_err(|e| format!("Каталог образов: {e}"))?;
+        .map_err(|e| {
+            msgf!(
+                "Каталог образов: {e}",
+                "Image catalog: {e}",
+                "Image-Katalog: {e}"
+            )
+        })?;
     if catalog_data["schema"] != 1 || catalog_data["profile"] != PROFILE {
-        return Err("Неподдерживаемый каталог образов CPS".into());
+        return Err(msg!(
+            "Неподдерживаемый каталог образов CPS",
+            "Unsupported CPS image catalog",
+            "CPS-Image-Katalog wird nicht unterstützt"
+        ));
     }
-    let entries = catalog_data["images"]
-        .as_array()
-        .ok_or("В каталоге нет images")?;
-    let found = entries.iter().find(|entry| entry["sha256"].as_str() == Some(&sha256)).ok_or("Этот BIN отсутствует в проверенном каталоге комплекта. Выберите образ из папки firmware или recovery.")?;
+    let entries = catalog_data["images"].as_array().ok_or_else(|| {
+        msg!(
+            "В каталоге нет images",
+            "The catalog is missing images",
+            "Im Katalog fehlt images"
+        )
+    })?;
+    let found = entries.iter().find(|entry| entry["sha256"].as_str() == Some(&sha256)).ok_or_else(|| msg!(
+        "Этот BIN отсутствует в проверенном каталоге комплекта. Выберите образ из папки firmware или recovery.",
+        "This BIN is missing from the verified bundle catalog. Select an image from the firmware or recovery folder.",
+        "Diese BIN fehlt im geprüften Paketkatalog. Wählen Sie ein Image aus dem Ordner firmware oder recovery.",
+    ))?;
     if found["bytes"].as_u64() != Some(IMAGE_BYTES as u64) {
-        return Err("Размер в каталоге не совпадает".into());
+        return Err(msg!(
+            "Размер в каталоге не совпадает",
+            "Size does not match the catalog",
+            "Größe stimmt nicht mit dem Katalog überein"
+        ));
     }
     let tx_sha256 = wire_hash(&bytes);
     if found["tx_sha256"].as_str() != Some(&tx_sha256) {
-        return Err("Контрольная сумма протокольного потока не совпадает с каталогом".into());
+        return Err(msg!(
+            "Контрольная сумма протокольного потока не совпадает с каталогом",
+            "The protocol stream checksum does not match the catalog",
+            "Die Prüfsumme des Protokolldatenstroms stimmt nicht mit dem Katalog überein"
+        ));
     }
     Ok(PreparedImage {
         path: path.to_path_buf(),
         label: found["label"].as_str().unwrap_or("UV98").to_string(),
+        personalized: false,
         sha256,
         bytes_len: bytes.len(),
         bytes,
@@ -208,32 +288,75 @@ pub(super) trait Transport {
     fn write_frame(&mut self, data: &[u8]) -> io::Result<usize>;
     fn close(&mut self) -> io::Result<()>;
 }
-fn new_file(path: &Path) -> Result<File, String> {
+fn new_file(path: &Path) -> Result<File, LocalizedText> {
     OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)
-        .map_err(|e| format!("{}: {e}", path.display()))
+        .map_err(|e| format!("{}: {e}", path.display()).into())
 }
-fn durable(file: &mut File, bytes: &[u8]) -> Result<(), String> {
+fn durable(file: &mut File, bytes: &[u8]) -> Result<(), LocalizedText> {
     file.write_all(bytes)
         .and_then(|_| file.sync_all())
-        .map_err(|e| format!("Журнал: {e}"))
+        .map_err(|e| msgf!("Журнал: {e}", "Log: {e}", "Protokoll: {e}"))
 }
-fn write_json(path: &Path, data: &serde_json::Value) -> Result<(), String> {
+fn write_json(path: &Path, data: &serde_json::Value) -> Result<(), LocalizedText> {
     durable(
         &mut new_file(path)?,
         &serde_json::to_vec_pretty(data).map_err(|e| e.to_string())?,
     )
 }
 
+struct TransferError {
+    notice: LocalizedText,
+    diagnostic: Option<String>,
+}
+
+impl From<LocalizedText> for TransferError {
+    fn from(notice: LocalizedText) -> Self {
+        Self {
+            notice,
+            diagnostic: None,
+        }
+    }
+}
+
+impl TransferError {
+    fn diagnostic(&self) -> &str {
+        self.diagnostic
+            .as_deref()
+            .unwrap_or_else(|| self.notice.as_str(Language::Russian))
+    }
+
+    fn transport(context: Option<&LocalizedText>, error: io::Error) -> Self {
+        let raw = error.to_string();
+        let render = |lang, detail: &str| {
+            context.map_or_else(
+                || detail.to_owned(),
+                |context| format!("{}: {detail}", context.as_str(lang)),
+            )
+        };
+        // Persist the original transport detail even if the UI has a translation.
+        let diagnostic = Some(render(Language::Russian, &raw));
+        let notice = LocalizedText::from_fn(|lang| {
+            #[cfg(windows)]
+            let detail = crate::firmware_windows::error_detail(&error, lang)
+                .map_or(raw.as_str(), |detail| detail);
+            #[cfg(not(windows))]
+            let detail = &raw;
+            render(lang, detail)
+        });
+        Self { notice, diagnostic }
+    }
+}
+
 fn run<T: Transport>(
     image: PreparedImage,
     port: &str,
     directory: &Path,
-    factory: impl FnOnce(&str) -> Result<T, String>,
+    factory: impl FnOnce(&str) -> Result<T, TransferError>,
     mut progress: impl FnMut(Progress),
-) -> Result<FlashReport, String> {
+) -> Result<FlashReport, LocalizedText> {
     // Revalidate the selected file and catalog immediately before creating the
     // journal/opening a port. Flash this immutable byte vector, not a file handle.
     let checked = prepare_with_catalog(&image.path, &image.catalog)?;
@@ -241,12 +364,22 @@ fn run<T: Transport>(
         || checked.bytes != image.bytes
         || checked.tx_sha256 != image.tx_sha256
     {
-        return Err("BIN изменился после выбора; выберите его заново".into());
+        return Err(msg!(
+            "BIN изменился после выбора; выберите его заново",
+            "The BIN changed after selection. Select it again.",
+            "Die BIN wurde nach der Auswahl verändert. Wählen Sie sie erneut aus."
+        ));
     }
     if let Some(parent) = directory.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    fs::create_dir(directory).map_err(|e| format!("Новая папка журнала: {e}"))?;
+    fs::create_dir(directory).map_err(|e| {
+        msgf!(
+            "Новая папка журнала: {e}",
+            "New log directory: {e}",
+            "Neues Protokollverzeichnis: {e}"
+        )
+    })?;
     let started = json!({"schema":1,"status":"incomplete","started_unix_ms":ms(),"port":port,"image_sha256":image.sha256,"image_bytes":IMAGE_BYTES,"tx_sha256":image.tx_sha256,"profile":PROFILE,"application_base":"0x08002800","application_end":"0x08040000","automatic_retries":0,"serial":{"baud":115200,"data_bits":8,"parity":"N","stop_bits":1,"dtr":false,"rts":false,"flow_control":false},"hardware_boot_verified":false,"mcu_readback_verified":false,"calibration_after_boot_verified":false});
     write_json(&directory.join("started.json"), &started)?;
     let mut tx = new_file(&directory.join("tx-attempted.bin"))?;
@@ -257,30 +390,45 @@ fn run<T: Transport>(
     let mut ack_count = 0usize;
     let mut destructive = false;
     let mut final_ack = false;
-    let mut stage = "Открытие порта".to_string();
+    let mut stage = msg!("Открытие порта", "Opening port", "Port wird geöffnet");
     progress(Progress {
         phase: stage.clone(),
         completed_blocks: 0,
         total_blocks: BLOCKS,
         destructive_started: false,
     });
-    let result = (|| -> Result<(), String> {
+    let result = (|| -> Result<(), TransferError> {
         opened = Some(factory(port)?);
         let serial = opened.as_mut().unwrap();
         if let Some(b) = serial
             .read_byte(Duration::from_millis(200))
-            .map_err(|e| e.to_string())?
+            .map_err(|e| TransferError::transport(None, e))?
         {
             durable(&mut rx, &[b])?;
-            return Err("Перед началом из порта пришли данные. Команды стирания не отправлены. Нужен загрузчик, не обычный экран.".into());
+            return Err(msg!(
+                "Перед началом из порта пришли данные. Команды стирания не отправлены. Нужен загрузчик, не обычный экран.",
+                "The port sent data before the transfer began. No erase commands were sent. Put the radio in bootloader mode.",
+                "Der Port hat vor dem Start Daten gesendet. Es wurden keine Löschbefehle gesendet. Versetzen Sie das Funkgerät in den Bootloader-Modus.",
+            ).into());
         }
         for (index, packet) in packets(&image.bytes).enumerate() {
             stage = if index < 3 {
-                format!("Подготовка приложения {}/3", index + 1)
+                msgf!(
+                    "Подготовка приложения {}/3",
+                    "Preparing application {}/3",
+                    "Anwendung wird vorbereitet {}/3",
+                    index + 1
+                )
             } else {
-                format!("Запись блока {}/{}", index - 2, BLOCKS)
+                msgf!(
+                    "Запись блока {}/{}",
+                    "Writing block {}/{}",
+                    "Block wird geschrieben {}/{}",
+                    index - 2,
+                    BLOCKS
+                )
             };
-            durable(&mut events, format!("{}\n",json!({"event":"tx_attempt","stage":stage,"bytes":packet.len(),"sha256":hash(&packet),"unix_ms":ms()})).as_bytes())?;
+            durable(&mut events, format!("{}\n",json!({"event":"tx_attempt","stage":stage.as_str(Language::Russian),"bytes":packet.len(),"sha256":hash(&packet),"unix_ms":ms()})).as_bytes())?;
             durable(&mut tx, &packet)?;
             destructive = true;
             progress(Progress {
@@ -290,45 +438,71 @@ fn run<T: Transport>(
                 destructive_started: true,
             });
             let write_result = serial.write_frame(&packet);
-            durable(&mut events, format!("{}\n",json!({"event":"tx_return","stage":stage,"reported_written":write_result.as_ref().ok().copied(),"error":write_result.as_ref().err().map(ToString::to_string),"unix_ms":ms()})).as_bytes())?;
-            let written = write_result.map_err(|e| format!("{stage}: {e}"))?;
+            durable(&mut events, format!("{}\n",json!({"event":"tx_return","stage":stage.as_str(Language::Russian),"reported_written":write_result.as_ref().ok().copied(),"error":write_result.as_ref().err().map(ToString::to_string),"unix_ms":ms()})).as_bytes())?;
+            let written = write_result.map_err(|e| TransferError::transport(Some(&stage), e))?;
             if written != packet.len() {
-                return Err(format!(
-                    "{stage}: неполная отправка {written}/{}. Автоповтор отключён.",
-                    packet.len()
-                ));
+                return Err(LocalizedText::from_fn(|lang| {
+                    trf!(
+                        lang,
+                        "{phase}: неполная отправка {written}/{}. Автоповтор отключён.",
+                        "{phase}: short send, {written}/{}. Automatic retry is disabled.",
+                        "{phase}: unvollständiger Versand, {written}/{}. Automatische Wiederholung ist deaktiviert.",
+                        packet.len(),
+                        phase = stage.as_str(lang)
+                    )
+                }).into());
             }
             let byte = serial
                 .read_byte(TIMEOUT)
-                .map_err(|e| format!("{stage}: {e}"))?;
+                .map_err(|e| TransferError::transport(Some(&stage), e))?;
             if let Some(b) = byte {
                 durable(&mut rx, &[b])?;
             }
             if byte != Some(6) {
-                return Err(format!(
-                    "{stage}: ожидался ACK 06, получено {}. Запись остановлена.",
-                    byte.map_or("таймаут".to_string(), |b| format!("{b:02X}"))
-                ));
+                return Err(LocalizedText::from_fn(|lang| {
+                    let reply = byte.map_or_else(
+                        || tr!(lang, "таймаут", "timeout", "Zeitüberschreitung").into(),
+                        |b| format!("{b:02X}"),
+                    );
+                    trf!(
+                        lang,
+                        "{phase}: ожидался ACK 06, получено {reply}. Запись остановлена.",
+                        "{phase}: expected ACK 06, got {reply}. Writing stopped.",
+                        "{phase}: ACK 06 erwartet, {reply} erhalten. Schreiben abgebrochen.",
+                        phase = stage.as_str(lang)
+                    )
+                })
+                .into());
             }
             ack_count += 1;
             if index >= 3 {
                 acknowledged += 1;
             }
-            durable(&mut events, format!("{}\n",json!({"event":"ack","stage":stage,"acked_blocks":acknowledged,"ack_count":ack_count})).as_bytes())?;
+            durable(&mut events, format!("{}\n",json!({"event":"ack","stage":stage.as_str(Language::Russian),"acked_blocks":acknowledged,"ack_count":ack_count})).as_bytes())?;
         }
-        stage = "Ожидание итогового подтверждения".into();
+        stage = msg!(
+            "Ожидание итогового подтверждения",
+            "Waiting for final acknowledgement",
+            "Warte auf abschließende Bestätigung"
+        );
         progress(Progress {
             phase: stage.clone(),
             completed_blocks: acknowledged,
             total_blocks: BLOCKS,
             destructive_started: true,
         });
-        let byte = serial.read_byte(TIMEOUT).map_err(|e| e.to_string())?;
+        let byte = serial
+            .read_byte(TIMEOUT)
+            .map_err(|e| TransferError::transport(None, e))?;
         if let Some(b) = byte {
             durable(&mut rx, &[b])?;
         }
         if byte != Some(6) {
-            return Err("Нет итогового ACK 06. Передача файла не подтверждена; не считать прошивку успешной.".into());
+            return Err(msg!(
+                "Нет итогового ACK 06. Передача файла не подтверждена; не считать прошивку успешной.",
+                "No final ACK 06. The file transfer is unconfirmed. Treat the flash as unsuccessful.",
+                "Abschließendes ACK 06 fehlt. Die Dateiübertragung ist nicht bestätigt. Betrachten Sie den Schreibvorgang als fehlgeschlagen.",
+            ).into());
         }
         ack_count += 1;
         final_ack = true;
@@ -340,13 +514,18 @@ fn run<T: Transport>(
     // `and_then` intentionally returns the original transfer error to the UI,
     // but must not erase a separate close failure from the durable report.
     let close_error = close.as_ref().err().map(ToString::to_string);
-    let outcome = result.and_then(|()| close.map(|_| ()).map_err(|e| format!("Закрытие COM: {e}")));
-    let error = outcome.as_ref().err().cloned();
+    let outcome = result.and_then(|()| {
+        close.map(|_| ()).map_err(|error| {
+            let context = msg!("Закрытие COM", "Closing COM port", "COM-Port schließen");
+            TransferError::transport(Some(&context), error)
+        })
+    });
+    let error = outcome.as_ref().err().map(TransferError::diagnostic);
     write_json(
         &directory.join("manifest.json"),
-        &json!({"schema":1,"status":if outcome.is_ok(){"transfer_acknowledged"}else{"failed"},"finished_unix_ms":ms(),"port":port,"image_sha256":image.sha256,"last_stage":stage,"erase_sequence_attempted":destructive,"acked_blocks":acknowledged,"ack_count":ack_count,"final_ack_received":final_ack,"port_closed":closed,"error":error,"close_error":close_error,"automatic_retries":0,"hardware_boot_verified":false,"mcu_readback_verified":false,"calibration_after_boot_verified":false}),
+        &json!({"schema":1,"status":if outcome.is_ok(){"transfer_acknowledged"}else{"failed"},"finished_unix_ms":ms(),"port":port,"image_sha256":image.sha256,"last_stage":stage.as_str(Language::Russian),"erase_sequence_attempted":destructive,"acked_blocks":acknowledged,"ack_count":ack_count,"final_ack_received":final_ack,"port_closed":closed,"error":error,"close_error":close_error,"automatic_retries":0,"hardware_boot_verified":false,"mcu_readback_verified":false,"calibration_after_boot_verified":false}),
     )?;
-    outcome?;
+    outcome.map_err(|error| error.notice)?;
     Ok(FlashReport {
         confirmed_blocks: acknowledged,
         total_blocks: BLOCKS,
@@ -357,7 +536,7 @@ pub fn flash_windows(
     port: &str,
     log_dir: &Path,
     on_progress: impl FnMut(Progress),
-) -> Result<FlashReport, String> {
+) -> Result<FlashReport, LocalizedText> {
     #[cfg(windows)]
     {
         run(
@@ -365,8 +544,14 @@ pub fn flash_windows(
             port,
             log_dir,
             |name| {
-                crate::firmware_windows::WindowsPort::open(name)
-                    .map_err(|e| format!("Не удалось открыть {name}: {e}"))
+                crate::firmware_windows::WindowsPort::open(name).map_err(|error| {
+                    let context = msgf!(
+                        "Не удалось открыть {name}",
+                        "Could not open {name}",
+                        "{name} konnte nicht geöffnet werden"
+                    );
+                    TransferError::transport(Some(&context), error)
+                })
             },
             on_progress,
         )
@@ -374,7 +559,11 @@ pub fn flash_windows(
     #[cfg(not(windows))]
     {
         let _ = (image, port, log_dir, on_progress);
-        Err("Запись поддерживается только в Windows".into())
+        Err(msg!(
+            "Запись поддерживается только в Windows",
+            "Firmware writing is available only on Windows",
+            "Firmware kann nur unter Windows geschrieben werden"
+        ))
     }
 }
 

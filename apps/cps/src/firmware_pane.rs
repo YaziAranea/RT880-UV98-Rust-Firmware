@@ -1,6 +1,7 @@
 //! Firmware UI. Opening this page or validating a file never opens a COM port.
 //! The one destructive entry point is the explicitly armed Start button.
 use crate::firmware::{self, FlashReport, PreparedImage, Progress};
+use crate::i18n::{Language, LocalizedText};
 use eframe::egui::{self, Color32, RichText};
 use std::{
     path::PathBuf,
@@ -15,7 +16,7 @@ const ERROR: Color32 = Color32::from_rgb(255, 172, 133);
 
 enum Event {
     Progress(Progress),
-    Finished(Result<FlashReport, String>),
+    Finished(Result<FlashReport, LocalizedText>),
 }
 
 pub struct FirmwarePane {
@@ -29,10 +30,11 @@ pub struct FirmwarePane {
     progress: Option<Progress>,
     armed: bool,
     preview: bool,
-    message: String,
+    language: Language,
+    message: LocalizedText,
     error: bool,
     finished: bool,
-    log: Vec<String>,
+    log: Vec<LocalizedText>,
 }
 
 impl Default for FirmwarePane {
@@ -52,7 +54,12 @@ impl Default for FirmwarePane {
             progress: None,
             armed: false,
             preview: false,
-            message: "Выберите образ из комплекта и COM-порт кабеля.".into(),
+            language: Language::default(),
+            message: msg!(
+                "Выберите образ из комплекта и COM-порт кабеля.",
+                "Select an image from the bundle and the cable's COM port.",
+                "Wählen Sie ein Image aus dem Paket und den COM-Port des Kabels."
+            ),
             error: false,
             finished: false,
             log: Vec::new(),
@@ -65,6 +72,10 @@ impl Default for FirmwarePane {
 }
 
 impl FirmwarePane {
+    pub fn set_language(&mut self, language: Language) {
+        self.language = language;
+    }
+
     pub fn busy(&self) -> bool {
         self.receiver.is_some()
     }
@@ -89,22 +100,38 @@ impl FirmwarePane {
                 self.image = Some(image);
                 self.error = false;
                 self.message =
-                    "Образ проверен по каталогу комплекта. Запись ещё не начиналась.".into();
+                    msg!(
+                        "Образ проверен по каталогу комплекта. Запись ещё не начиналась.",
+                        "Image verified against the bundle catalog. Writing has not started.",
+                        "Image anhand des Paketkatalogs geprüft. Der Schreibvorgang hat noch nicht begonnen.",
+                    );
             }
             Err(error) => {
                 self.image = None;
                 self.error = true;
-                self.message = format!("Образ не допущен к записи: {error}");
+                self.message = LocalizedText::from_fn(|lang| {
+                    trf!(
+                        lang,
+                        "Образ не допущен к записи: {error}",
+                        "Image rejected for writing: {error}",
+                        "Image wurde zum Schreiben abgelehnt: {error}",
+                        error = error.as_str(lang)
+                    )
+                });
             }
         }
     }
 
     pub fn close_blocked(&mut self) {
-        self.message = "Сначала дождитесь результата записи. Не отключайте питание и кабель. Окно можно будет закрыть после закрытия COM-порта.".into();
+        self.message = msg!(
+            "Сначала дождитесь результата записи. Не отключайте питание и кабель. Окно можно будет закрыть после закрытия COM-порта.",
+            "Wait for the write result. Keep the radio powered and the cable connected. Close this window once the COM port closes.",
+            "Warten Sie auf das Ergebnis des Schreibvorgangs. Lassen Sie das Funkgerät eingeschaltet und das Kabel angeschlossen. Das Fenster kann nach dem Schließen des COM-Ports geschlossen werden.",
+        );
         self.error = false;
     }
 
-    fn append_log(&mut self, text: String) {
+    fn append_log(&mut self, text: LocalizedText) {
         if self.log.last() == Some(&text) {
             return;
         }
@@ -115,19 +142,35 @@ impl FirmwarePane {
     }
 
     fn personalize_image(&mut self) {
+        let lang = self.language;
         let Some(source) = self.image.clone() else {
             return;
         };
         self.armed = false;
         let Some(manifest) = rfd::FileDialog::new()
-            .set_title("manifest.json полного снимка CPS (4 МиБ, два совпавших чтения)")
-            .add_filter("Манифест резервной копии", &["json"])
+            .set_title(tr!(
+                lang,
+                "manifest.json полного снимка CPS (4 МиБ, два совпавших чтения)",
+                "manifest.json from a full CPS snapshot (4 MiB, two matching reads)",
+                "manifest.json eines vollständigen CPS-Abbilds (4 MiB, zwei übereinstimmende Lesedurchläufe)",
+            ))
+            .add_filter(tr!(
+                lang,
+                "Манифест резервной копии",
+                "Backup manifest",
+                "Sicherungsmanifest",
+            ), &["json"])
             .pick_file()
         else {
             return;
         };
         let Some(parent) = rfd::FileDialog::new()
-            .set_title("Папка для нового персонального образа (исходники не изменяются)")
+            .set_title(tr!(
+                lang,
+                "Папка для нового персонального образа (исходники не изменяются)",
+                "Folder for the new personalized image (source files stay intact)",
+                "Ordner für das neue personalisierte Image (Quelldateien bleiben erhalten)"
+            ))
             .pick_folder()
         else {
             return;
@@ -146,11 +189,24 @@ impl FirmwarePane {
                 self.session_dir = None;
                 self.log.clear();
                 self.error = false;
-                self.message = format!("Персональный образ готов и выбран: {}. Изменён только SHA256 ваших калибровок. Запись ещё не начиналась.", output.display());
+                self.message = msgf!(
+                    "Персональный образ готов и выбран: {}. Изменён только SHA256 ваших калибровок. Запись ещё не начиналась.",
+                    "Personalized image ready and selected: {}. Only the calibration SHA256 changed. Writing has not started.",
+                    "Personalisiertes Image bereit und ausgewählt: {}. Nur die SHA256-Prüfsumme Ihrer Kalibrierdaten wurde geändert. Der Schreibvorgang hat noch nicht begonnen.",
+                    output.display(),
+                );
             }
             Err(error) => {
                 self.error = true;
-                self.message = format!("Образ не подготовлен: {error}");
+                self.message = LocalizedText::from_fn(|lang| {
+                    trf!(
+                        lang,
+                        "Образ не подготовлен: {error}",
+                        "Could not prepare the image: {error}",
+                        "Image konnte nicht vorbereitet werden: {error}",
+                        error = error.as_str(lang)
+                    )
+                });
             }
         }
     }
@@ -172,7 +228,11 @@ impl FirmwarePane {
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     events.push(Event::Finished(Err(
-                        "Поток записи завершился без результата. Завершение прошивки не подтверждено.".into(),
+                        msg!(
+                            "Поток записи завершился без результата. Завершение прошивки не подтверждено.",
+                            "The write worker stopped without a result. Completion of the flash is unconfirmed.",
+                            "Der Schreibprozess endete ohne Ergebnis. Der Abschluss des Schreibvorgangs ist nicht bestätigt.",
+                        ),
                     )));
                     break;
                 }
@@ -189,10 +249,17 @@ impl FirmwarePane {
                         || progress.completed_blocks.is_multiple_of(16)
                         || progress.completed_blocks == progress.total_blocks
                     {
-                        self.append_log(format!(
-                            "{} · подтверждено {} / {} блоков",
-                            progress.phase, progress.completed_blocks, progress.total_blocks
-                        ));
+                        self.append_log(LocalizedText::from_fn(|lang| {
+                            trf!(
+                                lang,
+                                "{} · подтверждено {} / {} блоков",
+                                "{} · {} / {} blocks acknowledged",
+                                "{} · {} / {} Blöcke bestätigt",
+                                progress.phase.as_str(lang),
+                                progress.completed_blocks,
+                                progress.total_blocks,
+                            )
+                        }));
                     }
                     self.progress = Some(progress);
                 }
@@ -203,15 +270,26 @@ impl FirmwarePane {
                         Ok(report) => {
                             self.finished = true;
                             self.error = false;
-                            self.message = format!(
+                            self.message = msgf!(
                                 "Запись завершена: загрузчик подтвердил {} / {} блоков и окончание передачи. COM-порт закрыт.",
-                                report.confirmed_blocks, report.total_blocks
+                                "Writing finished: the bootloader acknowledged {} / {} blocks and the end of the transfer. The COM port is closed.",
+                                "Schreiben abgeschlossen: Der Bootloader hat {} / {} Blöcke und das Ende der Übertragung bestätigt. Der COM-Port ist geschlossen.",
+                                report.confirmed_blocks,
+                                report.total_blocks,
                             );
                         }
                         Err(error) => {
                             self.finished = false;
                             self.error = true;
-                            self.message = format!("Запись не завершена: {error}");
+                            self.message = LocalizedText::from_fn(|lang| {
+                                trf!(
+                                    lang,
+                                    "Запись не завершена: {error}",
+                                    "Writing did not finish: {error}",
+                                    "Schreibvorgang nicht abgeschlossen: {error}",
+                                    error = error.as_str(lang)
+                                )
+                            });
                         }
                     }
                     self.append_log(self.message.clone());
@@ -223,20 +301,42 @@ impl FirmwarePane {
         }
     }
 
-    fn start(&mut self, ctx: &egui::Context, other_busy: bool) -> Result<(), String> {
+    fn start(&mut self, ctx: &egui::Context, other_busy: bool) -> Result<(), LocalizedText> {
         if self.preview {
-            return Err("Просмотр интерфейса: доступ к COM отключён.".into());
+            return Err(msg!(
+                "Просмотр интерфейса: доступ к COM отключён.",
+                "Interface preview: COM access is disabled.",
+                "Oberflächenvorschau: COM-Zugriff ist deaktiviert."
+            ));
         }
         if self.busy() || other_busy {
-            return Err("Другая операция с рацией ещё не завершена.".into());
+            return Err(msg!(
+                "Другая операция с рацией ещё не завершена.",
+                "Another radio operation is still in progress.",
+                "Ein anderer Vorgang am Funkgerät läuft noch."
+            ));
         }
         if !self.armed {
-            return Err("Сначала подтвердите готовность загрузчика.".into());
+            return Err(msg!(
+                "Сначала подтвердите готовность загрузчика.",
+                "Confirm that the bootloader is ready first.",
+                "Bestätigen Sie zuerst, dass der Bootloader bereit ist."
+            ));
         }
-        let image = self.image.clone().ok_or("Нет проверенного образа")?;
+        let image = self.image.clone().ok_or_else(|| {
+            msg!(
+                "Нет проверенного образа",
+                "No verified image selected",
+                "Kein geprüftes Image ausgewählt"
+            )
+        })?;
         let port = self.port.trim().to_string();
         if port.is_empty() {
-            return Err("Выберите COM-порт кабеля.".into());
+            return Err(msg!(
+                "Выберите COM-порт кабеля.",
+                "Select the cable's COM port.",
+                "Wählen Sie den COM-Port des Kabels."
+            ));
         }
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -258,7 +358,13 @@ impl FirmwarePane {
                 let _ = tx.send(Event::Finished(result));
                 repaint.request_repaint();
             })
-            .map_err(|error| format!("Не удалось запустить запись: {error}"))?;
+            .map_err(|error| {
+                msgf!(
+                    "Не удалось запустить запись: {error}",
+                    "Could not start writing: {error}",
+                    "Schreibvorgang konnte nicht gestartet werden: {error}"
+                )
+            })?;
         self.receiver = Some(receiver);
         self.session_dir = Some(directory);
         self.progress = None;
@@ -266,18 +372,38 @@ impl FirmwarePane {
         self.armed = false;
         self.error = false;
         self.log.clear();
-        self.message = "Проверка файла и журнала, затем подключение к загрузчику…".into();
+        self.message = msg!(
+            "Проверка файла и журнала, затем подключение к загрузчику…",
+            "Checking file and log, then connecting to the bootloader…",
+            "Datei und Protokoll werden geprüft, danach wird die Verbindung zum Bootloader hergestellt…",
+        );
         self.append_log(self.message.clone());
         Ok(())
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, other_busy: bool) {
-        ui.heading("Прошивка UV98 Plus");
-        ui.label("Образ Rust или восстановление стока — через штатный загрузчик и обычный кабель.");
+        let lang = self.language;
+        ui.heading(tr!(
+            lang,
+            "Прошивка UV98 Plus",
+            "UV98 Plus firmware",
+            "UV98-Plus-Firmware"
+        ));
+        ui.label(tr!(
+            lang,
+            "Образ Rust или восстановление стока — через штатный загрузчик и обычный кабель.",
+            "Use the stock bootloader and standard cable to install a Rust image or restore stock firmware.",
+            "Installieren Sie ein Rust-Image oder stellen Sie die Werksfirmware mit dem serienmäßigen Bootloader und Standardkabel wieder her.",
+        ));
         if self.preview {
             ui.colored_label(
                 WARNING,
-                "ПРОСМОТР ИНТЕРФЕЙСА · COM-порты не открываются, запись недоступна.",
+                tr!(
+                    lang,
+                    "ПРОСМОТР ИНТЕРФЕЙСА · COM-порты не открываются, запись недоступна.",
+                    "INTERFACE PREVIEW · COM ports stay closed. Writing is unavailable.",
+                    "OBERFLÄCHENVORSCHAU · COM-Ports bleiben geschlossen. Schreiben ist deaktiviert.",
+                ),
             );
         }
         ui.add_space(10.0);
@@ -285,25 +411,40 @@ impl FirmwarePane {
         ui.add_enabled_ui(!busy && !other_busy, |ui| {
             ui.group(|ui| {
                 ui.label(
-                    RichText::new("1  Образ из комплекта")
+                    RichText::new(tr!(
+                        lang,
+                        "1  Образ из комплекта",
+                        "1  Image from the bundle",
+                        "1  Image aus dem Paket",
+                    ))
                         .strong()
                         .color(ACCENT),
                 );
                 ui.horizontal(|ui| {
-                    if ui.button("Выбрать .bin…").clicked() {
+                    if ui.button(tr!(lang, "Выбрать .bin…", "Select .bin…", ".bin auswählen…")).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
-                            .set_title("Образ UV98 из проверенного комплекта")
-                            .add_filter("Прошивка UV98", &["bin"])
+                            .set_title(tr!(
+                                lang,
+                                "Образ UV98 из проверенного комплекта",
+                                "UV98 image from the verified bundle",
+                                "UV98-Image aus dem geprüften Paket",
+                            ))
+                            .add_filter(tr!(lang, "Прошивка UV98", "UV98 firmware", "UV98-Firmware"), &["bin"])
                             .pick_file()
                         {
                             self.load_image(path);
                         }
                     }
                     if let Some(image) = &self.image {
-                        ui.colored_label(ACCENT, &image.label);
-                        ui.label(format!("{} байт", image.bytes_len));
+                        ui.colored_label(ACCENT, image.display_label(lang));
+                        ui.label(trf!(lang, "{} байт", "{} bytes", "{} Byte", image.bytes_len));
                     } else {
-                        ui.label("Проверенный образ не выбран");
+                        ui.label(tr!(
+                            lang,
+                            "Проверенный образ не выбран",
+                            "No verified image selected",
+                            "Kein geprüftes Image ausgewählt",
+                        ));
                     }
                 });
                 if let Some(path) = &self.selected_path {
@@ -313,24 +454,49 @@ impl FirmwarePane {
                     ui.monospace(format!("SHA256  {}", image.sha256));
                 }
                 ui.small(
-                    "Принимаются образы каталога комплекта и проверенные персональные копии на их основе.",
+                    tr!(
+                        lang,
+                        "Принимаются образы каталога комплекта и проверенные персональные копии на их основе.",
+                        "CPS accepts images from the bundle catalog and verified personal copies based on them.",
+                        "CPS akzeptiert Images aus dem Paketkatalog und daraus erstellte geprüfte persönliche Kopien.",
+                    ),
                 );
                 ui.add_space(5.0);
-                if ui.add_enabled(self.image.is_some(), egui::Button::new("Подготовить образ для моей рации…")).clicked() {
+                if ui.add_enabled(self.image.is_some(), egui::Button::new(tr!(
+                    lang,
+                    "Подготовить образ для моей рации…",
+                    "Prepare an image for my radio…",
+                    "Image für mein Funkgerät vorbereiten…",
+                ))).clicked() {
                     self.personalize_image();
                 }
-                ui.small("Для первого запуска на другой рации: шаблон текущего выпуска → manifest.json полного снимка 4 МиБ → новая папка с BIN и каталогом. COM не используется; дампы и исходный BIN сохраняются.");
-                ui.colored_label(WARNING, "Только для той же подтверждённой аппаратной ревизии. Проверка снимка не подтверждает совместимость другой платы.");
+                ui.small(tr!(
+                    lang,
+                    "Для первого запуска на другой рации: шаблон текущего выпуска → manifest.json полного снимка 4 МиБ → новая папка с BIN и каталогом. COM не используется; дампы и исходный BIN сохраняются.",
+                    "For first use on a different radio: select an image from this release, choose manifest.json from a full 4 MiB snapshot, then create a new folder with the BIN and catalog. The COM port stays closed and the dumps and source BIN stay intact.",
+                    "Für den ersten Start auf einem anderen Funkgerät: Wählen Sie ein Image dieser Version und die manifest.json eines vollständigen 4-MiB-Abbilds. Erstellen Sie dann einen neuen Ordner mit BIN und Katalog. Der COM-Port bleibt geschlossen. Abbilder und Quell-BIN bleiben erhalten.",
+                ));
+                ui.colored_label(WARNING, tr!(
+                    lang,
+                    "Только для той же подтверждённой аппаратной ревизии. Проверка снимка не подтверждает совместимость другой платы.",
+                    "Use only with the same verified hardware revision. Snapshot verification cannot establish compatibility with another board.",
+                    "Nur für dieselbe bestätigte Hardware-Revision verwenden. Die Abbildprüfung kann die Kompatibilität mit einer anderen Platine nicht bestätigen.",
+                ));
             });
             ui.add_space(8.0);
             ui.group(|ui| {
                 ui.label(
-                    RichText::new("2  Кабель и загрузчик")
+                    RichText::new(tr!(
+                        lang,
+                        "2  Кабель и загрузчик",
+                        "2  Cable and bootloader",
+                        "2  Kabel und Bootloader",
+                    ))
                         .strong()
                         .color(ACCENT),
                 );
                 ui.horizontal(|ui| {
-                    ui.label("COM-порт");
+                    ui.label(tr!(lang, "COM-порт", "COM port", "COM-Port"));
                     if ui
                         .add(egui::TextEdit::singleline(&mut self.port).desired_width(100.0))
                         .changed()
@@ -339,7 +505,12 @@ impl FirmwarePane {
                     }
                     let old_port = self.port.clone();
                     egui::ComboBox::from_id_salt("firmware_ports")
-                        .selected_text("Доступные порты")
+                        .selected_text(tr!(
+                            lang,
+                            "Доступные порты",
+                            "Available ports",
+                            "Verfügbare Ports",
+                        ))
                         .show_ui(ui, |ui| {
                             for port in &self.ports {
                                 ui.selectable_value(&mut self.port, port.clone(), port);
@@ -348,38 +519,65 @@ impl FirmwarePane {
                     if self.port != old_port {
                         self.armed = false;
                     }
-                    if ui.button("Обновить список").clicked() {
+                    if ui.button(tr!(lang, "Обновить список", "Refresh list", "Liste aktualisieren")).clicked() {
                         match uv98_radio_read::list_ports() {
                             Ok(ports) => {
                                 self.ports = ports;
                                 self.error = false;
-                                self.message = format!(
+                                self.message = msgf!(
                                     "Найдено портов: {}. Порты не открывались.",
-                                    self.ports.len()
+                                    "Found {} ports. No ports were opened.",
+                                    "Gefundene Ports: {}. Es wurden keine Ports geöffnet.",
+                                    self.ports.len(),
                                 );
                             }
                             Err(error) => {
                                 self.error = true;
-                                self.message = error.to_string();
+                                self.message = crate::radio::localize_port_list_error(&error);
                             }
                         }
                     }
                 });
-                ui.label("Закройте другие CPS и Radio Tuning Software. Выключите рацию ручкой.");
-                ui.label("Зажмите верхнюю PTT, включите рацию, через 2–3 секунды отпустите PTT.");
+                ui.label(tr!(
+                    lang,
+                    "Закройте другие CPS и Radio Tuning Software. Выключите рацию ручкой.",
+                    "Close other CPS programs and Radio Tuning Software. Turn off the radio with its power knob.",
+                    "Schließen Sie andere CPS-Programme und Radio Tuning Software. Schalten Sie das Funkgerät am Drehknopf aus.",
+                ));
+                ui.label(tr!(
+                    lang,
+                    "Зажмите верхнюю PTT, включите рацию, через 2–3 секунды отпустите PTT.",
+                    "Hold the upper PTT, turn on the radio, then release PTT after 2–3 seconds.",
+                    "Halten Sie die obere PTT-Taste gedrückt und schalten Sie das Funkgerät ein. Lassen Sie die Taste nach 2–3 Sekunden los.",
+                ));
                 ui.label(
-                    "Загрузчик: чёрный экран и зелёный светодиод. Оставьте кабель подключённым.",
+                    tr!(
+                        lang,
+                        "Загрузчик: чёрный экран и зелёный светодиод. Оставьте кабель подключённым.",
+                        "Bootloader mode shows a black screen and green LED. Keep the cable connected.",
+                        "Im Bootloader-Modus bleibt der Bildschirm schwarz und die LED leuchtet grün. Lassen Sie das Kabel angeschlossen.",
+                    ),
                 );
                 ui.checkbox(
                     &mut self.armed,
-                    "Рация в загрузчике, выбран нужный COM-порт, питание устойчивое",
+                    tr!(
+                        lang,
+                        "Рация в загрузчике, выбран нужный COM-порт, питание устойчивое",
+                        "The radio is in bootloader mode, the correct COM port is selected, and power is stable",
+                        "Das Funkgerät ist im Bootloader-Modus, der richtige COM-Port ist ausgewählt und die Stromversorgung ist stabil",
+                    ),
                 );
             });
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.button("Папка журналов…").clicked() {
+                if ui.button(tr!(lang, "Папка журналов…", "Log folder…", "Protokollordner…")).clicked() {
                     if let Some(path) = rfd::FileDialog::new()
-                        .set_title("Папка журналов прошивки")
+                        .set_title(tr!(
+                            lang,
+                            "Папка журналов прошивки",
+                            "Firmware log folder",
+                            "Ordner für Firmware-Protokolle",
+                        ))
                         .pick_folder()
                     {
                         self.logs_parent = path;
@@ -395,7 +593,12 @@ impl FirmwarePane {
                         && self.armed
                         && !self.port.trim().is_empty()
                         && !self.preview,
-                    egui::Button::new(RichText::new("Записать прошивку").strong())
+                    egui::Button::new(RichText::new(tr!(
+                        lang,
+                        "Записать прошивку",
+                        "Write firmware",
+                        "Firmware schreiben",
+                    )).strong())
                         .fill(Color32::from_rgb(26, 105, 112)),
                 )
                 .clicked()
@@ -409,7 +612,12 @@ impl FirmwarePane {
         if other_busy {
             ui.colored_label(
                 WARNING,
-                "Дождитесь завершения чтения на вкладке «Резервные копии».",
+                tr!(
+                    lang,
+                    "Дождитесь завершения чтения на вкладке «Резервные копии».",
+                    "Wait for reading to finish in the Backups tab.",
+                    "Warten Sie, bis der Lesevorgang im Tab „Sicherungen“ abgeschlossen ist."
+                ),
             );
         }
         ui.add_space(10.0);
@@ -418,11 +626,16 @@ impl FirmwarePane {
                 progress.completed_blocks as f32 / progress.total_blocks.max(1) as f32
             });
             let text = self.progress.as_ref().map_or_else(
-                || "Подготовка…".into(),
+                || tr!(lang, "Подготовка…", "Preparing…", "Vorbereitung…").into(),
                 |progress| {
-                    format!(
+                    trf!(
+                        lang,
                         "{} · {} / {} блоков",
-                        progress.phase, progress.completed_blocks, progress.total_blocks
+                        "{} · {} / {} blocks",
+                        "{} · {} / {} Blöcke",
+                        progress.phase.as_str(lang),
+                        progress.completed_blocks,
+                        progress.total_blocks
                     )
                 },
             );
@@ -433,48 +646,108 @@ impl FirmwarePane {
             );
             ui.colored_label(
                 WARNING,
-                "Запись выполняется. Не выключайте рацию, не вынимайте кабель и не закрывайте CPS.",
+                tr!(
+                    lang,
+                    "Запись выполняется. Не выключайте рацию, не вынимайте кабель и не закрывайте CPS.",
+                    "Writing is in progress. Leave the radio powered on, the cable connected, and CPS open.",
+                    "Der Schreibvorgang läuft. Lassen Sie das Funkgerät eingeschaltet, das Kabel angeschlossen und CPS geöffnet.",
+                ),
             );
         }
-        ui.colored_label(if self.error { ERROR } else { ACCENT }, &self.message);
+        ui.colored_label(
+            if self.error { ERROR } else { ACCENT },
+            self.message.as_str(lang),
+        );
         if self.finished {
             ui.label(
-                RichText::new("Теперь выключите рацию на 3 секунды и включите без PTT.").strong(),
+                RichText::new(tr!(
+                    lang,
+                    "Теперь выключите рацию на 3 секунды и включите без PTT.",
+                    "Turn off the radio for 3 seconds, then turn it back on without pressing PTT.",
+                    "Schalten Sie das Funkgerät für 3 Sekunden aus und danach ohne Betätigung der PTT-Taste wieder ein.",
+                )).strong(),
             );
-            ui.small("Подтверждения загрузчика означают завершение передачи файла. Запуск, экран и радиосвязь проверяются на самой рации.");
+            ui.small(tr!(
+                lang,
+                "Подтверждения загрузчика означают завершение передачи файла. Запуск, экран и радиосвязь проверяются на самой рации.",
+                "Bootloader acknowledgements confirm file transfer. Check boot, display, and radio operation on the device.",
+                "Die Bootloader-Bestätigungen belegen die Dateiübertragung. Prüfen Sie Start, Display und Funkbetrieb am Gerät.",
+            ));
         } else if self.error && self.session_dir.is_some() {
             if self
                 .progress
                 .as_ref()
                 .is_some_and(|progress| progress.destructive_started)
             {
-                ui.colored_label(WARNING, "Стирание приложения уже начиналось. Не рассчитывайте на обычный запуск до успешной повторной записи.");
+                ui.colored_label(WARNING, tr!(
+                    lang,
+                    "Стирание приложения уже начиналось. Не рассчитывайте на обычный запуск до успешной повторной записи.",
+                    "Application erase already started. A normal boot may require a successful reflash.",
+                    "Das Löschen der Anwendung hat bereits begonnen. Ein normaler Start kann ein erneutes erfolgreiches Schreiben erfordern.",
+                ));
             }
-            ui.label("Сохраните журнал. Для повторной записи заново включите загрузчик; автоматической повторной записи нет.");
-            ui.small("Если COM-порт недоступен: закройте программы, переподключите USB кабеля и обновите список портов.");
+            ui.label(tr!(
+                lang,
+                "Сохраните журнал. Для повторной записи заново включите загрузчик; автоматической повторной записи нет.",
+                "Keep the log. To try again, restart the radio in bootloader mode and start the write manually.",
+                "Bewahren Sie das Protokoll auf. Starten Sie das Funkgerät für einen weiteren Versuch im Bootloader-Modus und lösen Sie den Schreibvorgang manuell aus.",
+            ));
+            ui.small(tr!(
+                lang,
+                "Если COM-порт недоступен: закройте программы, переподключите USB кабеля и обновите список портов.",
+                "If the COM port is unavailable, close other programs, reconnect the USB cable and refresh the port list.",
+                "Falls der COM-Port nicht verfügbar ist, schließen Sie andere Programme, stecken Sie das USB-Kabel erneut ein und aktualisieren Sie die Portliste.",
+            ));
         }
         if let Some(path) = &self.session_dir {
-            ui.small(format!("Журнал операции: {}", path.display()));
+            ui.small(trf!(
+                lang,
+                "Журнал операции: {}",
+                "Operation log: {}",
+                "Vorgangsprotokoll: {}",
+                path.display()
+            ));
         }
-        egui::CollapsingHeader::new("Подробности операции")
-            .default_open(self.busy() || self.error)
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("firmware_log")
-                    .max_height(160.0)
-                    .stick_to_bottom(true)
-                    .show(ui, |ui| {
-                        if self.log.is_empty() {
-                            ui.small("Запись ещё не запускалась.");
-                        }
-                        for line in &self.log {
-                            ui.monospace(line);
-                        }
-                    });
-            });
+        egui::CollapsingHeader::new(tr!(
+            lang,
+            "Подробности операции",
+            "Operation details",
+            "Vorgangsdetails"
+        ))
+        .id_salt("firmware_details")
+        .default_open(self.busy() || self.error)
+        .show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("firmware_log")
+                .max_height(160.0)
+                .stick_to_bottom(true)
+                .show(ui, |ui| {
+                    if self.log.is_empty() {
+                        ui.small(tr!(
+                            lang,
+                            "Запись ещё не запускалась.",
+                            "Writing has not started.",
+                            "Der Schreibvorgang hat noch nicht begonnen."
+                        ));
+                    }
+                    for line in &self.log {
+                        ui.monospace(line.as_str(lang));
+                    }
+                });
+        });
         ui.add_space(8.0);
-        ui.small("Записывается приложение MCU. Заводские калибровки и каналы во внешней памяти эта операция не записывает.");
-        ui.small("Возврат стока: выберите собственный совместимый заводской BIN; CPS проверит его по каталогу. Публичный комплект не содержит заводского BIN.");
+        ui.small(tr!(
+            lang,
+            "Записывается приложение MCU. Заводские калибровки и каналы во внешней памяти эта операция не записывает.",
+            "This writes the MCU application. Factory calibration data and channels in external memory stay intact.",
+            "Der Vorgang schreibt die MCU-Anwendung. Werkskalibrierdaten und Kanäle im externen Speicher bleiben erhalten.",
+        ));
+        ui.small(tr!(
+            lang,
+            "Возврат стока: выберите собственный совместимый заводской BIN; CPS проверит его по каталогу. Публичный комплект не содержит заводского BIN.",
+            "To restore stock firmware, select your own compatible stock BIN. CPS verifies it against the catalog. The public bundle omits the stock BIN.",
+            "Wählen Sie zur Wiederherstellung der Werksfirmware Ihre eigene kompatible Werks-BIN. CPS prüft sie anhand des Katalogs. Das öffentliche Paket enthält keine Werks-BIN.",
+        ));
     }
 }
 
@@ -494,7 +767,8 @@ mod tests {
             progress: None,
             armed: false,
             preview: false,
-            message: String::new(),
+            language: Language::default(),
+            message: LocalizedText::default(),
             error: false,
             finished: false,
             log: Vec::new(),
@@ -510,18 +784,21 @@ mod tests {
         assert!(pane
             .start(&ctx, false)
             .unwrap_err()
+            .as_str(Language::Russian)
             .contains("COM отключён"));
         assert!(!pane.busy());
         pane.preview = false;
         assert!(pane
             .start(&ctx, true)
             .unwrap_err()
+            .as_str(Language::Russian)
             .contains("Другая операция"));
         assert!(!pane.busy());
         pane.armed = false;
         assert!(pane
             .start(&ctx, false)
             .unwrap_err()
+            .as_str(Language::Russian)
             .contains("готовность загрузчика"));
         assert!(!pane.busy());
     }
@@ -532,7 +809,11 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         pane.receiver = Some(rx);
         tx.send(Event::Progress(Progress {
-            phase: "Блоки подтверждены".into(),
+            phase: msg!(
+                "Блоки подтверждены",
+                "Blocks acknowledged",
+                "Blöcke bestätigt"
+            ),
             completed_blocks: 246,
             total_blocks: 246,
             destructive_started: true,
@@ -547,7 +828,10 @@ mod tests {
         assert!(!pane.busy());
         assert!(!pane.finished);
         assert!(pane.error);
-        assert!(pane.message.contains("не подтверждено"));
+        assert!(pane
+            .message
+            .as_str(Language::Russian)
+            .contains("не подтверждено"));
     }
 
     #[test]
@@ -557,18 +841,44 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         pane.receiver = Some(rx);
         tx.send(Event::Progress(Progress {
-            phase: "Стирание".into(),
+            phase: msg!("Стирание", "Erasing", "Löschen"),
             completed_blocks: 0,
             total_blocks: 246,
             destructive_started: true,
         }))
         .unwrap();
-        tx.send(Event::Finished(Err("Таймаут ACK".into()))).unwrap();
+        tx.send(Event::Finished(Err(msg!(
+            "Таймаут ACK",
+            "ACK timeout",
+            "Zeitüberschreitung bei ACK",
+        ))))
+        .unwrap();
         pane.poll(&egui::Context::default());
         assert!(!pane.busy());
         assert!(!pane.armed);
         assert!(!pane.finished);
         assert!(pane.error);
-        assert!(pane.progress.unwrap().destructive_started);
+        for (language, progress, error) in [
+            (
+                Language::Russian,
+                "Стирание",
+                "Запись не завершена: Таймаут ACK",
+            ),
+            (
+                Language::English,
+                "Erasing",
+                "Writing did not finish: ACK timeout",
+            ),
+            (
+                Language::German,
+                "Löschen",
+                "Schreibvorgang nicht abgeschlossen: Zeitüberschreitung bei ACK",
+            ),
+        ] {
+            pane.set_language(language);
+            assert!(pane.progress.as_ref().unwrap().destructive_started);
+            assert!(pane.log[0].as_str(pane.language).starts_with(progress));
+            assert_eq!(pane.message.as_str(pane.language), error);
+        }
     }
 }

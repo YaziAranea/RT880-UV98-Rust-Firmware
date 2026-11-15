@@ -109,7 +109,7 @@ impl Transport for Fake {
         }
     }
 }
-fn invoke(f: &Fixture, s: Rc<RefCell<FakeState>>) -> Result<FlashReport, String> {
+fn invoke(f: &Fixture, s: Rc<RefCell<FakeState>>) -> Result<FlashReport, LocalizedText> {
     run(
         f.image.clone(),
         "FAKE",
@@ -259,7 +259,7 @@ fn transport_exceptions_stop_close_and_preserve_attempted_stream() {
         let fixture = Fixture::new();
         let state = Rc::new(RefCell::new(state));
         let error = invoke(&fixture, state.clone()).err().expect("must fail");
-        assert!(error.contains(error_text));
+        assert!(error.as_str(Language::Russian).contains(error_text));
         let state = state.borrow();
         assert!(state.closed);
         assert_eq!(
@@ -302,7 +302,7 @@ fn primary_transfer_and_close_failure_are_both_recorded() {
         ..Default::default()
     }));
     let error = invoke(&fixture, state).err().expect("must fail");
-    assert!(error.contains("ACK 06"));
+    assert!(error.as_str(Language::Russian).contains("ACK 06"));
     let manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(fixture.dir.join("log/manifest.json")).unwrap()).unwrap();
     assert!(manifest["error"].as_str().unwrap().contains("ACK 06"));
@@ -386,7 +386,7 @@ fn existing_log_and_open_failure_are_not_success() {
         f.image.clone(),
         "FAKE",
         &f.dir.join("open-fail"),
-        |_| Err("Windows 31".into()),
+        |_| Err(LocalizedText::from("Windows 31").into()),
         |_| {}
     )
     .is_err());

@@ -173,6 +173,7 @@ fn calibration_must_agree_with_nor_and_not_be_empty_or_marker_only() {
             data["sections"][1]["sha256"] = json!(hash(&calibration));
             fixture.set_manifest(&data);
             let error = verify_snapshot(&fixture.manifest).err().unwrap();
+            let error = error.as_str(Language::Russian);
             assert!(
                 error.contains("калибровок") || error.contains("Калибровки"),
                 "{error}"
@@ -192,6 +193,7 @@ fn calibration_must_agree_with_nor_and_not_be_empty_or_marker_only() {
     assert!(verify_snapshot(&fixture.manifest)
         .err()
         .unwrap()
+        .as_str(Language::Russian)
         .contains("не совпадает с началом"));
 }
 

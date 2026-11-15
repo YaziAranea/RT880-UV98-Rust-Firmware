@@ -10,9 +10,19 @@
 
 [English](README.md) · [Deutsch](README.de.md) · **Русский**
 
-[**Бинарник прошивки**](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37.bin) · [**Комплект с CPS 0.6.1**](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37-2026-11-16.zip) · [**Начать здесь: бэкап и установка**](docs/GETTING-STARTED.ru.md) · [Описание выпуска](https://github.com/YaziAranea/uv98-rust/releases/tag/r37)
+[**Бинарник прошивки**](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37.bin) · [**Комплект с CPS 0.7.0**](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37-CPS-0.7.0-2026-11-16.zip) · [**Начать здесь: бэкап и установка**](docs/GETTING-STARTED.ru.md) · [Описание выпуска](https://github.com/YaziAranea/uv98-rust/releases/tag/r37)
 
 > **Экспериментальная прошивка для исследованного профиля платы AT32F423.** R37 — шаблон: перед записью подготовьте в CPS персональный образ по проверенному NOR-бэкапу своей станции. Это привязывает прошивку к вашим калибровкам и не заменяет заводские данные. Похожее название модели не подтверждает совместимость платы. Начните с [инструкции резервирования и подготовки](docs/GETTING-STARTED.ru.md#4-проверьте-совместимость-перед-прошивкой).
+
+## CPS 0.7.0 для Windows
+
+В списке **Язык / Language / Sprache** на панели выберите **Русский**, **English** или **Deutsch**. Все восемь вкладок и уже показанные сообщения меняют язык сразу. Несохранённые правки остаются в формах, а выбор языка запоминается в профиле Windows. Заголовки и фильтры файловых диалогов следуют языку CPS, стандартные кнопки — языку Windows.
+
+В комплекте тот же BIN прошивки R37. Для обновления CPS перепрошивка не требуется. [Исходники CPS 0.7.0](https://github.com/YaziAranea/uv98-rust/tree/cps-v0.7.0)
+
+![Редактор каналов CPS 0.7.0 на русском](docs/images/cps-0.7.0/ru-channels.png)
+
+*Интерфейс CPS отрисован через egui без окна Windows на имитационных данных.*
 
 ## Как выглядит интерфейс
 

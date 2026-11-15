@@ -13,27 +13,27 @@ This guide covers first-time preparation of a UV-98 Plus / the investigated RT-8
 3. Use the stock CPS for your model to read the radio and save its original `.880dmf` or `.98pdmf` file. Keep an existing original such as `999.880dmf` unchanged.
 4. Close the stock CPS, Radio Tuning Software and other programs using the cable. Before the first read in our CPS, power the radio off for 3 seconds, then start it normally again.
 5. Create a folder such as `Documents/UV98-backup-2026-11-16`. Suggested subfolders: `01-original`, `02-calibration`, `03-nor`, `04-settings`, `05-recovery`. Put the original CPS file in `01-original`.
-6. Extract the entire [R37 package with CPS 0.6.1](https://github.com/YaziAranea/uv98-rust/releases/tag/r37). Run `UV98-CPS.exe` and open **«Резервные копии» (Backups)**. Select the actual cable COM port using **«Обновить список» (Refresh) → «Доступные порты» (Available ports)**. Old references to COM20/COM21 are not your required port number.
+6. Extract the entire [R37 package with CPS 0.7.0](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37-CPS-0.7.0-2026-11-16.zip). Run `UV98-CPS.exe`, choose **English** in **Язык / Language / Sprache**, then open **Backups**. Select the actual cable COM port using **Refresh list → Available ports**. Old references to COM20/COM21 are not your required port number.
 
-The CPS labels below match the current Russian Windows interface. Keep a short text note beside the backups with the radio model, stock version and board revision if known.
+The toolbar language selector is always visible. All eight tabs and existing status messages switch immediately and unsaved edits stay in place. CPS remembers the selection in your Windows user profile. File dialog titles and filters follow CPS. Standard dialog buttons follow Windows. The kit contains the same R37 firmware BIN, so updating CPS requires no reflash.
+
+Keep a short text note beside the backups with the radio model, stock version and board revision if known.
 
 ## 2. Perform three reads
 
-Before each operation, select its subfolder with **«Папка для снимков…» (Snapshot folder)**. CPS creates a new `UV98-read-…` directory inside it. Keep the complete directory.
+Before each operation, select its subfolder with **Snapshot folder…**. CPS creates a new `UV98-read-…` directory inside it. Keep the complete directory.
 
 | Order | CPS button | Expected output |
 |---|---|---|
-| 1 | **Считать калибровки (4 КиБ)** — Read calibration | `calibration.bin`, exactly **4096 bytes**: this radio's individual factory data. |
-| 2 | **Считать память настроек (4 МиБ)** — Read settings memory | `storage-address-space.bin`, exactly **4194304 bytes**, plus a separate `calibration.bin`: the external NOR address space available to the protocol. |
-| 3 | **Считать каналы, настройки и калибровки** — Read channels, settings and calibration | `calibration.bin`, `cfg.bin`, `channels.bin`, `zones.bin`, `fm.bin`: separate usable sections. |
+| 1 | **Read calibration (4 KiB)** | `calibration.bin`, exactly **4096 bytes**: this radio's individual factory data. |
+| 2 | **Read settings storage (4 MiB)** | `storage-address-space.bin`, exactly **4194304 bytes**, plus a separate `calibration.bin`: the external NOR address space available to the protocol. |
+| 3 | **Read channels, settings, and calibration** | `calibration.bin`, `cfg.bin`, `channels.bin`, `zones.bin`, `fm.bin`: separate usable sections. |
 
 The second operation takes the longest. Wait for **both passes**. Do not operate the radio or change its settings during a read.
 
 After **each** operation, look for:
 
-> Два чтения совпали. Снимок и журнал сохранены. Порт закрыт.
-
-This means: “Both reads matched. Snapshot and log saved. Port closed.”
+> Both reads matched. The snapshot and log were saved. The port is closed.
 
 Keep `manifest.json`, `started.json` and `pass-*.bin` along with the data files. A successful `manifest.json` contains:
 
@@ -73,7 +73,7 @@ The investigated profile uses stock 1.16: [file page in nicsure's archive](https
 eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc
 ```
 
-Place the file named `RT-880_Upgrade_V1_16_250915.bin` in a `recovery` folder beside `UV98-CPS.exe` (create the folder if needed). **«Сохранить заводской BIN 1.16…» (Save factory BIN 1.16)** can then make a separate copy; CPS checks its SHA. You can also select this original BIN directly on the Firmware tab. Do not rename another version to this filename.
+Place the file named `RT-880_Upgrade_V1_16_250915.bin` in a `recovery` folder beside `UV98-CPS.exe` (create the folder if needed). **Save stock BIN 1.16…** can then make a separate copy; CPS checks its SHA. You can also select this original BIN directly on the Firmware tab. Do not rename another version to this filename.
 
 ## 4. Check compatibility before flashing
 
@@ -81,9 +81,9 @@ R37 targets the investigated AT32F423 board profile. A similar case or an RT-880
 
 For a confirmed compatible board, prepare a personal BIN. **No Rust compiler is needed.**
 
-1. Open **«Прошивка» (Firmware)** in our CPS. Select the original `UV98-r37.bin` from the current package.
-2. Click **«Подготовить образ для моей рации…» (Prepare image for my radio)**.
-3. Select **`manifest.json` from the full 4 MiB NOR snapshot** created by “Read settings memory (4 MiB)”. Select the manifest, not `storage-address-space.bin` itself. A calibration-only snapshot is not sufficient.
+1. Open **Firmware** in our CPS. Select the original `UV98-r37.bin` from the current package.
+2. Click **Prepare an image for my radio…**.
+3. Select **`manifest.json` from the full 4 MiB NOR snapshot** created by “Read settings storage (4 MiB)”. Select the manifest, not `storage-address-space.bin` itself. A calibration-only snapshot is not sufficient.
 4. Choose a parent folder for new images, for example `Documents/UV98-personal`. CPS creates a new `UV98-personal-…` directory inside it.
 5. Wait for successful preparation. The output is `firmware/UV98-personal.bin` and `firmware/catalog.json`; CPS automatically selects the new BIN for flashing.
 6. Keep the entire new folder. If you reopen CPS later, select `UV98-personal.bin` with its adjacent catalog intact.
@@ -99,9 +99,9 @@ Proceed only after successful preparation, confirmation of board compatibility, 
 ## 5. Install a compatible image
 
 1. Extract the whole package. CPS validates BIN files against `firmware/catalog.json`; a lone image beside an unrelated old CPS is not sufficient.
-2. Open **«Прошивка» (Firmware)** in CPS and select the prepared `UV98-personal.bin`. Check its name and SHA256 on screen; CPS compares them with the new personal catalog.
+2. Open **Firmware** in CPS and select the prepared `UV98-personal.bin`. Check its name and SHA256 on screen; CPS compares them with the new personal catalog.
 3. Switch the radio off. Hold the **upper PTT**, turn it on, then release PTT after 2–3 seconds. On the investigated radio, the stock loader shows a black screen and green LED.
-4. Select the cable's COM port. Tick the loader readiness confirmation, then click **«Записать прошивку» (Write firmware)** once.
+4. Select the cable's COM port. Tick the loader readiness confirmation, then click **Write firmware** once.
 5. Wait for explicit completion. Do not switch off the radio, unplug the cable or close CPS during writing.
 6. After completion, switch off for 3 seconds and start **without PTT**. Check the display, keys and reception. Keep the operation log.
 
@@ -109,7 +109,7 @@ Proceed only after successful preparation, confirmation of board compatibility, 
 
 With the default bindings, the upper PTT requests A and the lower PTT requests B. TX appears on the transmitting card. B can transmit while A remains selected. Each slot's current power setting is held in RAM and starts at LOW. The battery icon shows up to four approximate level bars and the numeric voltage in 0.1 V steps (`--.-V` when unavailable). [PTT hardware evidence](../research/r37/ptt.md)
 
-Loader acknowledgements confirm file transfer. Check boot and operation on the device. R33 is the owner's accepted baseline. R37's lower PTT mapping, battery readings and display performance await a radio test. UI language and other Rust settings reset after power-off.
+Loader acknowledgements confirm file transfer. Check boot and operation on the device. R33 is the owner's accepted baseline. R37's lower PTT mapping, battery readings and display performance await a radio test. The language and other Rust settings on the radio reset after power-off.
 
 ## 6. Return to stock if needed
 

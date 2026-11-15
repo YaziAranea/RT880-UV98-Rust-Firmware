@@ -1,8 +1,10 @@
-# Building R37 from source
+# Building R37 and CPS 0.7.0 from source
 
 These commands build files on the computer; they do not open a COM port or flash a radio. For installation without a compiler, use the [release package and CPS guide](docs/GETTING-STARTED.en.md).
 
 The public checkout can build the ARM firmware, Windows CPS and the host-test subset below **without personal calibration or NOR files**. The complete historical verification pipeline still requires the owner's original private fixtures; it is a separate workflow.
+
+The [`r37` tag](https://github.com/YaziAranea/uv98-rust/tree/r37) identifies the original firmware release. The [`cps-v0.7.0` tag](https://github.com/YaziAranea/uv98-rust/tree/cps-v0.7.0) identifies the CPS 0.7.0 source used for the updated kit. The kit carries the same `UV98-r37.bin`, so updating CPS requires no reflash.
 
 ## Toolchain
 
@@ -56,7 +58,7 @@ cargo test --locked --lib -p uv98-handheld-ui -p uv98-signaling -p uv98-gps-nmea
 
 This is a defined public subset, not a claim that all workspace tests are fixture-free. Do not run `cargo test --workspace` expecting the private golden tests to pass in a clean public checkout.
 
-## Windows CPS without private fixtures
+## Windows CPS 0.7.0 without private fixtures
 
 For the tested Windows gnullvm host, first prepare the local OpenGL import library, then build the application:
 
@@ -86,4 +88,4 @@ Use real local paths and a new output directory. This workflow additionally need
 
 Use `--exclude-private-fixture` with `tools/package_diagnostic_image.py` when preparing a shareable source archive. The legacy packager otherwise includes the owner's fixture in `source.zip`. That switch alone is not a public-release privacy or licensing audit: inspect archive entries, logs and reports as well.
 
-The public R37 kit excludes manufacturer recovery firmware and personal calibration/NOR/codeplug files. The [getting-started guide](docs/GETTING-STARTED.en.md#where-to-get-the-stock-recovery-file) provides the separately obtained matching stock file and its hash. The older R35 kit remains a private historical artifact; its bundled recovery file must not be copied automatically into a public release.
+The [public R37 kit with CPS 0.7.0](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37-CPS-0.7.0-2026-11-16.zip) excludes manufacturer recovery firmware and personal calibration/NOR/codeplug files. The [getting-started guide](docs/GETTING-STARTED.en.md#where-to-get-the-stock-recovery-file) provides the separately obtained matching stock file and its hash. The older R35 kit remains a private historical artifact; its bundled recovery file must not be copied automatically into a public release.

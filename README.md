@@ -10,9 +10,19 @@ Independent A/B operation, a colour spectrum display, shortwave tools and access
 
 **English** · [Deutsch](README.de.md) · [Русский](README.ru.md)
 
-[**Firmware BIN**](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37.bin) · [**Firmware + CPS 0.6.1**](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37-2026-11-16.zip) · [**Start here: backup and installation**](docs/GETTING-STARTED.en.md) · [Release notes](https://github.com/YaziAranea/uv98-rust/releases/tag/r37)
+[**Firmware BIN**](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37.bin) · [**Firmware + CPS 0.7.0**](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37-CPS-0.7.0-2026-11-16.zip) · [**Start here: backup and installation**](docs/GETTING-STARTED.en.md) · [Release notes](https://github.com/YaziAranea/uv98-rust/releases/tag/r37)
 
 > **Experimental firmware for the investigated AT32F423 board profile.** R37 is a template: use CPS to prepare a per-radio image from your verified NOR backup before flashing. This binds the image to your own calibration; it does not replace factory data. A similar model name does not establish board compatibility. Follow the [backup and preparation guide](docs/GETTING-STARTED.en.md#4-check-compatibility-before-flashing).
+
+## Windows CPS 0.7.0
+
+Use **Язык / Language / Sprache** in the toolbar to select **Русский**, **English** or **Deutsch**. All eight tabs and existing status messages switch immediately. Unsaved edits stay in place, and CPS remembers the selection in your Windows user profile. File dialog titles and filters follow CPS. Standard dialog buttons follow Windows.
+
+The kit contains the same R37 firmware BIN. Updating CPS requires no reflash. [CPS 0.7.0 source](https://github.com/YaziAranea/uv98-rust/tree/cps-v0.7.0)
+
+![CPS 0.7.0 channel editor in English](docs/images/cps-0.7.0/en-channels.png)
+
+*Headless render of the CPS interface from egui with simulated data.*
 
 ## On the screen
 

@@ -10,9 +10,19 @@ Unabhängige A/B-Einstellungen, ein farbiges Spektrum, Kurzwellenfunktionen und 
 
 [English](README.md) · **Deutsch** · [Русский](README.ru.md)
 
-[**Firmware-BIN**](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37.bin) · [**Firmware und CPS 0.6.1**](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37-2026-11-16.zip) · [**Hier beginnen: Sicherung und Installation**](docs/GETTING-STARTED.de.md) · [Versionshinweise](https://github.com/YaziAranea/uv98-rust/releases/tag/r37)
+[**Firmware-BIN**](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37.bin) · [**Firmware und CPS 0.7.0**](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37-CPS-0.7.0-2026-11-16.zip) · [**Hier beginnen: Sicherung und Installation**](docs/GETTING-STARTED.de.md) · [Versionshinweise](https://github.com/YaziAranea/uv98-rust/releases/tag/r37)
 
 > **Experimentelle Firmware für das untersuchte AT32F423-Platinenprofil.** R37 ist eine Vorlage: Vor dem Flashen mit CPS ein persönliches Image aus der geprüften NOR-Sicherung des eigenen Geräts erstellen. Dabei wird das Image an die eigenen Kalibrierungen gebunden; die Werksdaten werden nicht ersetzt. Eine ähnliche Modellbezeichnung belegt keine Platinenkompatibilität. Zuerst die [Sicherungs- und Vorbereitungsanleitung](docs/GETTING-STARTED.de.md#4-kompatibilität-vor-dem-flashen-prüfen) lesen.
+
+## Windows-CPS 0.7.0
+
+Wählen Sie in der Symbolleiste unter **Язык / Language / Sprache** zwischen **Русский**, **English** und **Deutsch**. Alle acht Reiter und bereits angezeigte Statusmeldungen wechseln sofort die Sprache. Ungespeicherte Änderungen bleiben erhalten. CPS speichert die Sprachwahl im Windows-Benutzerprofil. Titel und Filter der Dateidialoge folgen der CPS-Sprache. Die Standardschaltflächen folgen der Windows-Sprache.
+
+Das Paket enthält dieselbe R37-Firmware-BIN. Das CPS-Update erfordert kein erneutes Flashen. [Quellcode der CPS 0.7.0](https://github.com/YaziAranea/uv98-rust/tree/cps-v0.7.0)
+
+![Kanaleditor der CPS 0.7.0 auf Deutsch](docs/images/cps-0.7.0/de-channels.png)
+
+*Die CPS-Oberfläche wurde mit egui ohne Windows-Fenster und mit simulierten Daten gerendert.*
 
 ## Ein Blick auf die Oberfläche
 

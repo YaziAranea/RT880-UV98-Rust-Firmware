@@ -1,4 +1,5 @@
 //! Local CPS file I/O only. No serial, networking or device access.
+use crate::i18n::LocalizedText;
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
@@ -7,32 +8,50 @@ use std::{
 use uv98_codeplug::FILE_LEN;
 use uv98_cps_core::Document;
 
-pub fn read_document(path: &Path) -> Result<Document, String> {
-    let file = File::open(path).map_err(|error| error.to_string())?;
-    if file.metadata().map_err(|error| error.to_string())?.len() != FILE_LEN as u64 {
-        return Err(format!("Ожидается CPS-файл размером {FILE_LEN} байта"));
+pub fn read_document(path: &Path) -> Result<Document, LocalizedText> {
+    let file = File::open(path).map_err(|error| LocalizedText::from(error.to_string()))?;
+    if file
+        .metadata()
+        .map_err(|error| LocalizedText::from(error.to_string()))?
+        .len()
+        != FILE_LEN as u64
+    {
+        return Err(msgf!(
+            "Ожидается CPS-файл размером {FILE_LEN} байта",
+            "Expected a CPS file of {FILE_LEN} bytes",
+            "Eine CPS-Datei mit {FILE_LEN} Bytes wird erwartet"
+        ));
     }
     let mut bytes = Vec::with_capacity(FILE_LEN);
     file.take(FILE_LEN as u64 + 1)
         .read_to_end(&mut bytes)
-        .map_err(|error| error.to_string())?;
-    Document::from_bytes(&bytes).map_err(|error| error.to_string())
+        .map_err(|error| LocalizedText::from(error.to_string()))?;
+    Document::from_bytes(&bytes).map_err(|error| LocalizedText::from(error.to_string()))
 }
 
-pub fn save_new_copy(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub fn save_new_copy(path: &Path, bytes: &[u8]) -> Result<(), LocalizedText> {
     if bytes.len() != FILE_LEN {
-        return Err("Неверная длина экспортируемого CPS-файла".into());
+        return Err(msg!(
+            "Неверная длина экспортируемого CPS-файла",
+            "Invalid exported CPS file length",
+            "Ungültige Länge der exportierten CPS-Datei"
+        )
+        .into());
     }
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)
         .map_err(|error| {
-            format!("Не удалось создать новую копию: {error}. Выберите новое имя файла.")
+            msgf!(
+                "Не удалось создать новую копию: {error}. Выберите новое имя файла.",
+                "Could not create a new copy: {error}. Choose a new file name.",
+                "Neue Kopie konnte nicht erstellt werden: {error}. Einen neuen Dateinamen wählen."
+            )
         })?;
     file.write_all(bytes)
         .and_then(|_| file.sync_all())
-        .map_err(|error| format!("Запись не завершена: {error}. Новый файл может быть неполным."))
+        .map_err(|error| msgf!("Запись не завершена: {error}. Новый файл может быть неполным.", "Writing did not finish: {error}. The new file may be incomplete.", "Schreiben nicht abgeschlossen: {error}. Die neue Datei ist möglicherweise unvollständig."))
 }
 
 #[cfg(test)]

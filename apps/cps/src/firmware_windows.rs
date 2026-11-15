@@ -1,6 +1,6 @@
 //! Exclusive bounded Win32 loader transport. Kept separate from read-only CPS transport.
 
-use std::{io, mem, ptr, time::Duration};
+use std::{fmt, io, mem, ptr, time::Duration};
 
 use windows_sys::Win32::Devices::Communication::{
     GetCommState, SetCommState, SetCommTimeouts, SetupComm, COMMTIMEOUTS, DCB, NOPARITY, ONESTOPBIT,
@@ -12,7 +12,55 @@ use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL, OPEN_EXISTING,
 };
 
-use crate::firmware::Transport;
+use crate::{firmware::Transport, i18n::Language};
+
+#[derive(Debug)]
+enum PortError {
+    InvalidName,
+    Closed,
+    InvalidFrameSize,
+}
+
+impl fmt::Display for PortError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.detail(Language::English))
+    }
+}
+
+impl std::error::Error for PortError {}
+
+impl PortError {
+    fn detail(&self, lang: Language) -> &'static str {
+        match self {
+            Self::InvalidName => tr!(
+                lang,
+                "Укажите COM1..COM65535",
+                "Expected COM1..COM65535",
+                "COM1..COM65535 erwartet",
+            ),
+            Self::Closed => tr!(
+                lang,
+                "Дескриптор COM закрыт",
+                "Serial handle is closed",
+                "COM-Handle ist geschlossen",
+            ),
+            Self::InvalidFrameSize => tr!(
+                lang,
+                "Недопустимый размер кадра загрузчика",
+                "Invalid loader frame size",
+                "Ungültige Framegröße des Bootloaders",
+            ),
+        }
+    }
+}
+
+pub(super) fn error_detail(error: &io::Error, lang: Language) -> Option<&'static str> {
+    error
+        .get_ref()?
+        .downcast_ref::<PortError>()
+        .map(|error| error.detail(lang))
+}
+
 fn port_number(name: &str) -> Option<u16> {
     let digits = name.strip_prefix("COM")?;
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
@@ -36,9 +84,8 @@ pub(super) struct WindowsPort {
 
 impl WindowsPort {
     pub(super) fn open(name: &str) -> io::Result<Self> {
-        let number = port_number(name).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "Expected COM1..COM65535")
-        })?;
+        let number = port_number(name)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, PortError::InvalidName))?;
         let path: Vec<u16> = format!(r"\\.\COM{number}")
             .encode_utf16()
             .chain(Some(0))
@@ -68,7 +115,7 @@ impl WindowsPort {
 
     fn handle(&self) -> io::Result<HANDLE> {
         self.handle
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, "Serial handle is closed"))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, PortError::Closed))
     }
 
     fn configure(&mut self) -> io::Result<()> {
@@ -135,7 +182,7 @@ impl Transport for WindowsPort {
         if bytes.len() != 5 && bytes.len() != 1028 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "Invalid loader frame size",
+                PortError::InvalidFrameSize,
             ));
         }
         self.timeouts(Duration::from_secs(5), Duration::from_secs(5))?;
