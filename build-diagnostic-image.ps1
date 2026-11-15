@@ -80,6 +80,7 @@ try {
     $imageDirectory = Join-Path $destination 'image'
     Invoke-Checked 'python' @('tools/export_diagnostic_image.py', 'target/thumbv7em-none-eabi/release/uv98-diag-firmware', $imageDirectory)
     Invoke-Checked 'python' @('tools/check_diag_preinit.py', (Join-Path $imageDirectory 'UV98-diag-0.1.8.elf'), '--report', (Join-Path $imageDirectory 'early-machine-code-check.json'))
+    Invoke-Checked 'python' @('tools/check_device_profile.py', (Join-Path $imageDirectory 'UV98-diag-0.1.8.elf'), '--report', (Join-Path $imageDirectory 'device-profile-check.json'))
     Invoke-Checked 'python' @((Join-Path $captureTools 'verify_boot_log_emulation.py'), '--report', (Join-Path $imageDirectory 'early-machine-code-check.json'), '--output', (Join-Path $destination 'boot-log-emulation-decode'))
     $preflight = & python research/recovery/image_preflight.py (Join-Path $imageDirectory 'UV98-diag-0.1.8.bin')
     if ($LASTEXITCODE -ne 0) { throw 'BIN preflight failed' }

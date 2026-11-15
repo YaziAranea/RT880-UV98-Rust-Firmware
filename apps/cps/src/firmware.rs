@@ -2,6 +2,7 @@
 //! No read probe exists in this loader: the first command starts erase.
 //! Images must match the release catalog; no padding, relocation, END or retries.
 use serde_json::json;
+pub mod profile;
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
@@ -86,6 +87,9 @@ pub fn export_stock(destination: &Path) -> Result<(), String> {
         .parent()
         .ok_or("Нет каталога CPS")?
         .join("recovery/RT-880_Upgrade_V1_16_250915.bin");
+    if !source.is_file() {
+        return Err("Заводской BIN не входит в публичный комплект. Поместите свой RT-880_Upgrade_V1_16_250915.bin в папку recovery рядом с CPS; файл будет проверен по SHA256. Это файл восстановления, не чтение MCU рации.".into());
+    }
     let bytes = bounded_read(&source, IMAGE_BYTES)?;
     if hash(&bytes) != STOCK_SHA256 {
         return Err("SHA256 заводского образа не совпадает с комплектом".into());
@@ -105,12 +109,20 @@ pub fn export_stock(destination: &Path) -> Result<(), String> {
 
 pub fn prepare(path: &Path) -> Result<PreparedImage, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    prepare_with_catalog(
-        path,
-        &exe.parent()
-            .ok_or("Нет каталога CPS")?
-            .join("firmware/catalog.json"),
-    )
+    let catalog = exe
+        .parent()
+        .ok_or("Нет каталога CPS")?
+        .join("firmware/catalog.json");
+    prepare_with_catalog(path, &catalog).or_else(|original_error| {
+        if path
+            .parent()
+            .is_some_and(|parent| parent.join("catalog.json").is_file())
+        {
+            profile::prepare_saved(path, &catalog)
+        } else {
+            Err(original_error)
+        }
+    })
 }
 
 /// The release manifest chooses the image, so an older hardcoded filename can

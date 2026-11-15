@@ -1,74 +1,89 @@
-# Сборка R35
+# Building R36 from source
 
-R35 build3 от 16 ноября 2026 года собрана от принятой R33 с профилем channel-tx. Это проект исследованной платы AT32F423 и калибровок владельца, а не универсальный установщик.
+These commands build files on the computer; they do not open a COM port or flash a radio. For installation without a compiler, use the [release package and CPS guide](docs/GETTING-STARTED.en.md).
 
-## Зависимости и входы
+The public checkout can build the ARM firmware, Windows CPS and the host-test subset below **without personal calibration or NOR files**. The complete historical verification pipeline still requires the owner's original private fixtures; it is a separate workflow.
 
-Проверенная конфигурация: Rust 1.99.1, host x86_64-pc-windows-gnullvm, target thumbv7em-none-eabi. Файла rust-toolchain.toml нет; Cargo.lock фиксирует зависимости, но не компилятор.
+## Toolchain
 
-Нужны PowerShell 7, Rust/Cargo и Python 3.11+ с capstone, unicorn, pyelftools. Инструменты кабельного журнала отдельно используют pyserial. Нужны личные входы по [PRIVATE-INPUTS.md](PRIVATE-INPUTS.md):
+The development environment uses Rust 1.99.1, Windows host `x86_64-pc-windows-gnullvm` and ARM target `thumbv7em-none-eabi`. There is no `rust-toolchain.toml`: `Cargo.lock` fixes dependencies, not the compiler. Other host/toolchain combinations require their own verification.
 
-- Fixture в crates/calibration/tests/fixtures/uv98-plus-stock-1.16.bin.
-- Исходный NOR 4 МиБ, передаваемый параметром -NorBackup.
+Use Rust/Cargo, Python 3.11+ and PowerShell 7 for the Windows commands below. Run them from the repository root:
 
-Скрипт проверяет SHA до и после работы. Данные другой станции требуют отдельной валидации, а не отключения проверок. Обычная сборка проверяет сохранённые oracle; их повторная генерация по reference BIN — отдельная операция.
-
-## Подготовка
-
-Из корня рабочего проекта:
-
-~~~powershell
-$env:PATH = (Join-Path $env:USERPROFILE '.cargo/bin') + ';' + $env:PATH
+```powershell
 rustup target add thumbv7em-none-eabi
 cargo fetch --locked
-python -m pip install capstone unicorn pyelftools pyserial
-~~~
+python -m pip install capstone unicorn pyelftools
+```
 
-Сборочный сценарий использует --offline после загрузки зависимостей. На Windows gnullvm выбирается rust-lld из установленного sysroot; CPS дополнительно запускает tools/prepare_windows_link.py.
+On the Windows gnullvm host, select the installed linker for host programs and build scripts:
 
-## Прошивка
+```powershell
+$taskRustSysroot = rustc --print sysroot
+$env:CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER = Join-Path $taskRustSysroot 'lib/rustlib/x86_64-pc-windows-gnullvm/bin/rust-lld.exe'
+```
 
-~~~powershell
+## Public ARM build
+
+```powershell
+cargo build --locked --release --target thumbv7em-none-eabi -p uv98-diag-firmware --features channel-tx
+python tools/export_diagnostic_image.py target/thumbv7em-none-eabi/release/uv98-diag-firmware validation/r36-public-build/image
+python tools/check_diag_preinit.py validation/r36-public-build/image/UV98-diag-0.1.8.elf --report validation/r36-public-build/early-machine-code-check.json
+python tools/check_device_profile.py validation/r36-public-build/image/UV98-diag-0.1.8.elf --report validation/r36-public-build/device-profile-check.json
+```
+
+The export directory must be new. Use another directory name for a subsequent build. The exporter retains its historical filenames:
+
+```text
+validation/r36-public-build/image/UV98-diag-0.1.8.bin
+validation/r36-public-build/image/UV98-diag-0.1.8.elf
+validation/r36-public-build/image/image-layout.json
+```
+
+The BIN covers the 251904-byte application window. It excludes the bootloader prefix and external NOR. A release name such as `UV98-r36.bin` is assigned during packaging; identify the exact artifact by its SHA256, not its filename alone.
+
+`channel-tx` enables the current channel transmission profile. Omitting that feature builds the default RX profile. The historical `upper-exo-tx-trial` feature is not the R36 release profile; do not combine the two TX profiles.
+
+The linked checks examine startup/exception code and the device profile in the actual ELF. They do not measure RF behaviour, electrical pin states or maximum stack use on physical hardware.
+
+**A self-built BIN is not automatically accepted by the released CPS.** CPS validates recognized images against its release catalog. The exporter creates a layout report, not a trusted CPS catalog. Development builds need a separately reviewed catalog and packaging pipeline; do not rename an unknown BIN or disable validation to make it look like a release. The ordinary user path prepares a personal image from the recognized R36 template in CPS.
+
+## Host checks without private fixtures
+
+```powershell
+cargo test --locked --lib -p uv98-handheld-ui -p uv98-signaling -p uv98-gps-nmea -p uv98-spectrum -p uv98-keys -p uv98-display
+```
+
+This is a defined public subset, not a claim that all workspace tests are fixture-free. Do not run `cargo test --workspace` expecting the private golden tests to pass in a clean public checkout.
+
+## Windows CPS without private fixtures
+
+For the tested Windows gnullvm host, first prepare the local OpenGL import library, then build the application:
+
+```powershell
+python tools/prepare_windows_link.py --sysroot $taskRustSysroot
+cargo build --locked --release --target x86_64-pc-windows-gnullvm -p uv98-cps
+python tools/pe_imports.py target/x86_64-pc-windows-gnullvm/release/uv98-cps.exe
+```
+
+The executable is `target/x86_64-pc-windows-gnullvm/release/uv98-cps.exe`. If the import report lists `libunwind.dll`, place the runtime from `lib/rustlib/x86_64-pc-windows-gnullvm/bin/` inside the Rust sysroot beside the executable. The import helper reads installed Windows export names and creates a local import library; it does not copy Windows DLL code.
+
+`build-cps.ps1` documents the full packaging procedure and produces `target/cps-portable/UV98-CPS.exe`. That script also runs tests using the private calibration fixture; it is **not** the fixture-free build command above. Building the executable alone does not provide the firmware catalog, images or recovery files included in a separately assembled release kit. A successful build also does not replace a native Windows UI check.
+
+## Full owner verification
+
+The historical `build-diagnostic-image.ps1` requires both the exact calibration fixture and preserved NOR listed in [PRIVATE-INPUTS.md](PRIVATE-INPUTS.md). It checks their fixed SHA values before and after running oracle checks, host tests, ARM checks and screen simulation. Another radio's backup is not a replacement for these golden inputs.
+
+For a maintainer who already holds those originals:
+
+```powershell
 ./build-diagnostic-image.ps1 -ChannelTx -NorBackup 'D:/private-radio-backup/storage-address-space.bin' -OutputDirectory 'D:/radio-builds/uv98-next-build'
-~~~
+```
 
-Заменить пути реальными локальными входами. Выходной каталог обязан быть новым. Сценарий выполняет форматирование, oracle, host-тесты, ARM ELF/BIN, проверки раннего запуска и симуляцию на NOR. COM не открывается, рация не прошивается.
+Use real local paths and a new output directory. This workflow additionally needs `pyserial` for boot-log test tools, but does not access the radio. Do not invent, zero-fill or substitute a fixture to make the tests pass. Historical R35 results remain in [R35-REPORT-RU.txt](R35-REPORT-RU.txt); they are not R36 hardware acceptance evidence.
 
-Без -ChannelTx получается RX-профиль. Исторический -UpperExoTxTrial не является профилем R35; два TX-профиля одновременно запрещены.
+## Public packaging
 
-Результаты: verification.json, build-log.txt, image/ и preview/. Внутреннее имя экспортера сохраняется:
+Use `--exclude-private-fixture` with `tools/package_diagnostic_image.py` when preparing a shareable source archive. The legacy packager otherwise includes the owner's fixture in `source.zip`. That switch alone is not a public-release privacy or licensing audit: inspect archive entries, logs and reports as well.
 
-~~~text
-image/UV98-diag-0.1.8.bin
-image/UV98-diag-0.1.8.elf
-image/diagnostic.map
-~~~
-
-При выпуске проверенный BIN копируется под именем UV98-r35.bin. Версию определять по SHA, не только имени. Проверенная сборка находится в outputs/UV98-r35-20261116-build3 исходного workspace.
-
-## CPS и упаковка
-
-~~~powershell
-./build-cps.ps1
-python tools/package_diagnostic_image.py D:/radio-builds/uv98-next-build --profile channel-tx --exclude-private-fixture
-~~~
-
-CPS появляется в target/cps-portable/, отчёт — validation/cps-build-summary.json. При необходимости копируется libunwind.dll. Сборка не заменяет проверку нативного интерфейса.
-
-Без --exclude-private-fixture упаковщик включает личный fixture в source.zip. Такой архив нельзя загружать в GitHub. Опция исключает fixture из архива, но не отменяет его необходимость для сборки. Перед передачей проверить также отсутствие NOR, codeplug и личных журналов.
-
-Комплект R35 содержит очищенные исходники, CPS, R35, R33 и заводской recovery BIN 1.16. Упаковка ничего не записывает на станцию.
-
-## Зафиксированный результат build3
-
-~~~text
-BIN: 251904 байта
-SHA256: 97e3d98257cacef6d64917d4b355719e1649b8570e8df8e9c9527edd39c7307d
-Flash: 251400 байт занято, 504 байта свободно
-RAM над статическими данными: 38828 байт
-~~~
-
-RAM — расчёт ELF, а не измеренный пик стека. Прошли 547 Rust-тестов, 122 CPS-теста, 80 Python-тестов; один Rust-тест пропущен. Выполнены 59 ARM-проверок, 59 проверок декодирования и 83 PNG-сценария.
-
-Это результаты на ПК, не аппаратная приёмка. В многопоточном процессе Cargo и COM использует только корневой агент. Старые COM20/COM21 инструкции и tools/session-archive/ относятся к прошлым сессиям; актуальный порт определяется отдельно.
-
+The public R36 kit excludes manufacturer recovery firmware and personal calibration/NOR/codeplug files. The [getting-started guide](docs/GETTING-STARTED.en.md#where-to-get-the-stock-recovery-file) provides the separately obtained matching stock file and its hash. The older R35 kit remains a private historical artifact; its bundled recovery file must not be copied automatically into a public release.

@@ -1,5 +1,7 @@
 /* Pre-RAM TX-only diagnostics. No stack, data RAM, BL or callee-saved registers.
- * r12: bit31 UART ready, bit30 checksum frozen, low8 ASCII sum. LR preserved.
+ * r12: bit31 UART ready, bit30 checksum frozen, bits24..28 hex shift,
+ * low24 ASCII sum (only low8 transmitted). LR preserved. One frame has fewer
+ * than64 bytes, so even255 per byte cannot carry into the hex-shift field.
  * UART byte helper's private tail-branch ABI: r0 byte, r3 Thumb continuation;
  * clobbers r1/r2/r12 only. Clock decode never writes a clock source/divider.
  */
@@ -28,7 +30,12 @@
  * Identity registers
  * are immutable; fault registers are best-effort samples, not an atomic dump. */
 .macro diag_hex kind, value
-    .irp shift,28,24,20,16,12,8,4,0
+    /* The former eight-way macro expansion repeated this code for every
+     * word of every frame. A bounded loop keeps the identical MMIO rereads,
+     * byte order/checksum and stackless UART ABI while saving flash. */
+    bic r12, r12, #0x1f000000
+    orr r12, r12, #0x1c000000
+.Lhex_digit\@:
         .if \kind == 3
             mrs r0, IPSR
         .elseif \kind == 4
@@ -43,16 +50,19 @@
                 ldrh r0, [r0]
             .endif
         .endif
-        .if \shift != 0
-            lsrs r0, r0, #\shift
-        .endif
+        ubfx r1, r12, #24, #5
+        lsr r0, r0, r1
         and r0, r0, #15
         cmp r0, #10
         ite lo
         addlo r0, #48
         addhs r0, #55
         diag_send_r0
-    .endr
+        tst r12, #0x1f000000
+        beq .Lhex_done\@
+        sub r12, r12, #0x04000000
+        b .Lhex_digit\@
+.Lhex_done\@:
 .endm
 
 .macro diag_frame code, ak=1, av=0xe0042000, bk=1, bv=0xe0042020, ck=2, cv=0x1ffff7e0

@@ -2,6 +2,7 @@
 //! measurements, frequency tuning, or storage writes. Radio activity is shown
 //! only from an explicit backend report, never inferred from a key or request.
 
+use crate::locale::{self, Language};
 use core::fmt::{self, Write};
 use uv98_codeplug::channels::{Bandwidth, Power, Tone};
 use uv98_display::{Delay, Display, DisplayBus};
@@ -26,6 +27,23 @@ use utility::{shortwave_processing_label, shortwave_scope_page, utility_page};
 
 pub const WIDTH: usize = 240;
 pub const HEIGHT: u16 = 320;
+
+struct Row<'a> {
+    pixels: &'a mut [u16; WIDTH],
+    language: Language,
+}
+impl core::ops::Deref for Row<'_> {
+    type Target = [u16; WIDTH];
+    fn deref(&self) -> &Self::Target {
+        self.pixels
+    }
+}
+impl core::ops::DerefMut for Row<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.pixels
+    }
+}
+
 pub const LIST_ROWS: usize = 7;
 const HOME_HEADER_END: u16 = 28;
 const HOME_NAME_Y: u16 = 30;
@@ -138,13 +156,13 @@ pub enum SpectrumError {
 impl SpectrumError {
     pub const fn label(self) -> &'static str {
         match self {
-            Self::None => "НЕТ ИЗМЕРЕНИЙ",
-            Self::Receiver => "ПРИЁМНИК НЕ ГОТОВ",
-            Self::Window => "ОКНО: НЕДОПУСТИМАЯ ПОЛОСА/ШАГ",
-            Self::Route => "ГРАНИЦА ДИАПАЗОНА ИЛИ МАРШРУТА",
-            Self::Busy => "ОБЗОР УЖЕ АКТИВЕН",
-            Self::Restore => "ВОССТАНОВЛЕНИЕ ПРИЁМА НЕ УДАЛОСЬ",
-            Self::Stale => "ГРАФИК ОТ ДРУГОГО ОКНА",
+            Self::None => "\x1f0B4",
+            Self::Receiver => "\x1f0F2",
+            Self::Window => "\x1f0CF",
+            Self::Route => "\x1f063",
+            Self::Busy => "\x1f0C6",
+            Self::Restore => "\x1f055",
+            Self::Stale => "\x1f064",
         }
     }
     pub const fn is_failure(self) -> bool {
@@ -465,6 +483,10 @@ pub fn dirty_ranges(model: &Model<'_>, previous: Option<View>) -> Result<DirtyRa
         return Ok(dirty);
     };
     let new = model.view;
+    if old.language != new.language {
+        dirty.push(0, HEIGHT);
+        return Ok(dirty);
+    }
     if old == new {
         return Ok(dirty);
     }
@@ -962,7 +984,12 @@ pub fn render_row(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) -> Result
 
 /// Internal fast path: caller has validated the immutable model and row range.
 #[inline(never)]
-fn render_validated_row(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn render_validated_row(row: u16, pixels: &mut [u16; WIDTH], model: &Model<'_>) {
+    let mut row_context = Row {
+        pixels,
+        language: model.view.language,
+    };
+    let out = &mut row_context;
     out.fill(color::BACKGROUND);
     if model.view.screen == Screen::Home {
         if row < HOME_HEADER_END {
@@ -1076,7 +1103,7 @@ fn validate(model: &Model<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-fn header(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn header(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     rect(row, out, 0, 0, WIDTH, 27, color::PANEL);
     text(row, out, 12, 11, 1, page_title(model.view), color::ACCENT);
     if model.view.locked {
@@ -1095,13 +1122,13 @@ pub fn radio_banner_rows(screen: Screen) -> (u16, u16) {
     }
 }
 
-fn lock_badge(row: u16, out: &mut [u16; WIDTH]) {
+fn lock_badge(row: u16, out: &mut Row<'_>) {
     rect(row, out, 178, 5, 52, 18, color::WARNING);
     symbol(row, out, 182, 6, Symbol::Lock, color::BACKGROUND);
-    text(row, out, 204, 10, 1, "БЛОК", color::BACKGROUND);
+    text(row, out, 204, 10, 1, "\x1f041", color::BACKGROUND);
 }
 
-fn home_header(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn home_header(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     rect(row, out, 0, 0, WIDTH, 27, color::PANEL);
     if model.view.dual_watch
         && matches!(
@@ -1141,27 +1168,21 @@ fn home_header(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
     }
 }
 
-fn radio_banner(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn radio_banner(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     if !(28..48).contains(&row) || model.view.screen == Screen::Shortwave {
         return;
     }
     let (label, foreground, background) = match model.radio.state {
-        RadioState::Off if model.ptt_pressed || model.view.ptt_down => (
-            "PTT: ПЕРЕДАЧА ОТКЛЮЧЕНА",
-            color::WARNING,
-            color::WARNING_BACKGROUND,
-        ),
-        RadioState::Off => ("РАДИО ВЫКЛЮЧЕНО", color::WARNING, color::WARNING_BACKGROUND),
-        RadioState::Starting => ("РАДИО: ЗАПУСК", color::WARNING, color::WARNING_BACKGROUND),
+        RadioState::Off if model.ptt_pressed || model.view.ptt_down => {
+            ("\x1f035", color::WARNING, color::WARNING_BACKGROUND)
+        }
+        RadioState::Off => ("\x1f0FA", color::WARNING, color::WARNING_BACKGROUND),
+        RadioState::Starting => ("\x1f0FC", color::WARNING, color::WARNING_BACKGROUND),
         RadioState::Receiving if model.radio.squelch_open => ("RX", color::BACKGROUND, color::GOOD),
         RadioState::Receiving => ("", color::GOOD, color::PANEL),
         RadioState::Transmitting => ("TX", color::TEXT, color::BAD),
-        RadioState::Unavailable => (
-            "РАДИО НЕДОСТУПНО",
-            color::WARNING,
-            color::WARNING_BACKGROUND,
-        ),
-        RadioState::Failed => ("ОШИБКА РАДИО", color::TEXT, color::BAD),
+        RadioState::Unavailable => ("\x1f0FB", color::WARNING, color::WARNING_BACKGROUND),
+        RadioState::Failed => ("\x1f0D9", color::TEXT, color::BAD),
     };
     // Confirmed sweep publication is more precise than the generic Starting
     // state used during retunes. Never hide a real TX or terminal RF fault.
@@ -1171,7 +1192,7 @@ fn radio_banner(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
             model.radio.state,
             RadioState::Transmitting | RadioState::Failed
         ) {
-        ("ОБЗОР: ПРОСЛУШИВАНИЕ", color::BACKGROUND, color::GOOD)
+        ("\x1f0CC", color::BACKGROUND, color::GOOD)
     } else if model.view.screen == Screen::Spectrum
         && model.view.spectrum_menu
         && !matches!(
@@ -1179,7 +1200,7 @@ fn radio_banner(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
             RadioState::Transmitting | RadioState::Failed
         )
     {
-        ("ОБЗОР: МЕНЮ", color::ACCENT, color::PANEL)
+        ("\x1f0C9", color::ACCENT, color::PANEL)
     } else if model.view.screen == Screen::Spectrum
         && !matches!(
             model.radio.state,
@@ -1187,25 +1208,17 @@ fn radio_banner(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
         )
     {
         match spectrum_phase(model) {
-            Some(SpectrumPhase::Pending) => {
-                ("ОБЗОР: ОЖИДАНИЕ", color::WARNING, color::WARNING_BACKGROUND)
+            Some(SpectrumPhase::Pending) => ("\x1f0CA", color::WARNING, color::WARNING_BACKGROUND),
+            Some(SpectrumPhase::Sweeping) => ("\x1f0C7", color::ACCENT, color::PANEL),
+            Some(SpectrumPhase::Listening) => ("\x1f0CC", color::BACKGROUND, color::GOOD),
+            Some(SpectrumPhase::Preparing) => {
+                ("\x1f0CB", color::WARNING, color::WARNING_BACKGROUND)
             }
-            Some(SpectrumPhase::Sweeping) => ("ОБЗОР: ЗВУК ВЫКЛ", color::ACCENT, color::PANEL),
-            Some(SpectrumPhase::Listening) => {
-                ("ОБЗОР: ПРОСЛУШИВАНИЕ", color::BACKGROUND, color::GOOD)
+            Some(SpectrumPhase::Restoring) => {
+                ("\x1f052", color::WARNING, color::WARNING_BACKGROUND)
             }
-            Some(SpectrumPhase::Preparing) => (
-                "ОБЗОР: ПОДГОТОВКА",
-                color::WARNING,
-                color::WARNING_BACKGROUND,
-            ),
-            Some(SpectrumPhase::Restoring) => (
-                "ВОЗВРАТ К ПРИЁМУ",
-                color::WARNING,
-                color::WARNING_BACKGROUND,
-            ),
-            Some(SpectrumPhase::Stopped) => ("ОБЗОР ОСТАНОВЛЕН", color::MUTED, color::PANEL),
-            Some(SpectrumPhase::Failed) => ("ОШИБКА ОБЗОРА", color::TEXT, color::BAD),
+            Some(SpectrumPhase::Stopped) => ("\x1f0C5", color::MUTED, color::PANEL),
+            Some(SpectrumPhase::Failed) => ("\x1f0D7", color::TEXT, color::BAD),
             None => (label, foreground, background),
         }
     } else {
@@ -1217,42 +1230,42 @@ fn radio_banner(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
 
 fn page_title(view: View) -> &'static str {
     match view.screen {
-        Screen::Home => "СЛОТЫ A / B",
-        Screen::Menu => view.menu_group.map(menu_group_label).unwrap_or("МЕНЮ"),
-        Screen::Channels => "СПИСОК КАНАЛОВ",
-        Screen::ChannelDetails => "ДАННЫЕ КАНАЛА",
-        Screen::Step => "ШАГ ЧАСТОТЫ",
-        Screen::Calibration => "КАЛИБРОВКИ",
-        Screen::Keys => "ПРОВЕРКА КНОПОК",
-        Screen::Help => "УПРАВЛЕНИЕ",
-        Screen::About => "О ПРОШИВКЕ",
-        Screen::Shortcuts => "ДОЛГИЕ КЛАВИШИ",
-        Screen::ShortcutAction => "НАЗНАЧИТЬ ДЕЙСТВИЕ",
-        Screen::Zones => "ЗОНЫ КАНАЛОВ",
-        Screen::SideKeys => "БОКОВЫЕ КНОПКИ",
-        Screen::SideAction => "ДЕЙСТВИЕ КНОПКИ",
-        Screen::Setting => view.setting.map(setting_title).unwrap_or("НАСТРОЙКА"),
-        Screen::Spectrum => "СПЕКТР ДИАПАЗОНА",
-        Screen::Shortwave => "РАДИОТЮНЕР",
-        Screen::Crossband => "КРОСС-БЭНД",
-        Screen::Gps => "GPS / НАВИГАЦИЯ",
-        Screen::Aprs => "APRS / МАЯК",
-        Screen::TxId => "ПОЗЫВНОЙ SELECT V",
+        Screen::Home => "\x1f11F",
+        Screen::Menu => view.menu_group.map(menu_group_label).unwrap_or("\x1f09C"),
+        Screen::Channels => "\x1f126",
+        Screen::ChannelDetails => "\x1f066",
+        Screen::Step => "\x1f13F",
+        Screen::Calibration => "\x1f082",
+        Screen::Keys => "\x1f0F6",
+        Screen::Help => "\x1f136",
+        Screen::About => "\x1f0C3",
+        Screen::Shortcuts => "\x1f06D",
+        Screen::ShortcutAction => "\x1f0AB",
+        Screen::Zones => "\x1f080",
+        Screen::SideKeys => "\x1f047",
+        Screen::SideAction => "\x1f068",
+        Screen::Setting => view.setting.map(setting_title).unwrap_or("\x1f0AC"),
+        Screen::Spectrum => "\x1f124",
+        Screen::Shortwave => "\x1f0FD",
+        Screen::Crossband => "\x1f097",
+        Screen::Gps => "\x1f019",
+        Screen::Aprs => "\x1f00A",
+        Screen::TxId => "\x1f0E8",
     }
 }
 
 /// One user-visible build identity for the header and the About page.
-pub const VERSION: &str = "0.1.8-r35";
+pub const VERSION: &str = "0.1.8-r36";
 /// Header has a fixed 42 px slot; About shows the full string.
-pub const VERSION_SHORT: &str = "R35";
+pub const VERSION_SHORT: &str = "R36";
 
-fn crossband(row: u16, out: &mut [u16; WIDTH], view: View) {
+fn crossband(row: u16, out: &mut Row<'_>, view: View) {
     let (status, tint) = match view.crossband_probe {
-        CrossbandProbe::Starting => ("ПРОВЕРКА ТРАКТА", color::ACCENT),
-        CrossbandProbe::InvalidPair => ("НУЖНА ПАРА VHF И UHF", color::WARNING),
-        CrossbandProbe::InvalidProbeChannels => ("ВЫБЕРИТЕ A, НАСТРОЙТЕ B В FM", color::WARNING),
-        CrossbandProbe::BusError => ("ОШИБКА ВТОРОГО BK4819", color::BAD),
-        CrossbandProbe::Stopped => ("РЕЖИМ ОСТАНОВЛЕН", color::MUTED),
+        CrossbandProbe::Starting => ("\x1f0F7", color::ACCENT),
+        CrossbandProbe::InvalidPair => ("\x1f0C2", color::WARNING),
+        CrossbandProbe::InvalidProbeChannels => ("\x1f058", color::WARNING),
+        CrossbandProbe::BusError => ("\x1f0D6", color::BAD),
+        CrossbandProbe::Stopped => ("\x1f106", color::MUTED),
         CrossbandProbe::Measuring {
             a_rx,
             b_rx,
@@ -1260,19 +1273,19 @@ fn crossband(row: u16, out: &mut [u16; WIDTH], view: View) {
             status,
             tone_match,
         } => {
-            centered(row, out, 65, 2, "ТЕСТ RX B", color::ACCENT);
+            centered(row, out, 65, 2, "\x1f12E", color::ACCENT);
             for (y, label, value) in [(124, "A RX", a_rx), (152, "B RX", b_rx)] {
                 let mut line = Text::new();
-                let _ = write!(line, "{label}  {} МГЦ", frequency(value).as_str());
+                let _ = write!(line, "{label}  {} \x1f09A", frequency(value).as_str());
                 centered(row, out, y, 1, line.as_str(), color::TEXT);
             }
             let mut line = Text::new();
             let _ = write!(line, "B RSSI {rssi}   0C {status:04X}");
             centered(row, out, 169, 1, line.as_str(), color::TEXT);
             match tone_match {
-                Some(true) => ("СУБТОН ОБНАРУЖЕН", color::GOOD),
-                Some(false) => ("ОЖИДАНИЕ СУБТОНА", color::MUTED),
-                None => ("СУБТОН НЕ ЗАДАН", color::MUTED),
+                Some(true) => ("\x1f12D", color::GOOD),
+                Some(false) => ("\x1f0CE", color::MUTED),
+                None => ("\x1f12C", color::MUTED),
             }
         }
         CrossbandProbe::Ready {
@@ -1282,26 +1295,26 @@ fn crossband(row: u16, out: &mut [u16; WIDTH], view: View) {
             live,
         } => {
             let (direction, left, right) = match traffic {
-                Some((Slot::A, rx, tx)) => ("A → B", ("ВХОД", rx), ("ВЫХОД", tx)),
-                Some((Slot::B, rx, tx)) => ("B → A", ("ВХОД", rx), ("ВЫХОД", tx)),
+                Some((Slot::A, rx, tx)) => ("A → B", ("\x1f057", rx), ("\x1f061", tx)),
+                Some((Slot::B, rx, tx)) => ("B → A", ("\x1f057", rx), ("\x1f061", tx)),
                 None => ("A / B", ("A RX", a_rx), ("B RX", b_rx)),
             };
             centered(row, out, 65, 2, direction, color::ACCENT);
             if !live {
-                centered(row, out, 93, 1, "ТЕСТ. ПЕРЕДАЧА ВЫКЛЮЧЕНА", color::WARNING);
+                centered(row, out, 93, 1, "\x1f12F", color::WARNING);
             }
             for (y, (label, value)) in [(124, left), (152, right)] {
                 let freq = frequency(value);
                 let mut line = Text::new();
-                let _ = write!(line, "{label}  {} МГЦ", freq.as_str());
+                let _ = write!(line, "{label}  {} \x1f09A", freq.as_str());
                 centered(row, out, y, 1, line.as_str(), color::TEXT);
             }
             if traffic.is_some() && live {
-                ("РЕТРАНСЛЯЦИЯ", color::GOOD)
+                ("\x1f107", color::GOOD)
             } else if traffic.is_some() {
-                ("СИГНАЛ НА ВХОДЕ", color::GOOD)
+                ("\x1f113", color::GOOD)
             } else {
-                ("ОЖИДАНИЕ СИГНАЛА", color::MUTED)
+                ("\x1f0CD", color::MUTED)
             }
         }
     };
@@ -1366,14 +1379,7 @@ const GRAPH_WIDTH: usize = 216;
 const GRAPH_TOP: u16 = 116;
 const GRAPH_BOTTOM: u16 = 175;
 const SPECTRUM_MENU_LABELS: [&str; 8] = [
-    "СЛУШАТЬ КУРСОР",
-    "ПРИНЯТЬ В VFO",
-    "БОЛЬШЕ ТОЧЕК",
-    "МЕНЬШЕ ТОЧЕК",
-    "ШАГ БОЛЬШЕ",
-    "ШАГ МЕНЬШЕ",
-    "СБРОСИТЬ ПИКИ",
-    "ЗАКРЫТЬ ОБЗОР",
+    "\x1f121", "\x1f0F4", "\x1f048", "\x1f09B", "\x1f13B", "\x1f13C", "\x1f10B", "\x1f07A",
 ];
 
 fn spectrum_bin_x(index: usize, len: usize) -> usize {
@@ -1396,7 +1402,7 @@ fn spectrum_level_y(raw: u16, low: u16, high: u16) -> u16 {
 
 fn khz(value_10hz: u32) -> Text {
     let mut text = Text::new();
-    let _ = write!(text, "{}.{:02}кГц", value_10hz / 100, value_10hz % 100);
+    let _ = write!(text, "{}.{:02}\x1f142", value_10hz / 100, value_10hz % 100);
     text
 }
 
@@ -1434,7 +1440,7 @@ fn spectrum_menu_value(model: &Model<'_>, view: Option<SpectrumView<'_>>, option
 
 fn spectrum_menu_overlay(
     row: u16,
-    out: &mut [u16; WIDTH],
+    out: &mut Row<'_>,
     view: Option<SpectrumView<'_>>,
     model: &Model<'_>,
 ) -> bool {
@@ -1480,25 +1486,25 @@ fn spectrum_menu_overlay(
     true
 }
 
-fn spectrum_geometry(row: u16, out: &mut [u16; WIDTH], step_10hz: u32, span_10hz: u32) {
+fn spectrum_geometry(row: u16, out: &mut Row<'_>, step_10hz: u32, span_10hz: u32) {
     let (top, label, value) = if (71..85).contains(&row) {
-        (71, "ШАГ", step_10hz)
+        (71, "\x1f13A", step_10hz)
     } else if (87..101).contains(&row) {
-        (87, "ПОЛОСА", span_10hz)
+        (87, "\x1f0EC", span_10hz)
     } else {
         return;
     };
     let mut line = Text::new();
     let (whole, hundredths) = (value / 100, value % 100);
     if hundredths == 0 {
-        let _ = write!(line, "{label} {whole} КГЦ");
+        let _ = write!(line, "{label} {whole} \x1f08E");
     } else {
-        let _ = write!(line, "{label} {whole}.{hundredths:02} КГЦ");
+        let _ = write!(line, "{label} {whole}.{hundredths:02} \x1f08E");
     }
     centered(row, out, top, 2, line.as_str(), color::TEXT);
 }
 
-fn spectrum(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn spectrum(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     let menu = model.view.spectrum_menu;
     let Some(view) = model.spectrum else {
         let step = STEP_10HZ
@@ -1523,23 +1529,16 @@ fn spectrum(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
             );
         }
         if !menu && (110..117).contains(&row) {
-            centered(row, out, 110, 1, "MENU: ПОЛОСА И ШАГ", color::MUTED);
+            centered(row, out, 110, 1, "\x1f02C", color::MUTED);
         }
         if menu {
             spectrum_menu_overlay(row, out, None, model);
         }
         if model.view.notice == Notice::None {
             if menu {
-                centered(
-                    row,
-                    out,
-                    269,
-                    1,
-                    "MENU: ПРИНЯТЬ  EXIT: НАЗАД",
-                    color::ACCENT,
-                );
+                centered(row, out, 269, 1, "\x1f02D", color::ACCENT);
             } else {
-                centered(row, out, 269, 1, "EXIT: ВЕРНУТЬСЯ", color::MUTED);
+                centered(row, out, 269, 1, "\x1f015", color::MUTED);
             }
         }
         return;
@@ -1557,13 +1556,13 @@ fn spectrum(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
                 let at = view.frequency_10hz(index).unwrap_or(0);
                 let _ = write!(
                     line,
-                    "ПРОХОД {}  СИЛЬН {} {raw:3}",
+                    "\x1f0F8 {}  \x1f114 {} {raw:3}",
                     view.plot.sweep,
                     frequency(at).as_str()
                 );
             }
             None => {
-                let _ = write!(line, "ПРОХОД {}  СИЛЬН: НЕТ ДАННЫХ", view.plot.sweep);
+                let _ = write!(line, "\x1f0F8 {}  \x1f115", view.plot.sweep);
             }
         }
         centered(row, out, 104, 1, line.as_str(), color::WARNING);
@@ -1626,7 +1625,7 @@ fn spectrum(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
             let mut label = Text::new();
             let _ = write!(label, "{}.{:03}", khz / 1000, khz % 1000);
             let label = label.as_str();
-            let width = text_width(label, 1);
+            let width = localized_width(label, 1, out.language);
             let x = match align {
                 0 => GRAPH_X,
                 1 => (WIDTH - width) / 2,
@@ -1652,26 +1651,22 @@ fn spectrum(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
         if view.plot.valid(index) {
             let _ = write!(
                 reading,
-                "RSSI {:3}   {} МС   {} ТОЧЕК",
+                "RSSI {:3}   {} \x1f0A2   {} \x1f134",
                 view.plot.latest[index], view.plot.elapsed_ms, view.len
             );
         } else {
-            let _ = reading.write_str("RSSI ---   ОЖИДАНИЕ ЗАМЕРОВ");
+            let _ = reading.write_str("\x1f038");
         }
         centered(row, out, 255, 1, reading.as_str(), color::TEXT);
     }
     if !menu && (264..271).contains(&row) {
         let mut info = Text::new();
         let mode = if model.view.spectrum_auto_listen {
-            "АВТОЗВУК"
+            "\x1f03C"
         } else {
-            "АВТООБЗОР"
+            "\x1f03D"
         };
-        let _ = write!(
-            info,
-            "{mode} #  ПОРОГ +{}  4+ 5−",
-            model.view.spectrum_trigger
-        );
+        let _ = write!(info, "{mode} \x1f000{}  4+ 5−", model.view.spectrum_trigger);
         centered(row, out, 264, 1, info.as_str(), color::MUTED);
     }
     if menu {
@@ -1679,58 +1674,51 @@ fn spectrum(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
     }
     if model.view.notice == Notice::None {
         if menu {
-            centered(
-                row,
-                out,
-                269,
-                1,
-                "MENU: ПРИНЯТЬ  EXIT: НАЗАД",
-                color::ACCENT,
-            );
+            centered(row, out, 269, 1, "\x1f02D", color::ACCENT);
             centered(
                 row,
                 out,
                 283,
                 1,
                 if model.view.spectrum_listening {
-                    "↑↓: ВЫБОР  ЗВУК ВКЛ"
+                    "\x1f146"
                 } else {
-                    "↑↓: ВЫБОР  ЗВУК ВЫКЛ"
+                    "\x1f147"
                 },
                 color::MUTED,
             );
         } else {
             let (status, foreground) = match spectrum_phase(model) {
-                Some(SpectrumPhase::Pending) => ("ПОДГОТОВКА ПРОСЛУШИВАНИЯ", color::WARNING),
-                Some(SpectrumPhase::Preparing) => ("ПОДГОТОВКА ПРИЁМНИКА", color::WARNING),
+                Some(SpectrumPhase::Pending) => ("\x1f0E4", color::WARNING),
+                Some(SpectrumPhase::Preparing) => ("\x1f0E3", color::WARNING),
                 Some(SpectrumPhase::Sweeping) if view.plot.held_bin.is_some() => {
-                    ("ПИК ПОЙМАН  0 ПРОДОЛЖИТЬ", color::WARNING)
+                    ("\x1f0E0", color::WARNING)
                 }
-                Some(SpectrumPhase::Sweeping) => ("↑↓ КУРСОР  1/7 ШАГ  2/8 ПОЛОСА", color::ACCENT),
-                Some(SpectrumPhase::Listening) => ("СЛУШАЕМ  0 ПРОДОЛЖИТЬ", color::GOOD),
-                Some(SpectrumPhase::Restoring) => ("ВОССТАНОВЛЕНИЕ ПРИЁМА", color::WARNING),
-                Some(SpectrumPhase::Stopped) => ("ОБЗОР ОСТАНОВЛЕН", color::MUTED),
-                Some(SpectrumPhase::Failed) => ("ОШИБКА ОБЗОРА", color::BAD),
-                None => ("ОБЗОР ОСТАНОВЛЕН", color::MUTED),
+                Some(SpectrumPhase::Sweeping) => ("\x1f143", color::ACCENT),
+                Some(SpectrumPhase::Listening) => ("\x1f120", color::GOOD),
+                Some(SpectrumPhase::Restoring) => ("\x1f054", color::WARNING),
+                Some(SpectrumPhase::Stopped) => ("\x1f0C5", color::MUTED),
+                Some(SpectrumPhase::Failed) => ("\x1f0D7", color::BAD),
+                None => ("\x1f0C5", color::MUTED),
             };
             centered(row, out, 274, 1, status, foreground);
             let keys = if spectrum_phase(model) == Some(SpectrumPhase::Sweeping) {
-                "3/9 СДВИГ  6 СЛУШАТЬ  * VFO"
+                "\x1f006"
             } else if spectrum_phase(model) == Some(SpectrumPhase::Listening) {
-                "* VFO  EXIT НАЗАД"
+                "\x1f001"
             } else {
-                "PTT: СТОП, БЕЗ ПЕРЕДАЧИ"
+                "\x1f036"
             };
             centered(row, out, 283, 1, keys, color::MUTED);
         }
     }
 }
 
-fn shortwave(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn shortwave(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     use crate::controller::{ShortwaveMode, ShortwaveStatus, SW_BANDS};
     let view = model.view;
     if let Some(draft) = view.shortwave_band_draft {
-        centered(row, out, 52, 2, "ДИАПАЗОНЫ", color::TEXT);
+        centered(row, out, 52, 2, "\x1f06A", color::TEXT);
         for (index, &(name, low, high, _)) in SW_BANDS.iter().enumerate() {
             let y = 74 + index as u16 * 20;
             if !(y..y + 17).contains(&row) {
@@ -1753,7 +1741,7 @@ fn shortwave(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
             );
             let mut line = Text::new();
             if index == usize::from(crate::controller::SW_FM_BAND) {
-                let _ = write!(line, "{name}  {}-{} МГЦ", low / 1000, high / 1000);
+                let _ = write!(line, "{name}  {}-{} \x1f09A", low / 1000, high / 1000);
             } else {
                 let _ = write!(line, "{name}  {low}-{high}");
             }
@@ -1792,88 +1780,86 @@ fn shortwave(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
         132,
         2,
         if fm && view.shortwave_entry.is_none() {
-            "МГЦ"
+            "\x1f09A"
         } else {
-            "КГЦ"
+            "\x1f08E"
         },
         color::MUTED,
     );
     let mut hint = Text::new();
     if view.shortwave_entry.is_some() {
-        let _ = hint.write_str("MENU ПОДТВЕРДИТЬ КГЦ");
+        let _ = hint.write_str("\x1f025");
     } else {
         let step = view.shortwave_step_hz(view.shortwave_scan);
         let label = if view.shortwave_scan {
-            "ШАГ СКАНА"
+            "\x1f13E"
         } else {
-            "↑↓ ШАГ"
+            "\x1f145"
         };
         if step < 1000 {
-            let _ = write!(hint, "{label} {step} ГЦ");
+            let _ = write!(hint, "{label} {step} \x1f065");
         } else if step % 1000 == 0 {
-            let _ = write!(hint, "{label} {} КГЦ", step / 1000);
+            let _ = write!(hint, "{label} {} \x1f08E", step / 1000);
         } else {
-            let _ = write!(hint, "{label} {}.{} КГЦ", step / 1000, step % 1000 / 100);
+            let _ = write!(
+                hint,
+                "{label} {}.{} \x1f08E",
+                step / 1000,
+                step % 1000 / 100
+            );
         }
     }
     centered(row, out, 155, 1, hint.as_str(), color::ACCENT);
     if view.shortwave_mode.is_ssb() {
         let mut bfo = Text::new();
-        let _ = write!(bfo, "BFO {:+} ГЦ", view.shortwave_bfo);
+        let _ = write!(bfo, "BFO {:+} \x1f065", view.shortwave_bfo);
         centered(row, out, 167, 1, bfo.as_str(), color::MUTED);
     }
     let mut signal = Text::new();
     let (state, foreground) = match view.shortwave_status {
         ShortwaveStatus::Recovering(code) => {
-            let _ = write!(signal, "КОД {code:02X}");
-            ("ПОВТОР ЗАПУСКА", color::WARNING)
+            let _ = write!(signal, "\x1f096 {code:02X}");
+            ("\x1f0E2", color::WARNING)
         }
         ShortwaveStatus::Patching(percent) => {
             let _ = write!(signal, "{percent}%   SI4732");
-            ("ЗАГРУЗКА SSB", color::WARNING)
+            ("\x1f079", color::WARNING)
         }
         ShortwaveStatus::Starting | ShortwaveStatus::Listening { .. } if view.shortwave_scan => {
-            ("СКАНИРОВАНИЕ", color::ACCENT)
+            ("\x1f118", color::ACCENT)
         }
-        ShortwaveStatus::Starting => ("НАСТРОЙКА SI4732", color::MUTED),
+        ShortwaveStatus::Starting => ("\x1f0AD", color::MUTED),
         ShortwaveStatus::Listening { part, rssi, snr } => {
             let _ = write!(signal, "ID {part:02X}   RSSI {rssi}   SNR {snr}");
-            ("ПРИЁМ", color::GOOD)
+            ("\x1f0EF", color::GOOD)
         }
         ShortwaveStatus::Fault(code) => {
-            let _ = write!(signal, "КОД {code:02X}   MENU ПОВТОР");
-            ("ОШИБКА ТЮНЕРА", color::BAD)
+            let _ = write!(signal, "\x1f096 {code:02X}   \x1f023");
+            ("\x1f0DA", color::BAD)
         }
     };
     centered(row, out, 184, 2, state, foreground);
     centered(row, out, 213, 1, signal.as_str(), color::MUTED);
     shortwave_processing_label(row, out, view, 238);
-    centered(
-        row,
-        out,
-        252,
-        1,
-        "* РЕЖИМ   # СКАН   ДОЛГО # ДИАП.",
-        color::ACCENT,
-    );
+    centered(row, out, 252, 1, "\x1f002", color::ACCENT);
     centered(
         row,
         out,
         266,
         1,
         if view.shortwave_mode == ShortwaveMode::Am {
-            "ДОЛГО 0 ВОДОПАД  1 ФИЛЬТР  2 SM"
+            "\x1f070"
         } else if view.shortwave_mode.is_ssb() {
-            "ДОЛГО 0 ВОДОПАД  1/3 BFO  2 СБРОС"
+            "\x1f071"
         } else {
-            "ДОЛГО 0: ВОДОПАД"
+            "\x1f072"
         },
         color::MUTED,
     );
-    centered(row, out, 280, 1, "КНОПКА ПОД PTT B: ШАГ", color::ACCENT);
+    centered(row, out, 280, 1, "\x1f093", color::ACCENT);
 }
 
-fn home(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn home(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     slot_card(row, out, model, Slot::A);
     slot_card(row, out, model, Slot::B);
 }
@@ -1908,7 +1894,7 @@ fn slot_content<'a>(model: &Model<'a>, slot: Slot) -> PeerView<'a> {
 }
 
 #[inline(never)]
-fn slot_card(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>, slot: Slot) {
+fn slot_card(row: u16, out: &mut Row<'_>, model: &Model<'_>, slot: Slot) {
     let (top, end) = home_slot_rows(slot);
     if !(top..end).contains(&row) {
         return;
@@ -1971,12 +1957,12 @@ fn slot_card(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>, slot: Slot) {
         text(row, out, 38, top + 7, 1, mode.as_str(), color::TEXT);
         let mut zone = Text::new();
         if content.zone.is_none() {
-            let _ = zone.write_str("ЗОНА: ВСЕ");
+            let _ = zone.write_str("\x1f07F");
         } else if let Some(name) = content.zone_name {
             let decoded = channel_name(name);
-            let _ = write!(zone, "ЗОНА: {}", decoded.as_str());
+            let _ = write!(zone, "\x1f07E {}", decoded.as_str());
         } else {
-            let _ = write!(zone, "ЗОНА: {}", u16::from(content.zone.unwrap()) + 1);
+            let _ = write!(zone, "\x1f07E {}", u16::from(content.zone.unwrap()) + 1);
         }
         text(row, out, 96, top + 7, 1, zone.as_str(), color::MUTED);
     }
@@ -1985,15 +1971,15 @@ fn slot_card(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>, slot: Slot) {
     if (name_y..name_y + 14).contains(&row) {
         let decoded = channel_name(content.name);
         let label = match entry.map(|entry| entry.kind) {
-            Some(EntryKind::Channel) => "НОМЕР КАНАЛА",
-            Some(EntryKind::Frequency) => "ВВОД ЧАСТОТЫ",
+            Some(EntryKind::Channel) => "\x1f0C0",
+            Some(EntryKind::Frequency) => "\x1f04B",
             None if content.mode == Mode::Vfo => "",
-            None if content.channel.is_none() => "НЕТ КАНАЛА",
+            None if content.channel.is_none() => "\x1f0B5",
             None => decoded.as_str(),
         };
         text(row, out, 14, name_y, 2, label, color::TEXT);
         if entry.is_none() {
-            text(row, out, 208, name_y + 6, 1, "МГЦ", color::MUTED);
+            text(row, out, 208, name_y + 6, 1, "\x1f09A", color::MUTED);
         }
     }
     let (frequency_start, frequency_end) = home_frequency_rows(slot);
@@ -2015,15 +2001,7 @@ fn slot_card(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>, slot: Slot) {
         );
     }
     if entry.is_some() {
-        text(
-            row,
-            out,
-            16,
-            top + HOME_METER_Y,
-            1,
-            "MENU: ПРИНЯТЬ  EXIT: ОТМЕНА",
-            color::MUTED,
-        );
+        text(row, out, 16, top + HOME_METER_Y, 1, "\x1f02E", color::MUTED);
         return;
     }
     if active {
@@ -2063,7 +2041,11 @@ fn slot_card(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>, slot: Slot) {
         }
         if content.mode == Mode::Vfo && (top + HOME_META_Y..top + HOME_META_Y + 7).contains(&row) {
             let mut info = Text::new();
-            let _ = write!(info, "ШАГ {} КГЦ", step_label(model.view.step_index));
+            let _ = write!(
+                info,
+                "\x1f13A {} \x1f08E",
+                step_label(model.view.step_index)
+            );
             text(
                 row,
                 out,
@@ -2121,7 +2103,7 @@ impl MeterReading {
 
 /// Shared ruled 10+2 geometry for RX relative level and confirmed TX setting.
 /// A saved peer slot has no live RF report, so its bar stays visibly empty.
-fn slot_meter(row: u16, out: &mut [u16; WIDTH], top: u16, reading: MeterReading) {
+fn slot_meter(row: u16, out: &mut Row<'_>, top: u16, reading: MeterReading) {
     if !(top..top + 15).contains(&row) {
         return;
     }
@@ -2244,12 +2226,12 @@ fn home_frequency(model: &Model<'_>) -> Option<u32> {
     }
 }
 
-fn home_status(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn home_status(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     if model.view.scan != ScanState::Stopped {
         let label = match model.view.scan {
-            ScanState::Requested => "СКАНИРОВАНИЕ: ЗАПУСК",
-            ScanState::Running => "СКАНИРОВАНИЕ",
-            ScanState::Stopping => "СКАНИРОВАНИЕ: СТОП",
+            ScanState::Requested => "\x1f119",
+            ScanState::Running => "\x1f118",
+            ScanState::Stopping => "\x1f11A",
             ScanState::Stopped => "",
         };
         centered(row, out, 9, 1, label, color::GOOD);
@@ -2257,7 +2239,7 @@ fn home_status(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
             symbol(row, out, 208, 5, Symbol::Scan, color::GOOD);
         }
     } else if model.radio.monitor {
-        centered(row, out, 9, 1, "MON  ·  EXIT ВЫКЛ", color::GOOD);
+        centered(row, out, 9, 1, "\x1f030", color::GOOD);
     } else if model.radio.tx_trial {
         centered(row, out, 9, 1, "TX TEST: CH002 / A / 5S", color::WARNING);
     }
@@ -2280,7 +2262,7 @@ enum Symbol {
     SlotB,
 }
 
-fn symbol(row: u16, out: &mut [u16; WIDTH], x: usize, y: u16, symbol: Symbol, color: u16) {
+fn symbol(row: u16, out: &mut Row<'_>, x: usize, y: u16, symbol: Symbol, color: u16) {
     if !(y..y + 16).contains(&row) {
         return;
     }
@@ -2356,66 +2338,56 @@ fn menu_start(index: u8) -> usize {
 
 fn setting_title(setting: Setting) -> &'static str {
     match setting {
-        Setting::BandPreset => "ДИАПАЗОН VFO",
-        Setting::GpsEnable => "ПИТАНИЕ GPS",
-        Setting::GpsBaud => "СКОРОСТЬ GPS",
-        Setting::TxTail => "СИГНАЛ В КОНЦЕ TX",
-        Setting::Dtmf => "DTMF ПРИ ПЕРЕДАЧЕ",
-        Setting::TopKey => "КНОПКА НАД ЭКРАНОМ",
-        Setting::BottomKey => "КНОПКА ПОД PTT B",
-        Setting::Shift => "РАЗНОС VFO",
-        Setting::TxTone => "ТОН ПЕРЕДАЧИ VFO",
-        Setting::Mode => "РЕЖИМ КАНАЛ / VFO",
-        Setting::Power => "МОЩНОСТЬ",
-        Setting::Monitor => "МОНИТОР",
-        Setting::Modulation => "РЕЖИМ FM / AM",
-        Setting::Reverse => "РЕВЕРС RX / TX",
-        Setting::ActiveSlot => "АКТИВНЫЙ СЛОТ",
-        Setting::Scan => "СКАНИРОВАНИЕ",
-        Setting::DisplayLight => "ПОДСВЕТКА ЭКРАНА",
-        Setting::KeyLight => "ПОДСВЕТКА КНОПОК",
+        Setting::BandPreset => "\x1f069",
+        Setting::GpsEnable => "\x1f0E1",
+        Setting::GpsBaud => "\x1f11C",
+        Setting::TxTail => "\x1f111",
+        Setting::Dtmf => "\x1f00F",
+        Setting::Language => "\x1f141",
+        Setting::TopKey => "\x1f091",
+        Setting::BottomKey => "\x1f092",
+        Setting::Shift => "\x1f101",
+        Setting::TxTone => "\x1f133",
+        Setting::Mode => "\x1f105",
+        Setting::Power => "\x1f0A0",
+        Setting::Monitor => "\x1f09F",
+        Setting::Modulation => "\x1f104",
+        Setting::Reverse => "\x1f102",
+        Setting::ActiveSlot => "\x1f03F",
+        Setting::Scan => "\x1f118",
+        Setting::DisplayLight => "\x1f0E6",
+        Setting::KeyLight => "\x1f0E5",
     }
 }
 
 fn setting_options(setting: Setting) -> &'static [&'static str] {
     match setting {
+        Setting::Language => &["\x1f108", "ENGLISH", "DEUTSCH"],
         Setting::BandPreset => &[
             "VHF / 145.500",
             "UHF / 433.500",
             "CB / 27.135 AM",
             "800 / 850.000 FM",
         ],
-        Setting::GpsEnable | Setting::Dtmf => &["ВЫКЛЮЧЕН", "ВКЛЮЧЕН"],
+        Setting::GpsEnable | Setting::Dtmf => &["\x1f05E", "\x1f04F"],
         Setting::GpsBaud => &[
             "4800", "9600", "14400", "19200", "38400", "56000", "57600", "115200", "128000",
             "256000",
         ],
-        Setting::TxTail => &["ВЫКЛЮЧЕН", "5-TONE ZVEI-1", "5-TONE CCIR"],
-        Setting::TopKey | Setting::BottomKey => &["ВЫКЛ.", "МОНИТОР", "СКАНИРОВАНИЕ", "СПЕКТР"],
+        Setting::TxTail => &["\x1f05E", "5-TONE ZVEI-1", "5-TONE CCIR"],
+        Setting::TopKey | Setting::BottomKey => &["\x1f05D", "\x1f09F", "\x1f118", "\x1f123"],
         Setting::TxTone => &[],
         Setting::Shift => &[
-            "0 (СИМПЛЕКС)",
-            "-0.600 МГЦ",
-            "+0.600 МГЦ",
-            "-1.600 МГЦ",
-            "+1.600 МГЦ",
-            "-5.000 МГЦ",
-            "+5.000 МГЦ",
+            "\x1f005", "\x1f14B", "\x1f148", "\x1f14C", "\x1f149", "\x1f14D", "\x1f14A",
         ],
-        Setting::Mode => &["КАНАЛЫ", "ЧАСТОТА / VFO"],
-        Setting::Power => &["НИЗКАЯ (L)", "СРЕДНЯЯ (M)", "ВЫСОКАЯ (H)"],
-        Setting::Monitor | Setting::Reverse => &["ВЫКЛЮЧЕН", "ВКЛЮЧЕН"],
+        Setting::Mode => &["\x1f08A", "\x1f138"],
+        Setting::Power => &["\x1f0BD", "\x1f12A", "\x1f060"],
+        Setting::Monitor | Setting::Reverse => &["\x1f05E", "\x1f04F"],
         Setting::Modulation => &["FM", "AM"],
-        Setting::ActiveSlot => &["СЛОТ A", "СЛОТ B"],
-        Setting::Scan => &["ОСТАНОВИТЬ", "ЗАПУСТИТЬ"],
+        Setting::ActiveSlot => &["\x1f11D", "\x1f11E"],
+        Setting::Scan => &["\x1f0D0", "\x1f07C"],
         Setting::DisplayLight | Setting::KeyLight => &[
-            "ВЫКЛЮЧЕНА",
-            "ВКЛЮЧЕНА",
-            "5 СЕКУНД",
-            "10 СЕКУНД",
-            "20 СЕКУНД",
-            "30 СЕКУНД",
-            "60 СЕКУНД",
+            "\x1f05F", "\x1f050", "\x1f158", "\x1f14E", "\x1f154", "\x1f156", "\x1f159",
         ],
     }
 }
@@ -2452,7 +2424,7 @@ fn setting_uses_radio(setting: Option<Setting>) -> bool {
 /// This is the committed value, never the highlighted draft. For RF settings
 /// the backend must report an active state before the UI calls it confirmed.
 fn current_setting_label(model: &Model<'_>, setting: Setting) -> &'static str {
-    const UNKNOWN: &str = "НЕТ ПОДТВЕРЖДЕНИЯ";
+    const UNKNOWN: &str = "\x1f0B6";
     if setting_uses_radio(Some(setting))
         && !matches!(
             model.radio.state,
@@ -2462,11 +2434,12 @@ fn current_setting_label(model: &Model<'_>, setting: Setting) -> &'static str {
         return UNKNOWN;
     }
     let index = match setting {
-        Setting::BandPreset => return "ВЫБРАТЬ НАЧАЛЬНУЮ ЧАСТОТУ",
+        Setting::BandPreset => return "\x1f05C",
         Setting::GpsEnable => usize::from(model.view.gps_enabled),
         Setting::GpsBaud => usize::from(model.view.gps_baud),
         Setting::TxTail => usize::from(model.view.tx_tail),
         Setting::Dtmf => usize::from(model.view.dtmf_enabled),
+        Setting::Language => model.view.language as usize,
         Setting::TopKey => usize::from(model.view.top_action),
         Setting::BottomKey => usize::from(model.view.bottom_action),
         Setting::Shift => usize::from(model.view.shift_index),
@@ -2484,10 +2457,10 @@ fn current_setting_label(model: &Model<'_>, setting: Setting) -> &'static str {
         Setting::KeyLight => light_index(model.view.key_light),
         Setting::Scan => {
             return match model.view.scan {
-                ScanState::Stopped => "ОСТАНОВЛЕН",
-                ScanState::Requested => "ЗАПРОС ЗАПУСКА",
-                ScanState::Running => "СКАНИРУЕТ",
-                ScanState::Stopping => "ОСТАНОВКА",
+                ScanState::Stopped => "\x1f0D2",
+                ScanState::Requested => "\x1f07B",
+                ScanState::Running => "\x1f11B",
+                ScanState::Stopping => "\x1f0D1",
             }
         }
     };
@@ -2501,10 +2474,10 @@ fn ctcss_label(index: usize) -> Text {
     let mut text = Text::new();
     match TX_CTCSS.get(index) {
         Some(0) => {
-            let _ = text.write_str("ВЫКЛЮЧЕН");
+            let _ = text.write_str("\x1f05E");
         }
         Some(tone) => {
-            let _ = write!(text, "{}.{} ГЦ", tone / 10, tone % 10);
+            let _ = write!(text, "{}.{} \x1f065", tone / 10, tone % 10);
         }
         None => {
             let _ = text.write_str("?");
@@ -2513,7 +2486,7 @@ fn ctcss_label(index: usize) -> Text {
     text
 }
 
-fn setting(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn setting(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     let Some(setting) = model.view.setting else {
         return;
     };
@@ -2523,13 +2496,13 @@ fn setting(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
             .top_draft
             .map(key_label)
             .unwrap_or(if setting == Setting::TopKey {
-                "НАЖМИТЕ КНОПКУ НАД ЭКРАНОМ"
+                "\x1f0A5"
             } else {
-                "НАЖМИТЕ КНОПКУ ПОД PTT B"
+                "\x1f0A6"
             });
         text(row, out, 16, 62, 1, label, color::ACCENT);
     } else {
-        text(row, out, 16, 62, 1, "ВЫБЕРИТЕ ЗНАЧЕНИЕ", color::ACCENT);
+        text(row, out, 16, 62, 1, "\x1f059", color::ACCENT);
     }
     if (84..91).contains(&row) {
         let mut current = Text::new();
@@ -2540,7 +2513,7 @@ fn setting(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
         } else {
             current_setting_label(model, setting)
         };
-        let _ = write!(current, "СЕЙЧАС: {}", label);
+        let _ = write!(current, "\x1f110 {}", label);
         text(row, out, 16, 84, 1, current.as_str(), color::MUTED);
     }
     let (start, pitch, height) = setting_geometry(setting);
@@ -2589,64 +2562,57 @@ fn setting(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
     if setting.choice_count() > 3 {
         return;
     }
-    text(
-        row,
-        out,
-        16,
-        252,
-        1,
-        "ПРИМЕНЕНИЕ: ТОЛЬКО MENU",
-        color::MUTED,
-    );
+    text(row, out, 16, 252, 1, "\x1f0F3", color::MUTED);
 }
 
 pub fn menu_label(item: MenuItem) -> &'static str {
     match item {
-        MenuItem::BandPreset => "ДИАПАЗОН VFO",
-        MenuItem::Gps => "GPS КООРДИНАТЫ",
-        MenuItem::GpsEnable => "ПИТАНИЕ GPS",
-        MenuItem::GpsBaud => "СКОРОСТЬ GPS",
-        MenuItem::Aprs => "APRS МАЯК",
-        MenuItem::TxTail => "СИГНАЛ КОНЦА TX",
-        MenuItem::TxId => "НОМЕР SELECT V",
-        MenuItem::Dtmf => "DTMF КЛАВИШИ",
-        MenuItem::Mode => "КАНАЛ / ЧАСТОТА",
-        MenuItem::Channels => "СПИСОК КАНАЛОВ",
-        MenuItem::ChannelDetails => "ДАННЫЕ КАНАЛА",
-        MenuItem::TopKey => "КНОПКА СВЕРХУ",
-        MenuItem::BottomKey => "НИЖНЯЯ КНОПКА",
-        MenuItem::Shift => "РАЗНОС RX / TX",
-        MenuItem::TxTone => "ТОН ПЕРЕДАЧИ",
-        MenuItem::Step => "ШАГ ЧАСТОТЫ",
-        MenuItem::About => "О ПРОШИВКЕ",
-        MenuItem::Reverse => "РЕВЕРС RX / TX",
-        MenuItem::Scan => "СКАНИРОВАНИЕ",
-        MenuItem::Shortcuts => "ДОЛГИЕ КЛАВИШИ",
-        MenuItem::Power => "МОЩНОСТЬ L/M/H",
-        MenuItem::Monitor => "МОНИТОР",
-        MenuItem::Modulation => "РЕЖИМ FM / AM",
-        MenuItem::Zones => "ЗОНЫ КАНАЛОВ",
-        MenuItem::ActiveSlot => "ВЫБОР A / B",
-        MenuItem::SideKeys => "БОКОВЫЕ КНОПКИ",
-        MenuItem::DisplayLight => "СВЕТ ЭКРАНА",
-        MenuItem::KeyLight => "СВЕТ КНОПОК",
-        MenuItem::Spectrum => "СПЕКТР ЧАСТОТ",
-        MenuItem::Shortwave => "КВ ПРИЁМНИК",
+        MenuItem::BandPreset => "\x1f069",
+        MenuItem::Gps => "\x1f01B",
+        MenuItem::GpsEnable => "\x1f0E1",
+        MenuItem::GpsBaud => "\x1f11C",
+        MenuItem::Aprs => "\x1f00B",
+        MenuItem::TxTail => "\x1f112",
+        MenuItem::TxId => "\x1f0BF",
+        MenuItem::Dtmf => "\x1f00E",
+        MenuItem::Language => "\x1f141",
+        MenuItem::Mode => "\x1f087",
+        MenuItem::Channels => "\x1f126",
+        MenuItem::ChannelDetails => "\x1f066",
+        MenuItem::TopKey => "\x1f094",
+        MenuItem::BottomKey => "\x1f0BC",
+        MenuItem::Shift => "\x1f100",
+        MenuItem::TxTone => "\x1f132",
+        MenuItem::Step => "\x1f13F",
+        MenuItem::About => "\x1f0C3",
+        MenuItem::Reverse => "\x1f102",
+        MenuItem::Scan => "\x1f118",
+        MenuItem::Shortcuts => "\x1f06D",
+        MenuItem::Power => "\x1f0A1",
+        MenuItem::Monitor => "\x1f09F",
+        MenuItem::Modulation => "\x1f104",
+        MenuItem::Zones => "\x1f080",
+        MenuItem::ActiveSlot => "\x1f05B",
+        MenuItem::SideKeys => "\x1f047",
+        MenuItem::DisplayLight => "\x1f10D",
+        MenuItem::KeyLight => "\x1f10C",
+        MenuItem::Spectrum => "\x1f125",
+        MenuItem::Shortwave => "\x1f08D",
     }
 }
 
 pub fn menu_group_label(group: MenuGroup) -> &'static str {
     match group {
-        MenuGroup::Mode => "КАНАЛЫ / VFO",
-        MenuGroup::Receive => "ПРИЁМ И TX",
-        MenuGroup::Scanning => "ПОИСК / СПЕКТР",
-        MenuGroup::Keys => "КНОПКИ",
+        MenuGroup::Mode => "\x1f08B",
+        MenuGroup::Receive => "\x1f0F1",
+        MenuGroup::Scanning => "\x1f0EA",
+        MenuGroup::Keys => "\x1f095",
         MenuGroup::Navigation => "GPS / APRS",
-        MenuGroup::System => "СИСТЕМА / TX",
+        MenuGroup::System => "\x1f117",
     }
 }
 
-fn menu(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn menu(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     let start = menu_start(model.view.menu_index);
     let entries = menu_entries(model.view.menu_group);
     for (offset, &entry) in entries.iter().skip(start).take(LIST_ROWS).enumerate() {
@@ -2725,26 +2691,26 @@ fn menu(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
 
 pub fn shortcut_label(action: ShortcutAction) -> &'static str {
     match action {
-        ShortcutAction::None => "НЕ НАЗНАЧЕНО",
-        ShortcutAction::Power => "МОЩНОСТЬ L/M/H",
-        ShortcutAction::Monitor => "МОНИТОР",
-        ShortcutAction::Scan => "СКАНИРОВАНИЕ",
-        ShortcutAction::Reverse => "РЕВЕРС RX / TX",
-        ShortcutAction::Mode => "КАНАЛ / VFO",
-        ShortcutAction::Step => "ШАГ ЧАСТОТЫ",
-        ShortcutAction::Channels => "СПИСОК КАНАЛОВ",
-        ShortcutAction::Keys => "ПРОВЕРКА КНОПОК",
-        ShortcutAction::Lock => "БЛОКИРОВКА",
-        ShortcutAction::Modulation => "РЕЖИМ FM / AM",
-        ShortcutAction::Zones => "ЗОНЫ КАНАЛОВ",
-        ShortcutAction::SwitchSlot => "ВЫБОР A / B",
-        ShortcutAction::Spectrum => "СПЕКТР ЧАСТОТ",
-        ShortcutAction::Crossband => "КРОСС-БЭНД",
+        ShortcutAction::None => "\x1f0B0",
+        ShortcutAction::Power => "\x1f0A1",
+        ShortcutAction::Monitor => "\x1f09F",
+        ShortcutAction::Scan => "\x1f118",
+        ShortcutAction::Reverse => "\x1f102",
+        ShortcutAction::Mode => "\x1f086",
+        ShortcutAction::Step => "\x1f13F",
+        ShortcutAction::Channels => "\x1f126",
+        ShortcutAction::Keys => "\x1f0F6",
+        ShortcutAction::Lock => "\x1f042",
+        ShortcutAction::Modulation => "\x1f104",
+        ShortcutAction::Zones => "\x1f080",
+        ShortcutAction::SwitchSlot => "\x1f05B",
+        ShortcutAction::Spectrum => "\x1f125",
+        ShortcutAction::Crossband => "\x1f097",
         ShortcutAction::DualWatch => "DUAL WATCH A/B",
     }
 }
 
-fn shortcuts(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn shortcuts(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     let index = model.view.binding_index;
     let start = menu_start(index);
     for (offset, &action) in model
@@ -2787,14 +2753,14 @@ fn shortcuts(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
         );
     }
     if model.view.notice == Notice::None && (283..290).contains(&row) {
-        text(row, out, 16, 283, 1, "ДО ВЫКЛЮЧЕНИЯ", color::MUTED);
+        text(row, out, 16, 283, 1, "\x1f06B", color::MUTED);
         let mut count = Text::new();
         let _ = write!(count, "{} / {}", index + 1, model.view.bindings.len());
         text(row, out, 182, 283, 1, count.as_str(), color::MUTED);
     }
 }
 
-fn shortcut_actions(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn shortcut_actions(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     let index = model.view.binding_action_index;
     let start = menu_start(index);
     for (offset, &action) in SHORTCUT_ACTIONS
@@ -2823,16 +2789,16 @@ fn shortcut_actions(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
         let mut key = Text::new();
         let _ = write!(
             key,
-            "ДОЛГО {}: ВЫБЕРИТЕ ФУНКЦИЮ",
+            "\x1f06E {}\x1f008",
             binding_digit(model.view.binding_index).unwrap_or(0)
         );
         text(row, out, 16, 283, 1, key.as_str(), color::MUTED);
     }
 }
 
-fn zones(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn zones(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     if model.zones.is_empty() {
-        centered(row, out, 128, 2, "НЕТ СПИСКА ЗОН", color::TEXT);
+        centered(row, out, 128, 2, "\x1f0B8", color::TEXT);
         return;
     }
     for (offset, zone) in model.zones.iter().enumerate() {
@@ -2850,14 +2816,14 @@ fn zones(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
             y + 4,
             2,
             if zone.index.is_none() {
-                "ВСЕ КАНАЛЫ"
+                "\x1f056"
             } else {
                 name.as_str()
             },
             item_color(selected),
         );
         let mut count = Text::new();
-        let _ = write!(count, "КАНАЛОВ: {}", zone.channel_count);
+        let _ = write!(count, "\x1f089 {}", zone.channel_count);
         text(
             row,
             out,
@@ -2869,15 +2835,7 @@ fn zones(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
         );
     }
     if model.view.notice == Notice::None {
-        text(
-            row,
-            out,
-            16,
-            283,
-            1,
-            "ЗОНА ФИЛЬТРУЕТ СПИСОК КАНАЛОВ",
-            color::MUTED,
-        );
+        text(row, out, 16, 283, 1, "\x1f07D", color::MUTED);
     }
 }
 
@@ -2885,15 +2843,15 @@ pub fn side_action_label(action: SideAction) -> &'static str {
     match action {
         SideAction::PttA => "PTT A",
         SideAction::PttB => "PTT B",
-        SideAction::Active => "PTT ТЕКУЩИЙ A/B",
-        SideAction::Monitor => "МОНИТОР",
-        SideAction::Scan => "СКАНИРОВАНИЕ",
-        SideAction::Power => "МОЩНОСТЬ L/M/H",
-        SideAction::None => "НЕ НАЗНАЧЕНО",
+        SideAction::Active => "\x1f032",
+        SideAction::Monitor => "\x1f09F",
+        SideAction::Scan => "\x1f118",
+        SideAction::Power => "\x1f0A1",
+        SideAction::None => "\x1f0B0",
     }
 }
 
-fn side_keys(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn side_keys(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     for (index, &action) in model.view.side_bindings.iter().enumerate() {
         let y = LIST_Y + index as u16 * LIST_ROW_HEIGHT;
         if row < y || row >= y + LIST_ROW_HEIGHT {
@@ -2921,37 +2879,21 @@ fn side_keys(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
         );
     }
     for (y, label) in [
-        (154, "PTT A / PTT B: СЛОТ ПЕРЕДАЧИ"),
-        (178, "PTT ТЕКУЩИЙ: АКТИВНЫЙ A/B"),
-        (210, "ДОЛГО *: ПЕРЕКЛЮЧИТЬ A/B"),
-        (248, "ИЗМЕНЕНИЯ ДО ВЫКЛЮЧЕНИЯ"),
+        (154, "\x1f031"),
+        (178, "\x1f033"),
+        (210, "\x1f06F"),
+        (248, "\x1f081"),
     ] {
         text(row, out, 16, y, 1, label, color::MUTED);
     }
     if model.lower_side_mapped {
-        text(
-            row,
-            out,
-            16,
-            124,
-            1,
-            "НИЖНИЙ ВХОД: ПОДТВЕРЖДЁН",
-            color::GOOD,
-        );
+        text(row, out, 16, 124, 1, "\x1f0BA", color::GOOD);
     } else {
-        text(
-            row,
-            out,
-            16,
-            124,
-            1,
-            "НИЖНИЙ ВХОД НЕ ОПРЕДЕЛЁН",
-            color::WARNING,
-        );
+        text(row, out, 16, 124, 1, "\x1f0B9", color::WARNING);
     }
 }
 
-fn side_actions(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn side_actions(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     for (index, &action) in SIDE_ACTIONS.iter().enumerate() {
         let y = LIST_Y + index as u16 * LIST_ROW_HEIGHT;
         if row < y || row >= y + LIST_ROW_HEIGHT {
@@ -2977,19 +2919,19 @@ fn side_actions(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
             283,
             1,
             if model.view.side_index == 0 {
-                "НАЗНАЧЕНИЕ ВЕРХНЕЙ КНОПКИ"
+                "\x1f0A9"
             } else {
-                "НАЗНАЧЕНИЕ НИЖНЕЙ КНОПКИ"
+                "\x1f0AA"
             },
             color::MUTED,
         );
     }
 }
 
-fn channels(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn channels(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     if model.list.is_empty() {
-        centered(row, out, 128, 2, "СПИСОК ПУСТ", color::TEXT);
-        centered(row, out, 163, 1, "СОХРАНЁННЫХ КАНАЛОВ НЕТ", color::MUTED);
+        centered(row, out, 128, 2, "\x1f127", color::TEXT);
+        centered(row, out, 163, 1, "\x1f122", color::MUTED);
         return;
     }
     for (offset, channel) in model.list.iter().enumerate() {
@@ -3040,14 +2982,14 @@ fn channels(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
                 value.as_str(),
                 item_color(selected),
             );
-            text(row, out, 108, y + 22, 1, "МГЦ", item_color(selected));
+            text(row, out, 108, y + 22, 1, "\x1f09A", item_color(selected));
         }
     }
 }
 
-fn details(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn details(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     let Some(channel) = model.channel else {
-        centered(row, out, 128, 2, "КАНАЛ НЕ ВЫБРАН", color::TEXT);
+        centered(row, out, 128, 2, "\x1f088", color::TEXT);
         return;
     };
     let reversed = model.view.mode == Mode::Channel && model.view.reverse;
@@ -3056,9 +2998,9 @@ fn details(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
         let mut number = Text::new();
         let _ = write!(
             number,
-            "КАНАЛ {:04}{}",
+            "\x1f085 {:04}{}",
             channel.index + 1,
-            if reversed { " / R РЕВЕРС" } else { "" }
+            if reversed { " \x1f003" } else { "" }
         );
         text(row, out, 16, 60, 1, number.as_str(), color::MUTED);
     }
@@ -3066,7 +3008,7 @@ fn details(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
         let name = channel_name(channel.name);
         text(row, out, 16, 80, 2, name.as_str(), color::TEXT);
     }
-    text(row, out, 16, 112, 1, "ПРИЁМ / МГЦ", color::MUTED);
+    text(row, out, 16, 112, 1, "\x1f0F0", color::MUTED);
     if (130..151).contains(&row) {
         text(row, out, 16, 130, 3, frequency(rx).as_str(), color::ACCENT);
     }
@@ -3081,7 +3023,7 @@ fn details(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
             color::TEXT,
         );
     }
-    text(row, out, 16, 185, 1, "ПЕРЕДАЧА / МГЦ", color::MUTED);
+    text(row, out, 16, 185, 1, "\x1f0DC", color::MUTED);
     if (203..224).contains(&row) {
         text(row, out, 16, 203, 3, frequency(tx).as_str(), color::TEXT);
     }
@@ -3104,7 +3046,7 @@ fn details(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
         let mut flags = Text::new();
         let _ = write!(
             flags,
-            "ПОЛОСА {} / МОЩНОСТЬ {}",
+            "\x1f0EC {} \x1f004 {}",
             bandwidth_label(channel.bandwidth_raw),
             power_label(channel.power_raw)
         );
@@ -3124,7 +3066,7 @@ pub fn step_label(index: u8) -> &'static str {
     }
 }
 
-fn steps(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn steps(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     for index in 0..STEP_10HZ.len() {
         let y = 62 + index as u16 * 33;
         if row < y || row >= y + LIST_ROW_HEIGHT {
@@ -3136,33 +3078,25 @@ fn steps(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
             continue;
         }
         let mut label = Text::new();
-        let _ = write!(label, "{} КГЦ", step_label(index as u8));
+        let _ = write!(label, "{} \x1f08E", step_label(index as u8));
         text(row, out, 24, y + 8, 2, label.as_str(), item_color(selected));
     }
-    text(row, out, 16, 281, 1, "ШАГ РУЧНОГО РЕЖИМА VFO", color::MUTED);
+    text(row, out, 16, 281, 1, "\x1f13D", color::MUTED);
 }
 
-fn calibration(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
-    text(row, out, 16, 68, 2, "ПРОВЕРКА БЭКАПА", color::TEXT);
-    text(row, out, 16, 107, 1, "4096 БАЙТ / SHA-256", color::MUTED);
+fn calibration(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
+    text(row, out, 16, 68, 2, "\x1f0F5", color::TEXT);
+    text(row, out, 16, 107, 1, "\x1f007", color::MUTED);
     let (label, foreground) = match model.calibration_matches {
-        Some(true) => ("ДАННЫЕ СОВПАЛИ", color::GOOD),
-        Some(false) => ("НЕ СОВПАДАЕТ", color::BAD),
-        None => ("НЕ ПРОВЕРЕНО", color::WARNING),
+        Some(true) => ("\x1f067", color::GOOD),
+        Some(false) => ("\x1f0B3", color::BAD),
+        None => ("\x1f0B2", color::WARNING),
     };
     rect(row, out, 12, 132, 216, 52, color::PANEL);
     centered(row, out, 151, 2, label, foreground);
-    text(
-        row,
-        out,
-        16,
-        214,
-        1,
-        "СРАВНЕНИЕ С ИСХОДНЫМ БЭКАПОМ",
-        color::MUTED,
-    );
-    text(row, out, 16, 249, 1, "КАЛИБРОВКИ НЕ", color::MUTED);
-    text(row, out, 16, 268, 1, "ПЕРЕЗАПИСЫВАЮТСЯ", color::MUTED);
+    text(row, out, 16, 214, 1, "\x1f129", color::MUTED);
+    text(row, out, 16, 249, 1, "\x1f083", color::MUTED);
+    text(row, out, 16, 268, 1, "\x1f0DF", color::MUTED);
 }
 
 pub fn key_label(key: Key) -> &'static str {
@@ -3178,27 +3112,27 @@ pub fn key_label(key: Key) -> &'static str {
         Key::Digit8 => "8",
         Key::Digit9 => "9",
         Key::Menu => "MENU",
-        Key::Up => "ВВЕРХ",
-        Key::Down => "ВНИЗ",
+        Key::Up => "\x1f04A",
+        Key::Down => "\x1f051",
         Key::Exit => "EXIT",
         Key::Star => "*",
         Key::Hash => "#",
         Key::Ptt => "PTT",
-        Key::Aux16 => "БОКОВАЯ 1",
-        Key::Aux17 => "БОКОВАЯ 2",
-        Key::Aux18 => "БОКОВАЯ 3",
+        Key::Aux16 => "\x1f044",
+        Key::Aux17 => "\x1f045",
+        Key::Aux18 => "\x1f046",
     }
 }
 
-fn keys(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
-    text(row, out, 16, 68, 1, "ПОСЛЕДНЯЯ КНОПКА", color::MUTED);
+fn keys(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
+    text(row, out, 16, 68, 1, "\x1f0ED", color::MUTED);
     let key = model.last_key.or(model.view.last_key);
     centered(
         row,
         out,
         101,
         3,
-        key.map(key_label).unwrap_or("НАЖМИТЕ"),
+        key.map(key_label).unwrap_or("\x1f0A4"),
         color::ACCENT,
     );
     rect(row, out, 16, 147, 208, 1, color::LINE);
@@ -3210,9 +3144,9 @@ fn keys(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
         170,
         2,
         if model.ptt_pressed || model.view.ptt_down {
-            "НАЖАТА"
+            "\x1f0A3"
         } else {
-            "ОТПУЩЕНА"
+            "\x1f0D5"
         },
         color::TEXT,
     );
@@ -3225,16 +3159,8 @@ fn keys(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
         let _ = write!(
             label,
             "{}: {}",
-            if index == 0 {
-                "ВЕРХНЯЯ"
-            } else {
-                "НИЖНЯЯ"
-            },
-            if pressed {
-                "НАЖАТА"
-            } else {
-                "ОТПУЩЕНА"
-            }
+            if index == 0 { "\x1f04D" } else { "\x1f0BB" },
+            if pressed { "\x1f0A3" } else { "\x1f0D5" }
         );
         text(row, out, 16, y, 1, label.as_str(), color::MUTED);
     }
@@ -3245,9 +3171,9 @@ fn keys(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
         211,
         1,
         if model.radio.state == RadioState::Transmitting {
-            "TX ПОДТВЕРЖДЕН РАДИО"
+            "\x1f03A"
         } else {
-            "PTT: КНОПКА, НЕ СТАТУС TX"
+            "\x1f034"
         },
         color::MUTED,
     );
@@ -3258,23 +3184,23 @@ fn keys(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
         248,
         1,
         if model.input_ready {
-            "ГОТОВО К НАЖАТИЮ"
+            "\x1f062"
         } else {
-            "ОТПУСТИТЕ ВСЕ КНОПКИ"
+            "\x1f0D3"
         },
         color::MUTED,
     );
 }
 
-fn help(row: u16, out: &mut [u16; WIDTH]) {
+fn help(row: u16, out: &mut Row<'_>) {
     for (index, (key, meaning)) in [
-        ("↑ / ↓", "ВЫБОР / ЧАСТОТА"),
-        ("MENU", "МЕНЮ / ПОДТВЕРДИТЬ"),
-        ("EXIT", "НАЗАД / ОТМЕНА ВВОДА"),
-        ("*", "CH/VFO; ДОЛГО: A/B"),
-        ("#", "ШАГ; ДОЛГО: БЛОК"),
-        ("0...9", "НОМЕР / ЧАСТОТА"),
-        ("0-9", "ДОЛГО: БЫСТРАЯ ФУНКЦИЯ"),
+        ("↑ / ↓", "\x1f05A"),
+        ("MENU", "\x1f09D"),
+        ("EXIT", "\x1f0A8"),
+        ("*", "\x1f00C"),
+        ("#", "\x1f140"),
+        ("0...9", "\x1f0BE"),
+        ("0-9", "\x1f076"),
     ]
     .iter()
     .enumerate()
@@ -3283,126 +3209,94 @@ fn help(row: u16, out: &mut [u16; WIDTH]) {
         text(row, out, 16, y, 2, key, color::ACCENT);
         text(row, out, 88, y + 4, 1, meaning, color::TEXT);
     }
-    text(
-        row,
-        out,
-        16,
-        216,
-        1,
-        "ДОЛГО 0: СПЕКТР (МОЖНО ИЗМЕНИТЬ)",
-        color::ACCENT,
-    );
-    text(row, out, 16, 232, 1, "R РЕВЕРС  +/- СДВИГ TX", color::MUTED);
-    text(
-        row,
-        out,
-        16,
-        248,
-        1,
-        "CT CTCSS / DCS ЦИФРОВОЙ ТОН",
-        color::MUTED,
-    );
-    text(
-        row,
-        out,
-        16,
-        264,
-        1,
-        "W/N ПОЛОСА / L/M/H МОЩНОСТЬ",
-        color::MUTED,
-    );
-    text(
-        row,
-        out,
-        16,
-        284,
-        1,
-        "ДОЛГО EXIT: ДОМОЙ / ОТМЕНА",
-        color::MUTED,
-    );
+    text(row, out, 16, 216, 1, "\x1f073", color::ACCENT);
+    text(row, out, 16, 232, 1, "\x1f037", color::MUTED);
+    text(row, out, 16, 248, 1, "\x1f00D", color::MUTED);
+    text(row, out, 16, 264, 1, "\x1f03B", color::MUTED);
+    text(row, out, 16, 284, 1, "\x1f074", color::MUTED);
 }
 
-fn about(row: u16, out: &mut [u16; WIDTH]) {
+fn about(row: u16, out: &mut Row<'_>) {
     text(row, out, 16, 68, 3, "UV98 RUST", color::ACCENT);
-    text(row, out, 16, 112, 2, "ВЕРСИЯ", color::TEXT);
+    text(row, out, 16, 112, 2, "\x1f04C", color::TEXT);
     text(
         row,
         out,
-        16 + text_width("ВЕРСИЯ ", 2),
+        16 + localized_width("\x1f04C ", 2, out.language),
         112,
         2,
         VERSION,
         color::TEXT,
     );
     for (y, label) in [
-        (156, "КАНАЛЫ / ЧАСТОТЫ / МЕНЮ"),
-        (180, "СТАТУС РАДИО В ВЕРХНЕЙ СТРОКЕ"),
-        (204, "КАЛИБРОВКИ ТОЛЬКО ЧТЕНИЕ"),
-        (248, "НАСТРОЙКИ СБРОСЯТСЯ"),
-        (270, "ПРИ ВЫКЛЮЧЕНИИ"),
+        (156, "\x1f08C"),
+        (180, "\x1f12B"),
+        (204, "\x1f084"),
+        (248, "\x1f0AE"),
+        (270, "\x1f0EE"),
     ] {
         text(row, out, 16, y, 1, label, color::MUTED);
     }
 }
 
-fn notice(row: u16, out: &mut [u16; WIDTH], value: Notice) {
+fn notice(row: u16, out: &mut Row<'_>, value: Notice) {
     let label = match value {
         Notice::None => return,
-        Notice::AuxBinding => "НАЖМИТЕ СВОЮ КНОПКУ ЕЩЁ РАЗ",
-        Notice::InvalidChannel => "НОМЕР КАНАЛА: ОТ 1 ДО 1024",
-        Notice::InactiveChannel => "В ЭТОМ КАНАЛЕ НЕТ ДАННЫХ",
-        Notice::InvalidFrequency => "ЧАСТОТА: 000.10000 - 999.99999",
-        Notice::EntryFull => "ЛИМИТ ЦИФР / MENU: ПРИНЯТЬ",
-        Notice::Locked => "БЛОКИРОВКА: УДЕРЖИВАЙТЕ #",
-        Notice::TxDisabled => "ПЕРЕДАЧА ВЫКЛЮЧЕНА",
-        Notice::NoChannels => "СОХРАНЁННЫХ КАНАЛОВ НЕТ",
-        Notice::ChannelOnly => "РЕВЕРС: ВЫБЕРИТЕ КАНАЛ",
-        Notice::RadioUnavailable => "РАДИОФУНКЦИЯ НЕДОСТУПНА",
-        Notice::SpectrumUnavailable => "ОБЗОР НЕ НАЧАТ: ПРИЁМНИК",
+        Notice::AuxBinding => "\x1f0A7",
+        Notice::InvalidChannel => "\x1f0C1",
+        Notice::InactiveChannel => "\x1f049",
+        Notice::InvalidFrequency => "\x1f139",
+        Notice::EntryFull => "\x1f098",
+        Notice::Locked => "\x1f043",
+        Notice::TxDisabled => "\x1f0DD",
+        Notice::NoChannels => "\x1f122",
+        Notice::ChannelOnly => "\x1f103",
+        Notice::RadioUnavailable => "\x1f0FE",
+        Notice::SpectrumUnavailable => "\x1f0C4",
     };
     rect(row, out, 0, 270, WIDTH, 25, color::WARNING_BACKGROUND);
     centered(row, out, 279, 1, label, color::WARNING);
 }
 
-fn footer(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn footer(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     rect(row, out, 0, 296, WIDTH, 24, color::PANEL);
     rect(row, out, 0, 296, WIDTH, 1, color::LINE);
     let (left, right) = if model.view.locked {
-        ("УДЕРЖИВАТЬ #", "РАЗБЛОКИРОВАТЬ")
+        ("\x1f135", "\x1f0FF")
     } else if model.view.entry.is_some() {
-        ("MENU ПРИНЯТЬ", "EXIT ОТМЕНА")
+        ("\x1f027", "\x1f013")
     } else {
         match model.view.screen {
-            Screen::Home if model.view.scan != ScanState::Stopped => ("MENU МЕНЮ", "EXIT СТОП"),
-            Screen::Home if model.radio.monitor => ("MENU МЕНЮ", "EXIT ВЫКЛ"),
+            Screen::Home if model.view.scan != ScanState::Stopped => ("\x1f020", "\x1f014"),
+            Screen::Home if model.radio.monitor => ("\x1f020", "\x1f011"),
             Screen::Home => ("", ""),
-            Screen::Menu | Screen::Channels => ("MENU ВЫБРАТЬ", "EXIT НАЗАД"),
-            Screen::Step => ("MENU ПРИМЕНИТЬ", "EXIT ОТМЕНА"),
-            Screen::Shortcuts => ("MENU ИЗМЕНИТЬ", "EXIT НАЗАД"),
-            Screen::ShortcutAction => ("MENU ПРИНЯТЬ", "EXIT ОТМЕНА"),
-            Screen::Zones => ("MENU ВЫБРАТЬ", "EXIT НАЗАД"),
-            Screen::SideKeys => ("MENU ИЗМЕНИТЬ", "EXIT НАЗАД"),
-            Screen::SideAction => ("MENU ПРИНЯТЬ", "EXIT ОТМЕНА"),
-            Screen::Setting => ("MENU ПОДТВЕРДИТЬ", "EXIT ОТМЕНА"),
-            Screen::Spectrum if model.view.spectrum_menu => ("MENU ПРИНЯТЬ", "EXIT НАЗАД"),
+            Screen::Menu | Screen::Channels => ("\x1f01E", "\x1f012"),
+            Screen::Step => ("\x1f026", "\x1f013"),
+            Screen::Shortcuts => ("\x1f01F", "\x1f012"),
+            Screen::ShortcutAction => ("\x1f027", "\x1f013"),
+            Screen::Zones => ("\x1f01E", "\x1f012"),
+            Screen::SideKeys => ("\x1f01F", "\x1f012"),
+            Screen::SideAction => ("\x1f027", "\x1f013"),
+            Screen::Setting => ("\x1f024", "\x1f013"),
+            Screen::Spectrum if model.view.spectrum_menu => ("\x1f027", "\x1f012"),
             Screen::Spectrum if model.view.spectrum_pending_listen.is_some() => {
-                ("MENU ОТМЕНА", "EXIT ОТМЕНА")
+                ("\x1f022", "\x1f013")
             }
-            Screen::Spectrum if model.view.spectrum_listening => ("MENU ВАРИАНТЫ", "EXIT СТОП"),
-            Screen::Spectrum => ("MENU ВАРИАНТЫ", "EXIT ВОЗВРАТ"),
+            Screen::Spectrum if model.view.spectrum_listening => ("\x1f01D", "\x1f014"),
+            Screen::Spectrum => ("\x1f01D", "\x1f010"),
             Screen::Shortwave if model.view.shortwave_band_draft.is_some() => {
-                ("MENU ВЫБРАТЬ", "EXIT НАЗАД")
+                ("\x1f01E", "\x1f012")
             }
-            Screen::Shortwave => ("MENU ЧАСТОТА", "EXIT НАЗАД"),
-            Screen::Crossband => ("ДОЛГО ТА ЖЕ КЛАВИША", "EXIT"),
-            _ => ("MENU НАЗАД", "EXIT НАЗАД"),
+            Screen::Shortwave => ("\x1f028", "\x1f012"),
+            Screen::Crossband => ("\x1f075", "EXIT"),
+            _ => ("\x1f021", "\x1f012"),
         }
     };
     text(row, out, 12, 305, 1, left, color::ACCENT);
     text(
         row,
         out,
-        WIDTH - 12 - text_width(right, 1),
+        WIDTH.saturating_sub(12 + localized_width(right, 1, out.language)),
         305,
         1,
         right,
@@ -3432,7 +3326,7 @@ fn valid_frequency(value: u32) -> bool {
     value > 0 && value <= 99_999_999
 }
 
-fn ham_status(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+fn ham_status(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     if !(104..115).contains(&row) {
         return;
     }
@@ -3562,10 +3456,10 @@ fn tone_text(raw: u16) -> Text {
     let mut value = Text::new();
     match Tone::decode(raw) {
         Some(Tone::None) => {
-            let _ = value.write_str("ТОН ВЫКЛЮЧЕН");
+            let _ = value.write_str("\x1f131");
         }
         Some(Tone::Ctcss { tenths_hz }) => {
-            let _ = write!(value, "CTCSS {}.{} ГЦ", tenths_hz / 10, tenths_hz % 10);
+            let _ = write!(value, "CTCSS {}.{} \x1f065", tenths_hz / 10, tenths_hz % 10);
         }
         Some(Tone::Dcs { code, inverted }) => {
             let _ = write!(
@@ -3576,7 +3470,7 @@ fn tone_text(raw: u16) -> Text {
             );
         }
         None => {
-            let _ = write!(value, "ТОН ? / {:04X}", raw);
+            let _ = write!(value, "\x1f130 {:04X}", raw);
         }
     }
     value
@@ -3585,14 +3479,14 @@ fn tone_text(raw: u16) -> Text {
 fn offset_text(rx: u32, tx: u32) -> Text {
     let mut value = Text::new();
     if !valid_frequency(rx) || !valid_frequency(tx) {
-        let _ = value.write_str("СДВИГ TX: НЕ ОПРЕДЕЛЁН");
+        let _ = value.write_str("\x1f10F");
     } else if rx == tx {
-        let _ = value.write_str("СИМПЛЕКС / БЕЗ СДВИГА");
+        let _ = value.write_str("\x1f116");
     } else {
         let delta = rx.abs_diff(tx);
         let _ = write!(
             value,
-            "СДВИГ TX {}{}.{:05} МГЦ",
+            "\x1f10E {}{}.{:05} \x1f09A",
             if tx > rx { '+' } else { '-' },
             delta / 100_000,
             delta % 100_000
@@ -3601,15 +3495,7 @@ fn offset_text(rx: u32, tx: u32) -> Text {
     value
 }
 
-fn icon(
-    row: u16,
-    out: &mut [u16; WIDTH],
-    x: usize,
-    y: u16,
-    width: usize,
-    rows: &[u16],
-    color: u16,
-) {
+fn icon(row: u16, out: &mut Row<'_>, x: usize, y: u16, width: usize, rows: &[u16], color: u16) {
     let Some(bits) = row.checked_sub(y).and_then(|dy| rows.get(usize::from(dy))) else {
         return;
     };
@@ -3620,7 +3506,7 @@ fn icon(
     }
 }
 
-fn item_background(row: u16, out: &mut [u16; WIDTH], y: u16, selected: bool) {
+fn item_background(row: u16, out: &mut Row<'_>, y: u16, selected: bool) {
     rect(
         row,
         out,
@@ -3700,7 +3586,7 @@ fn channel_name(bytes: &[u8]) -> Text {
         index += 1;
     }
     if value.len == 0 {
-        let _ = value.write_str("БЕЗ ИМЕНИ");
+        let _ = value.write_str("\x1f040");
     }
     value
 }
@@ -3750,7 +3636,7 @@ fn frequency(value: u32) -> FrequencyText {
 }
 
 #[inline(never)]
-fn home_digits(row: u16, out: &mut [u16; WIDTH], top: u16, value: &str, ink: u16, base: u16) {
+fn home_digits(row: u16, out: &mut Row<'_>, top: u16, value: &str, ink: u16, base: u16) {
     // Chakra Petch SemiBold, SIL OFL 1.1. Four pixels per byte.
     const WIDTH_DIGIT: usize = 26;
     const ROW_BYTES: usize = 7;
@@ -3810,6 +3696,23 @@ fn entry_text(value: u32, digits: u8, kind: EntryKind) -> Text {
 }
 
 fn text_width(value: &str, scale: u16) -> usize {
+    localized_width(value, scale, Language::Russian)
+}
+fn localized_width(value: &str, scale: u16, language: Language) -> usize {
+    if value.contains('\x1f') {
+        raw_width(locale::resolve(value, language).as_str(), scale)
+    } else {
+        raw_width(value, scale)
+    }
+}
+fn fitting_scale(value: &str, requested: u16, available: usize) -> u16 {
+    let mut scale = requested;
+    while scale > 1 && raw_width(value, scale) > available {
+        scale -= 1;
+    }
+    scale
+}
+fn raw_width(value: &str, scale: u16) -> usize {
     value
         .chars()
         .count()
@@ -3818,14 +3721,22 @@ fn text_width(value: &str, scale: u16) -> usize {
 }
 
 #[inline(never)]
-fn centered(row: u16, out: &mut [u16; WIDTH], y: u16, scale: u16, value: &str, color: u16) {
+fn centered(row: u16, out: &mut Row<'_>, y: u16, scale: u16, value: &str, color: u16) {
     if row < y || row >= y + 7 * scale {
         return;
     }
-    text(
+    let translated;
+    let value = if value.contains('\x1f') {
+        translated = locale::resolve(value, out.language);
+        translated.as_str()
+    } else {
+        value
+    };
+    let scale = fitting_scale(value, scale, WIDTH);
+    raw_text(
         row,
         out,
-        WIDTH.saturating_sub(text_width(value, scale)) / 2,
+        WIDTH.saturating_sub(raw_width(value, scale)) / 2,
         y,
         scale,
         value,
@@ -3834,14 +3745,29 @@ fn centered(row: u16, out: &mut [u16; WIDTH], y: u16, scale: u16, value: &str, c
 }
 
 #[inline(never)]
-fn rect(row: u16, out: &mut [u16; WIDTH], x: usize, y: u16, width: usize, height: u16, color: u16) {
+fn rect(row: u16, out: &mut Row<'_>, x: usize, y: u16, width: usize, height: u16, color: u16) {
     if row >= y && row < y.saturating_add(height) {
         out[x.min(WIDTH)..x.saturating_add(width).min(WIDTH)].fill(color);
     }
 }
 
 #[inline(never)]
-fn text(row: u16, out: &mut [u16; WIDTH], x: usize, y: u16, scale: u16, value: &str, color: u16) {
+fn text(row: u16, out: &mut Row<'_>, x: usize, y: u16, scale: u16, value: &str, color: u16) {
+    if row < y || row >= y + 7 * scale {
+        return;
+    }
+    let translated;
+    let value = if value.contains('\x1f') {
+        translated = locale::resolve(value, out.language);
+        translated.as_str()
+    } else {
+        value
+    };
+    let scale = fitting_scale(value, scale, WIDTH.saturating_sub(x));
+    raw_text(row, out, x, y, scale, value, color);
+}
+#[inline(never)]
+fn raw_text(row: u16, out: &mut Row<'_>, x: usize, y: u16, scale: u16, value: &str, color: u16) {
     if row < y || row >= y + 7 * scale {
         return;
     }
@@ -3873,6 +3799,7 @@ mod tests {
 
     fn view(screen: Screen) -> View {
         View {
+            language: Language::Russian,
             gps_enabled: false,
             gps_baud: 1,
             gps_status: crate::controller::GpsStatus::default(),
@@ -4103,7 +4030,10 @@ mod tests {
         );
         assert_eq!(channel_name(&[0x81, 0x40, b'A']).as_str(), "?A");
         assert_eq!(channel_name(&[0xa7]).as_str(), "?");
-        assert_eq!(channel_name(&[0xff]).as_str(), "БЕЗ ИМЕНИ");
+        assert_eq!(
+            locale::resolve(channel_name(&[0xff]).as_str(), Language::Russian).as_str(),
+            "БЕЗ ИМЕНИ"
+        );
         assert_eq!(
             channel_name(b"12345678901234567890").as_str(),
             "1234567890123456"
@@ -4147,17 +4077,34 @@ mod tests {
             (43_020_000, 43_180_000, 0x2013, 0x1302)
         );
         assert_eq!(raw.rx_10hz, 43_180_000);
-        assert_eq!(tone_text(0x1302).as_str(), "CTCSS 77.0 ГЦ");
+        assert_eq!(
+            locale::resolve(tone_text(0x1302).as_str(), Language::Russian).as_str(),
+            "CTCSS 77.0 ГЦ"
+        );
         assert_eq!(tone_text(0x2013).as_str(), "DCS D023N");
         assert_eq!(tone_text(0x3013).as_str(), "DCS D023I");
-        assert_eq!(tone_text(0).as_str(), "ТОН ВЫКЛЮЧЕН");
-        assert_eq!(tone_text(0xffff).as_str(), "ТОН ? / FFFF");
         assert_eq!(
-            offset_text(raw.rx_10hz, raw.tx_10hz).as_str(),
+            locale::resolve(tone_text(0).as_str(), Language::Russian).as_str(),
+            "ТОН ВЫКЛЮЧЕН"
+        );
+        assert_eq!(
+            locale::resolve(tone_text(0xffff).as_str(), Language::Russian).as_str(),
+            "ТОН ? / FFFF"
+        );
+        assert_eq!(
+            locale::resolve(
+                offset_text(raw.rx_10hz, raw.tx_10hz).as_str(),
+                Language::Russian
+            )
+            .as_str(),
             "СДВИГ TX -1.60000 МГЦ"
         );
         assert_eq!(
-            offset_text(raw.tx_10hz, raw.rx_10hz).as_str(),
+            locale::resolve(
+                offset_text(raw.tx_10hz, raw.rx_10hz).as_str(),
+                Language::Russian
+            )
+            .as_str(),
             "СДВИГ TX +1.60000 МГЦ"
         );
         let mut a = model(Screen::Home);
@@ -4884,7 +4831,15 @@ mod tests {
             MeterReading::Transmit(Some(12)),
         ] {
             let mut row = [0; WIDTH];
-            slot_meter(110, &mut row, 110, reading);
+            slot_meter(
+                110,
+                &mut Row {
+                    pixels: &mut row,
+                    language: Language::Russian,
+                },
+                110,
+                reading,
+            );
             let cells: [u16; 12] = core::array::from_fn(|index| row[46 + index * 15]);
             assert_eq!(&cells[0..2], &[0x319f; 2]);
             assert_eq!(&cells[2..6], &[0x075f; 4]);
@@ -5279,6 +5234,53 @@ mod tests {
     }
 
     #[test]
+    fn languages_redraw_the_complete_screen_and_keep_menu_labels_inside_the_panel() {
+        for language in [Language::Russian, Language::English, Language::German] {
+            for item in MENU_ITEMS {
+                let label = locale::resolve(menu_label(item), language);
+                assert!(
+                    raw_width(label.as_str(), 2) <= WIDTH - 44 - 12,
+                    "menu label too long: {language:?} {item:?}: {}",
+                    label.as_str()
+                );
+            }
+            for group in [
+                MenuGroup::Mode,
+                MenuGroup::Receive,
+                MenuGroup::Scanning,
+                MenuGroup::Keys,
+                MenuGroup::System,
+            ] {
+                let width = localized_width(menu_group_label(group), 2, language);
+                assert!(
+                    width <= 170,
+                    "group {group:?}, {language:?}: {width}px > 170px"
+                );
+            }
+            for screen in [
+                Screen::Home,
+                Screen::Menu,
+                Screen::Spectrum,
+                Screen::Shortwave,
+                Screen::Gps,
+                Screen::Aprs,
+                Screen::About,
+                Screen::Help,
+            ] {
+                let old = model(screen);
+                let mut new = old;
+                new.view.language = language;
+                if language != old.view.language {
+                    assert_eq!(compare_incremental(old, new), WIDTH * usize::from(HEIGHT));
+                }
+                for y in 0..HEIGHT {
+                    render_row(y, &mut [0; WIDTH], &new).unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
     fn native_menu_symbols_fit_and_scan_symbol_requires_running_state() {
         for item in MENU_ITEMS {
             assert!(text_width(menu_label(item), 2) <= WIDTH - 44 - 12);
@@ -5320,7 +5322,10 @@ mod tests {
             let mut old = model(Screen::Setting);
             old.view.setting = Some(setting);
             old.view.setting_index = 1;
-            assert_eq!(current_setting_label(&old, setting), "НЕТ ПОДТВЕРЖДЕНИЯ");
+            assert_eq!(
+                locale::resolve(current_setting_label(&old, setting), Language::Russian).as_str(),
+                "НЕТ ПОДТВЕРЖДЕНИЯ"
+            );
             let mut new = old;
             new.radio.state = RadioState::Receiving;
             new.radio.power = Some(0);
@@ -5334,7 +5339,10 @@ mod tests {
             old = new;
             new.radio.state = RadioState::Starting;
             assert_eq!(compare_radio_incremental(old, new), WIDTH * 27);
-            assert_eq!(current_setting_label(&new, setting), "НЕТ ПОДТВЕРЖДЕНИЯ");
+            assert_eq!(
+                locale::resolve(current_setting_label(&new, setting), Language::Russian).as_str(),
+                "НЕТ ПОДТВЕРЖДЕНИЯ"
+            );
         }
     }
 
@@ -5691,7 +5699,10 @@ mod tests {
     #[test]
     fn tenth_binding_is_zero_and_new_header_revision_fits_longest_title() {
         assert_eq!(binding_digit(9), Some(0));
-        assert_eq!(shortcut_label(ShortcutAction::Spectrum), "СПЕКТР ЧАСТОТ");
+        assert_eq!(
+            locale::resolve(shortcut_label(ShortcutAction::Spectrum), Language::Russian).as_str(),
+            "СПЕКТР ЧАСТОТ"
+        );
         assert!(182 + text_width(VERSION_SHORT, 1) <= WIDTH - 10);
         assert!(16 + text_width("ВЕРСИЯ ", 2) + text_width(VERSION, 2) <= WIDTH - 8);
         let mut old = model(Screen::Shortcuts);

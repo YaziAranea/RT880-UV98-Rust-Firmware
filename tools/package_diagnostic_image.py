@@ -211,11 +211,11 @@ def package(folder, root=ROOT, profile="rx", exclude_private_fixture=False):
     folder, root = folder.resolve(), root.resolve()
     runtime = validate_inputs(folder, root, profile)
     source_files = [p for name in ("crates", "apps", "firmware", "firmware-diagnostic", "firmware-uart-probe",
-                    "tools", "research", "reference", ".cargo")
+                    "tools", "research", "reference", ".cargo", "docs", ".github")
                     for p in (root / name).rglob("*")
                     if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"]
     source_files += [p for p in root.iterdir() if p.is_file() and
-                     (p.suffix in (".toml", ".lock", ".ps1", ".txt") or p.name in (".gitignore", "AGENTS.md"))]
+                     (p.suffix in (".toml", ".lock", ".ps1", ".txt", ".md") or p.name in (".gitignore", ".gitattributes", "LICENSE"))]
     private_fixture = (root / "crates/calibration/tests/fixtures/uv98-plus-stock-1.16.bin").resolve()
     if exclude_private_fixture:
         source_files = [p for p in source_files if p.resolve() != private_fixture]

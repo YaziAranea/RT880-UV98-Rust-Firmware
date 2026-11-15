@@ -5,9 +5,16 @@ pub fn glyph(ch: char) -> [u8; 7] {
         'a'..='z' => ch.to_ascii_uppercase(),
         'а'..='я' => char::from_u32(ch as u32 - 32).unwrap_or('?'),
         'ё' => 'Ё',
+        'ä' => 'Ä',
+        'ö' => 'Ö',
+        'ü' => 'Ü',
         other => other,
     };
     match ch {
+        'Ä' => [10, 0, 14, 17, 31, 17, 17],
+        'Ö' => [10, 0, 14, 17, 17, 17, 14],
+        'Ü' => [10, 0, 17, 17, 17, 17, 14],
+        'ß' => [12, 18, 18, 28, 18, 18, 28],
         'A' | 'А' => [14, 17, 17, 31, 17, 17, 17],
         'B' | 'В' => [30, 17, 17, 30, 17, 17, 30],
         'C' | 'С' => [14, 17, 16, 16, 16, 17, 14],
@@ -68,8 +75,9 @@ pub fn glyph(ch: char) -> [u8; 7] {
         '9' => [14, 17, 17, 15, 1, 1, 14],
         ' ' => [0; 7],
         '/' => [1, 1, 2, 4, 8, 16, 16],
-        '-' => [0, 0, 0, 31, 0, 0, 0],
+        '-' | '−' => [0, 0, 0, 31, 0, 0, 0],
         '.' => [0, 0, 0, 0, 0, 6, 6],
+        ',' => [0, 0, 0, 0, 6, 4, 8],
         ':' => [0, 6, 6, 0, 6, 6, 0],
         ';' => [0, 6, 6, 0, 6, 4, 8],
         '_' => [0, 0, 0, 0, 0, 0, 31],
@@ -104,6 +112,32 @@ mod tests {
             assert!(upper.iter().any(|&row| row != 0));
             assert!(upper.iter().all(|&row| row < 32));
             assert_eq!(upper, glyph(ch.to_lowercase().next().unwrap()));
+        }
+    }
+
+    #[test]
+    fn german_letters_are_distinct_from_plain_vowels_and_supported_in_both_cases() {
+        for (upper, lower, plain) in [('Ä', 'ä', 'A'), ('Ö', 'ö', 'O'), ('Ü', 'ü', 'U')] {
+            assert_eq!(glyph(upper), glyph(lower));
+            assert_ne!(glyph(upper), glyph(plain));
+            assert_ne!(glyph(upper), glyph('?'));
+            assert!(glyph(upper).iter().all(|&row| row < 32));
+        }
+        assert_ne!(glyph('ß'), glyph('?'));
+    }
+
+    #[test]
+    fn spectrum_threshold_minus_is_a_sign_instead_of_a_missing_glyph() {
+        assert_eq!(glyph('−'), glyph('-'));
+        assert_ne!(glyph('−'), glyph('?'));
+    }
+
+    #[test]
+    fn every_catalog_character_has_a_real_glyph() {
+        for row in include_str!("../locales/messages.tsv").lines().skip(1) {
+            for ch in row.chars().filter(|&ch| ch != '\t' && ch != '?') {
+                assert_ne!(glyph(ch), glyph('?'), "missing glyph: {ch}");
+            }
         }
     }
 }

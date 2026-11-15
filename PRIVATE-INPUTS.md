@@ -1,65 +1,51 @@
-# Приватные входы и оригиналы
+# Private inputs and original backups
 
-Личные данные станции остаются у владельца. Они нужны для воспроизведения проверок, но не входят в Git и очищенный комплект R35.
+Personal radio data belong to their owner. They are excluded from this repository and the public R36 kit. The [public build commands](BUILDING.md) do not require them; some historical golden tests and simulations do.
 
-## Что исключается
+## Keep private
 
-- NOR 4 МиБ с каналами, настройками и личными данными.
-- 999.880dmf и другие пользовательские .880dmf/.98pdmf.
-- Персональный блок заводских калибровок 4096 байт.
-- Сырые журналы USB и сеансов с личными данными.
-- Локальные source.zip, в которые включён личный fixture.
+- Full 4 MiB NOR snapshots containing channels, settings and personal data.
+- Original `.880dmf` / `.98pdmf` codeplugs, including the owner's `999.880dmf`.
+- Individual 4096-byte factory calibration blocks.
+- Raw USB logs and captures containing personal information or location.
+- Local `source.zip` archives that include private fixtures.
 
-Заводской recovery BIN 1.16 и принятая R33 включены в приватный комплект R35. Они не содержат полный персональный NOR. Файл производителя не является считанным дампом MCU владельца.
+Keep complete verified snapshot folders, including their manifests and two passes, in two protected locations. Do not attach them to a public GitHub issue. A useful public issue can contain the release/BIN hash, exact reproduction steps and a suitably checked screenshot instead.
 
-## Входы проверенной сборки
+## Private golden-test inputs
 
-Calibration fixture находится локально в игнорируемом пути:
+Some tests use `include_bytes!` with this intentionally ignored file:
 
-~~~text
+```text
 crates/calibration/tests/fixtures/uv98-plus-stock-1.16.bin
-SHA256: 8906c3d9847eeeefe0ee6aad6aa4302949bd5e5984f3c64ed02edb8cf6fb0ff7
-~~~
+```
 
-Файл нужен тестам с include_bytes!. Отсутствие в clone намеренно. Не заменять его нулями или чужими калибровками для успешного теста.
+The full `build-diagnostic-image.ps1` workflow additionally requires the owner's original 4194304-byte NOR through `-NorBackup`. That script checks fixed SHA256 values for both original inputs before and after the run. The public checkout does not provide those files or a universal replacement.
 
-Исходный NOR передаётся параметром -NorBackup. Путь относительно исходного workspace:
+**Do not replace a missing golden fixture with zeros, synthetic data or another radio's calibration.** Such changes would remove the meaning of the existing expected results. Use the public build and test subset, or add independently documented synthetic test cases as a separate development change.
 
-~~~text
-outputs/uv98-backup-2026-11-08/storage-read-01/storage-address-space.bin
-Размер: 4194304 байта
-SHA256: 1e8f4c5c5373392a08a041da9132e22d21ad0dba4fca97b9bb4f21ade77c55a3
-~~~
+## R36 per-radio preparation
 
-Этот путь не является частью произвольного clone. Проверить наличие и SHA перед использованием; допускается другое место хранения того же оригинала.
+R36 reads the real calibration from the radio and compares it with an expected SHA256. The raw calibration block is not embedded in the firmware.
 
-Reference BIN стока для исследования:
+CPS 0.6 can prepare a personal image from a recognized R36 template and the `manifest.json` of the owner's full, twice-read 4 MiB NOR snapshot. It validates the snapshot and changes only the expected calibration hash. It creates a new BIN and catalog, leaving the original template and backups unchanged. Raw calibration, channels and NOR are not copied into the new image folder. The catalog records hashes and provenance, not a replacement calibration block.
 
-~~~text
-RT-880_Upgrade_V1_16_250915.bin
-SHA256: eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc
-~~~
+This process binds an image to an individual radio; it does **not** establish that another board revision has compatible hardware. Use it only for a confirmed compatible board. See the [complete preparation procedure](docs/GETTING-STARTED.en.md#4-check-compatibility-before-flashing).
 
-Это файл восстановления и анализа, а не замена персонального NOR.
+Firmware settings, including language, remain in RAM. Writing calibration or silently replacing stock NOR regions is not part of R36. Original backups, codeplugs and immutable release files must be preserved.
 
-## Сохранение данных
+## What the backup does and does not contain
 
-R35 читает калибровки со станции и проверяет ожидаемый SHA. Полный calibration fixture в BIN не встроен. Проверка привязана к экземпляру владельца, поэтому универсальность для других станций пока не заявлена.
+CPS reads calibration and external NOR using the stock protocol with the radio running stock firmware normally. The known protocol does not read the MCU application or bootloader. A saved stock firmware BIN is a separately obtained recovery file, not a readback of the owner's MCU.
 
-Запись калибровок и скрытая перезапись стоковых областей в R35 не добавлены. Настройки Rust остаются в RAM. Оригинальные резервные копии, 999.880dmf и неизменяемые выпуски не перезаписываются.
+Our CPS currently does not restore a raw 4 MiB NOR or calibration block to the radio. Flashing a stock MCU application does not reconstruct damaged external data. Keep the originals even after a successful firmware recovery.
 
-CPS редактирует GPS/APRS в копии codeplug с побайтной разницей и undo. Перенос файла в станцию пока выполняется штатной CPS на стоке. Резервные калибровки и NOR также читаются штатным протоколом при обычном запуске стока. Это не полный дамп внутренней памяти MCU и не новый протокол записи настроек Rust.
+GPS/APRS file editing modifies a working codeplug copy, with byte differences and undo. Transferring that edited codeplug currently uses the stock CPS while on stock firmware; the Rust radio does not yet implement a general USB settings-write protocol.
 
-## Публикация
+## Recovery firmware and publication
 
-tools/package_diagnostic_image.py по умолчанию включает личный fixture в source.zip. Для GitHub использовать --exclude-private-fixture, проверять манифест и содержимое архива.
+The manufacturer's stock recovery BIN is excluded from the public R36 kit because redistribution permission has not been established. Its known filename, source and SHA256 are listed in the [recovery-file instructions](docs/GETTING-STARTED.en.md#where-to-get-the-stock-recovery-file). Obtaining that file does not replace an individual calibration or NOR backup.
 
-~~~text
-Очищенный комплект:
-C:/Users/User/Documents/UV98/releases/UV98-r35-2026-11-16
-~~~
+The older R35 local kit and draft remain private historical artifacts; they include files that must not be assumed suitable for public redistribution. Preserve those originals separately from a new public package.
 
-В нём находятся R35, сохранённая R33, заводской recovery BIN 1.16, CPS, исходники без личных входов, отчёты и примеры экранов. Более полные локальные архивы и исходные резервы хранятся отдельно.
-
-Перед публичным открытием нужны неперсональные fixture, отделение профиля станции, проверка переносимости и лицензий. Chakra Petch сопровождается OFL; это не задаёт автоматически лицензию всего проекта.
-
+The legacy `tools/package_diagnostic_image.py` includes the private calibration fixture in `source.zip` unless `--exclude-private-fixture` is specified. Always use the exclusion for public source archives, then inspect the complete package for personal data and third-party licensing. `.gitignore` alone does not remove files already placed in an archive or release asset.

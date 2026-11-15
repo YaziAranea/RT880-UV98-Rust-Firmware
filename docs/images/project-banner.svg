@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-labelledby="title desc">
+  <title id="title">UV98 — Rust firmware</title>
+  <desc id="desc">Project banner for iRadio UV-98 Plus and RT-880. English, German and Russian. Abstract A/B channels and a spectrum motif; not a device screenshot.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#101f2d"/><stop offset="1" stop-color="#07111b"/></linearGradient>
+    <linearGradient id="trace" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#54d9d0"/><stop offset="1" stop-color="#9de9be"/></linearGradient>
+  </defs>
+  <rect width="1200" height="300" rx="18" fill="url(#background)"/>
+  <path d="M0 299H1200" stroke="#283c4d" stroke-width="2"/>
+  <path d="M713 0V300" stroke="#29404e"/>
+  <path d="M742 250H1160M742 200H1160M742 150H1160M742 100H1160M742 50H1160M790 26V270M870 26V270M950 26V270M1030 26V270M1110 26V270" stroke="#152c3a"/>
+  <rect x="64" y="47" width="36" height="4" rx="2" fill="#efb24b"/>
+  <text x="63" y="142" font-family="'Segoe UI', Arial, sans-serif" font-size="88" font-weight="700" letter-spacing="-3" fill="#f1f5f7">UV98</text>
+  <text x="342" y="100" font-family="Consolas, 'Liberation Mono', monospace" font-size="23" font-weight="700" letter-spacing="2" fill="#67dace">RUST</text>
+  <text x="342" y="135" font-family="Consolas, 'Liberation Mono', monospace" font-size="23" font-weight="700" letter-spacing="2" fill="#d7e2e9">FIRMWARE</text>
+  <text x="67" y="185" font-family="'Segoe UI', Arial, sans-serif" font-size="20" fill="#a3b5c4">iRadio UV-98 Plus · RT-880</text>
+  <g font-family="Consolas, 'Liberation Mono', monospace" font-size="13" font-weight="700" text-anchor="middle">
+    <rect x="66" y="219" width="54" height="29" rx="7" fill="#1d3443" stroke="#365369"/><text x="93" y="239" fill="#dbe8ef">EN</text>
+    <rect x="130" y="219" width="54" height="29" rx="7" fill="#1d3443" stroke="#365369"/><text x="157" y="239" fill="#dbe8ef">DE</text>
+    <rect x="194" y="219" width="54" height="29" rx="7" fill="#1d3443" stroke="#365369"/><text x="221" y="239" fill="#dbe8ef">RU</text>
+  </g>
+  <g font-family="Consolas, 'Liberation Mono', monospace" font-size="18" font-weight="700">
+    <text x="755" y="72" fill="#efb24b">A</text><path d="M791 65H1081" stroke="#efb24b" stroke-width="8" stroke-linecap="round"/><path d="M1102 65H1137" stroke="#56452e" stroke-width="8" stroke-linecap="round"/>
+    <text x="755" y="112" fill="#67dace">B</text><path d="M791 105H986" stroke="#67dace" stroke-width="8" stroke-linecap="round"/><path d="M1008 105H1137" stroke="#25494f" stroke-width="8" stroke-linecap="round"/>
+  </g>
+  <path d="M757 243L757 230L775 230L785 218L795 230L814 230L830 201L842 230L861 230L880 178L889 217L903 230L923 230L937 208L950 230L972 230L984 189L993 151L1003 190L1015 230L1034 230L1045 215L1057 230L1074 230L1090 193L1101 230L1121 230L1134 219L1144 230L1155 230L1155 243Z" fill="#53d9ce" opacity="0.12"/>
+  <path d="M757 230L775 230L785 218L795 230L814 230L830 201L842 230L861 230L880 178L889 217L903 230L923 230L937 208L950 230L972 230L984 189L993 151L1003 190L1015 230L1034 230L1045 215L1057 230L1074 230L1090 193L1101 230L1121 230L1134 219L1144 230L1155 230" fill="none" stroke="url(#trace)" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M757 251H1155M790 247V255M870 247V255M950 247V255M1030 247V255M1110 247V255" stroke="#3a5668" stroke-width="2"/>
+</svg>

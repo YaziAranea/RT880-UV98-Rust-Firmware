@@ -5,6 +5,7 @@
 **/__pycache__/
 *.pyc
 *.880dmf
+*.98pdmf
 *.elf
 *.exe
 *.dll

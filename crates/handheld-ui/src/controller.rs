@@ -1,6 +1,7 @@
 //! Storage-independent UI state. Frequencies and settings here are a volatile
 //! preview; no effect tunes RF, transmits, or changes a saved channel record.
 use crate::input::InputEvent;
+use crate::locale::Language;
 use uv98_keys::Key;
 
 pub const CHANNEL_COUNT: usize = 1024;
@@ -138,6 +139,7 @@ pub enum Setting {
     GpsBaud,
     TxTail,
     Dtmf,
+    Language,
 }
 
 impl Setting {
@@ -150,7 +152,7 @@ impl Setting {
             10
         } else if matches!(self, Self::BandPreset) {
             4
-        } else if matches!(self, Self::TxTail) {
+        } else if matches!(self, Self::TxTail | Self::Language) {
             3
         } else if self.is_tx_tone() {
             TX_CTCSS.len() as u8
@@ -200,10 +202,11 @@ pub enum MenuItem {
     TxTail,
     TxId,
     Dtmf,
+    Language,
 }
 
 /// Full catalog for tooling. The visible menu uses `menu_entries`.
-pub const MENU_ITEMS: [MenuItem; 30] = [
+pub const MENU_ITEMS: [MenuItem; 31] = [
     MenuItem::Mode,
     MenuItem::Modulation,
     MenuItem::Channels,
@@ -234,6 +237,7 @@ pub const MENU_ITEMS: [MenuItem; 30] = [
     MenuItem::TxTail,
     MenuItem::TxId,
     MenuItem::Dtmf,
+    MenuItem::Language,
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -304,6 +308,7 @@ pub const fn menu_entries(group: Option<MenuGroup>) -> &'static [MenuEntry] {
             Item(MenuItem::Dtmf),
             Item(MenuItem::TxTail),
             Item(MenuItem::TxId),
+            Item(MenuItem::Language),
         ],
     }
 }
@@ -568,16 +573,16 @@ impl ShortwaveMode {
 
 // Presets are operator tuning limits and starting frequencies, not relay routes.
 pub const SW_BANDS: [(&str, u32, u32, u32); 10] = [
-    ("ВЕСЬ КВ", SW_MIN_KHZ as u32, SW_MAX_KHZ as u32, 6070),
-    ("160 М", 1800, 2000, 1900),
-    ("80 М", 3500, 3800, 3650),
-    ("40 М", 7000, 7200, 7100),
-    ("30 М", 10100, 10150, 10120),
-    ("20 М", 14000, 14350, 14200),
-    ("17 М", 18068, 18168, 18130),
-    ("15 М", 21000, 21450, 21200),
-    ("12 М", 24890, 24990, 24950),
-    ("FM ВЕЩАНИЕ", 64000, 108000, 98100),
+    ("\x1f04E", SW_MIN_KHZ as u32, SW_MAX_KHZ as u32, 6070),
+    ("\x1f151", 1800, 2000, 1900),
+    ("\x1f15A", 3500, 3800, 3650),
+    ("\x1f157", 7000, 7200, 7100),
+    ("\x1f155", 10100, 10150, 10120),
+    ("\x1f153", 14000, 14350, 14200),
+    ("\x1f152", 18068, 18168, 18130),
+    ("\x1f150", 21000, 21450, 21200),
+    ("\x1f14F", 24890, 24990, 24950),
+    ("\x1f018", 64000, 108000, 98100),
 ];
 
 pub const SW_FM_BAND: u8 = SW_BANDS.len() as u8 - 1;
@@ -636,6 +641,7 @@ pub enum AprsStatus {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct View {
+    pub language: Language,
     pub gps_enabled: bool,
     pub gps_baud: u8,
     pub gps_status: GpsStatus,
@@ -837,6 +843,7 @@ impl Controller {
         Self {
             spectrum_last_bin: SPECTRUM_INTERVALS[0],
             view: View {
+                language: Language::Russian,
                 gps_enabled: false,
                 gps_baud: 1,
                 gps_status: GpsStatus::default(),
@@ -989,6 +996,7 @@ impl Controller {
             Setting::GpsBaud => self.view.gps_baud,
             Setting::TxTail => self.view.tx_tail,
             Setting::Dtmf => u8::from(self.view.dtmf_enabled),
+            Setting::Language => self.view.language as u8,
             Setting::TopKey => {
                 self.view.top_draft = self.view.top_key;
                 self.view.top_action
@@ -1033,6 +1041,7 @@ impl Controller {
             Setting::GpsBaud => self.view.gps_baud = selected,
             Setting::TxTail => self.view.tx_tail = selected,
             Setting::Dtmf => self.view.dtmf_enabled = selected != 0,
+            Setting::Language => self.view.language = Language::from_index(selected),
             Setting::BandPreset => {
                 // Presets select frequency, modulation and step together. The
                 // RF runtime still derives its relay route from frequency.
@@ -2670,6 +2679,7 @@ impl Controller {
                     MenuItem::GpsBaud => self.open_setting(Setting::GpsBaud),
                     MenuItem::TxTail => self.open_setting(Setting::TxTail),
                     MenuItem::Dtmf => self.open_setting(Setting::Dtmf),
+                    MenuItem::Language => self.open_setting(Setting::Language),
                     MenuItem::Gps => self.view.screen = Screen::Gps,
                     MenuItem::Aprs => self.view.screen = Screen::Aprs,
                     MenuItem::TxId => {
@@ -4024,6 +4034,41 @@ mod tests {
         ui.handle(InputEvent::Ptt(false), &bitmap);
         assert_eq!(ui.view.notice, Notice::None);
         assert!(ui.handle(InputEvent::Ptt(true), &bitmap).ptt_tx_requested);
+    }
+
+    #[test]
+    fn language_editor_cancels_draft_and_commits_without_changing_either_radio_context() {
+        let bitmap = catalog(&[0, 2]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        let contexts = [ui.context(Slot::A), ui.context(Slot::B)];
+        assert_eq!(ui.view.language, Language::Russian);
+        assert_eq!(
+            choose_menu(&mut ui, MenuItem::Language, &bitmap).request,
+            None
+        );
+        assert_eq!(ui.view.setting, Some(Setting::Language));
+        assert_eq!(press(&mut ui, Key::Down, &bitmap).request, None);
+        assert_eq!(ui.view.language, Language::Russian);
+        assert_eq!(ui.view.setting_index, 1);
+        assert_eq!(press(&mut ui, Key::Exit, &bitmap).request, None);
+        assert_eq!(ui.view.language, Language::Russian);
+        for language in [Language::English, Language::German, Language::Russian] {
+            assert_eq!(
+                choose_menu(&mut ui, MenuItem::Language, &bitmap).request,
+                None
+            );
+            while ui.view.setting_index != language as u8 {
+                assert_eq!(press(&mut ui, Key::Down, &bitmap).request, None);
+            }
+            let change = press(&mut ui, Key::Menu, &bitmap);
+            assert_eq!(change.request, None);
+            assert!(change.redraw);
+            assert!(!change.ptt_tx_requested && !change.slot_changed && !change.channel_changed);
+            assert_eq!(ui.view.language, language);
+            assert_eq!(ui.view.screen, Screen::Menu);
+            assert_eq!([ui.context(Slot::A), ui.context(Slot::B)], contexts);
+            assert_eq!(ui.view.active_slot, Slot::A);
+        }
     }
 
     #[test]

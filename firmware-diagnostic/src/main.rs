@@ -55,6 +55,42 @@ const LIVE_TX: bool = cfg!(any(feature = "upper-exo-tx-trial", feature = "channe
 const LIVE_RELAY: bool = cfg!(feature = "channel-tx");
 const LOWER_PTT_CODE: Option<u8> = None;
 
+/// CPS may personalize only this digest, after verifying two identical stock
+/// NOR reads. Calibration itself stays in the radio and is never overwritten.
+/// Volatile access is intentional: a personalized BIN must use the bytes in
+/// flash, not a compiler-folded copy of the original owner's expected digest.
+#[used]
+#[no_mangle]
+pub static UV98_CALIBRATION_PROFILE: [u8; 48] = {
+    let mut profile = [0; 48];
+    let magic = *b"UV98CALPROFILE1\0";
+    let mut index = 0;
+    while index < 16 {
+        profile[index] = magic[index];
+        index += 1;
+    }
+    index = 0;
+    while index < 32 {
+        profile[16 + index] = PRESERVED_CALIBRATION_SHA256[index];
+        index += 1;
+    }
+    profile
+};
+
+#[inline(never)]
+fn expected_calibration_digest() -> [u8; 32] {
+    // SAFETY: the immutable 48-byte object is allocated in readable application
+    // flash; offset16..48 is exactly one byte-aligned [u8;32] array.
+    unsafe {
+        core::ptr::read_volatile(
+            core::ptr::addr_of!(UV98_CALIBRATION_PROFILE)
+                .cast::<u8>()
+                .add(16)
+                .cast::<[u8; 32]>(),
+        )
+    }
+}
+
 /// What the operator asked the spectrum session to become after the sweep
 /// owner finishes its current restore. The allowed follow-up is decided by the
 /// tested `spectrum_flow` policy, not by the restore reason alone.
@@ -646,7 +682,7 @@ fn main() -> ! {
         Serviced(lcd),
         Timing::new(),
         require(uv98_keys::Timing::new(30, 600), 0xE030),
-        PRESERVED_CALIBRATION_SHA256,
+        expected_calibration_digest(),
     );
     event(&mut log, 0x120, [0; 3]);
     event(&mut log, 0x121, [0; 3]);

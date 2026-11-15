@@ -1,56 +1,77 @@
+![UV98 Rust firmware — English, Deutsch, Русский](docs/images/project-banner.svg)
+
 # UV98 Rust
 
-Приватная разработка прошивки на Rust и собственной CPS для iRadio UV‑98 Plus / исследованной платы RT‑880. Цель — удобная радиолюбительская станция с сохранением заводских калибровок.
+**Rust firmware and Windows CPS for the iRadio UV-98 Plus / RT-880 radio platform.**
 
-**R35 build3 от 16 ноября 2026 года — кандидат для аппаратной проверки. Владельцем принята R33; она остаётся опорной.** R35 собрана от R33. Экспериментальная R34 не включена в производственную базу.
+Independent A/B operation, a colour spectrum display, shortwave tools and access to the source.
 
-## Прошивка и комплект
+**English** · [Deutsch](README.de.md) · [Русский](README.ru.md)
 
-[Скачать BIN R35](https://github.com/YaziAranea/uv98-rust/releases/download/r35/UV98-r35.bin) · [Скачать полный комплект R35](https://github.com/YaziAranea/uv98-rust/releases/download/r35/UV98-r35-2026-11-16.zip) · [Выпуск r35](https://github.com/YaziAranea/uv98-rust/releases/tag/r35).
+[**Firmware BIN**](https://github.com/YaziAranea/uv98-rust/releases/download/r36/UV98-r36.bin) · [**Firmware + CPS package**](https://github.com/YaziAranea/uv98-rust/releases/download/r36/UV98-r36-2026-11-16.zip) · [**Start here: backup and installation**](docs/GETTING-STARTED.en.md) · [Release notes](https://github.com/YaziAranea/uv98-rust/releases/tag/r36)
 
-Ссылки требуют доступа к приватному репозиторию. Комплект содержит CPS, R35, сохранённую R33, заводской файл восстановления 1.16, исходники без личных данных, отчёты и примеры экранов.
+> **Experimental firmware for the investigated AT32F423 board profile.** R36 is a template: use CPS to prepare a per-radio image from your verified NOR backup before flashing. This binds the image to your own calibration; it does not replace factory data. A similar model name does not establish board compatibility. Follow the [backup and preparation guide](docs/GETTING-STARTED.en.md#4-check-compatibility-before-flashing).
 
-Размер BIN — 251904 байта. SHA256:
+## On the screen
 
-~~~text
-97e3d98257cacef6d64917d4b355719e1649b8570e8df8e9c9527edd39c7307d
-~~~
+<table>
+<tr>
+<td align="center"><img src="docs/images/r36/en-home.png" width="240" alt="English dual A/B frequency screen with signal meters"><br><b>A/B channels and VFOs</b></td>
+<td align="center"><img src="docs/images/r36/en-spectrum.png" width="240" alt="Colour frequency spectrum and waterfall"><br><b>Spectrum and waterfall</b></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/images/r36/en-hf.png" width="240" alt="Shortwave receiver with an RSSI waterfall"><br><b>Shortwave tools</b></td>
+<td align="center"><img src="docs/images/r36/en-menu.png" width="240" alt="English radio menu"><br><b>English · Deutsch · Русский</b></td>
+</tr>
+</table>
 
-Образ проверяет SHA калибровок конкретной станции. Это пока не универсальный установщик для чужой UV98.
+*UI simulations rendered by the same Rust renderer used on the radio. Signals and readings in these illustrations are simulated; the images are not RF measurements.*
 
-## Новое в R35
+## What is included
 
-- GPS через штатный UART с проверкой NMEA, валидности и свежести позиции.
-- DTMF клавишами 0–9, * и # при удержании PTT, с возвратом микрофона после тона.
-- Select V: пятизначный числовой ID ZVEI1/CCIR в конце TX.
-- Ручной APRS-маяк через поддерживаемый C-BUS модем, на TX-частоте активного A/B.
-- КВ-водопад Si4732: 32 последовательные точки RSSI и 16 строк истории. Выход возвращает частоту, BFO и звук.
-- AM-фильтры Si4732 6/3/1 кГц и soft mute.
-- Пресеты CB 27.135 AM и 850.000 FM со стоковой картой коммутации. Штатный диапазон «800» начинается с 840 МГц. CB AM — приём; AM TX не добавлена.
-- Шрифт Chakra Petch с одинаковыми цифрами на MCU и в симуляторе. Сохранены звёздочка, цвета S-метра и RX-рамка R33.
-- CPS 0.5.0: редактор GPS/APRS в копии codeplug, актуальный выбор BIN, страницы прошивки и резервных копий.
+| Area | Features |
+|---|---|
+| Everyday operation | Independent A/B channel or VFO contexts, zones, repeater shift, CTCSS/DCS indications, segmented signal meters and assignable keys. |
+| Finding signals | Frequency scanning, spectrum cursor and window control, peak listening and a colour waterfall. |
+| Shortwave | Si4732 receiver, AM/USB/LSB/CW controls, band and step selection, sequential RSSI waterfall, AM filters and soft mute. |
+| Signalling | Keypad DTMF while holding PTT; five-digit ZVEI1/CCIR identification at the end of transmission. |
+| Navigation | GPS position handling and an explicitly requested APRS position beacon through the supported C-BUS modem. |
+| Windows CPS | Channel/zone editing, calibration and NOR backups, GPS/APRS file settings, image validation and flashing through the stock loader. |
+| Languages | English, German and Russian documentation and selectable radio UI. Channel names remain the user's own text. |
 
-Управление и границы описаны в [R35-REPORT-RU.txt](R35-REPORT-RU.txt).
+The stock “800 MHz” mode starts at **840 MHz**; the preset uses 850.000 MHz. CB uses a 27.135 MHz preset. CB AM is receive-only; AM transmission has not been added.
 
-## Проверки и ограничения
+## Start with a backup
 
-На ПК прошли 547 Rust-тестов, 122 CPS-теста и 80 Python-тестов; один Rust-тест пропущен. Выполнены 59 проверок раннего ARM-запуска, 59 проверок декодирования и 83 PNG-сценария. В нативной CPS проверены страницы GPS/APRS, резервных копий и прошивки: тестовое применение изменило 12 байт, отмена вернула ноль изменений.
+1. Keep the radio on its stock firmware and save its original `.880dmf` / `.98pdmf` file.
+2. Use our CPS to save **calibration**, **4 MiB NOR** and **settings/channel sections**. Each operation reads twice and compares the results.
+3. Keep the complete snapshot folders and a matching factory recovery file in two places. The public package does not include the manufacturer's firmware.
+4. Check board compatibility, then prepare your personal R36 image in CPS from the verified NOR snapshot. No Rust compiler is needed for this step.
 
-Во flash занято 251400 из 251904 байт; свободно 504 байта. Над статическими данными RAM остаётся 38828 байт. Это расчёт ELF, а не измеренный пик стека.
+The [file checklist and step-by-step guide](docs/GETTING-STARTED.en.md) names every CPS button and expected file. **The 4 MiB NOR backup is not an MCU firmware or bootloader dump.**
 
-В R35 не было COM-сеансов, прошивки или передач в эфир. Host-проверки не подтверждают RF-чувствительность, модуляцию или доставку APRS.
+## Current limits
 
-APRS RX в интерфейсе, автоматический маяк, GPIO-модем и полноценные NR/NB основного приёмника ещё не завершены. КВ-водопад закрывает звук во время обзора и не является FFT. Одновременный звук двух BK4819 не реализован; Dual Watch R33 сохранён.
+R33 is the owner's accepted baseline. Later candidates and their evidence are identified in the [release notes](https://github.com/YaziAranea/uv98-rust/releases); a successful build or simulated screen is not a hardware reception/transmission test.
 
-Настройки Rust пока находятся в RAM. CPS читает калибровки и NOR штатным протоколом при установленном стоке. Запись изменённого codeplug выполняется штатной CPS на стоке. Заводской recovery BIN — файл производителя, а не считанный дамп MCU.
+- Dual Watch alternates the receiver. Simultaneous audio from two BK4819 receivers is not implemented.
+- The HF waterfall retunes one Si4732 and interrupts audio during the sweep; it is not an FFT.
+- APRS is currently a manual beacon. An APRS receive UI, automatic beacons and the alternative GPIO modem remain unfinished.
+- AM filters/soft mute are available; general-purpose voice NR/NB on the main BK4819 is not implemented.
+- Radio settings, including the selected UI language, are currently volatile. The CPS file editor is not yet a USB settings-write protocol for the Rust firmware.
 
-## Продолжение разработки
+## Source and development
 
-- [Краткий handoff](HANDOFF.md).
-- [Пакет входа для другой модели](MODEL-HANDOFF-RU.md) и [стартовый промпт](NEXT-MODEL-PROMPT.txt).
-- [Реестр требований и наблюдений](FEATURES-NEXT-RU.txt), [продуктовый план](PRODUCT-ROADMAP-RU.txt).
-- [Сборка](BUILDING.md), [приватные входы](PRIVATE-INPUTS.md).
-- [RF, реле и Si4732](research/r35-rf/AUDIT-RU.txt), [сигналинг и GPS/APRS](research/r35-signaling/EVIDENCE-RU.txt), [редактор CPS](research/r35-ui/CPS-GPS-APRS-RU.txt).
+| Path | Purpose |
+|---|---|
+| [`firmware-diagnostic/`](firmware-diagnostic/) | Executable firmware and the main radio loop. |
+| [`crates/`](crates/) | Drivers, calibration interpretation, RF runtime, UI and signalling. |
+| [`apps/cps/`](apps/cps/) | Windows CPS source. |
+| [`apps/handheld-image-sim/`](apps/handheld-image-sim/) | Screen simulator using the shared renderer. |
+| [`research/`](research/) | Hardware evidence and protocol notes. |
 
-Прошивка находится в firmware-diagnostic/, библиотеки — в crates/, CPS — в apps/cps/, симулятор — в apps/handheld-image-sim/. Личные NOR, codeplug и calibration fixture не публикуются. Репозиторий остаётся приватным до отдельного решения владельца.
+[Build instructions](BUILDING.md) · [Contributing](CONTRIBUTING.md) · [Development handoff](HANDOFF-R36.md) · [Requirements and observations](FEATURES-NEXT-RU.txt) · [Private input policy](PRIVATE-INPUTS.md)
 
+Personal calibration blocks, NOR dumps and codeplugs are excluded from the repository. Some verification uses an original private fixture; see the build instructions before attempting to reproduce it. Original project code and documentation use the [MIT licence](LICENSE); third-party files retain their [own licences and attribution](THIRD-PARTY-NOTICES.md).
+
+For a useful issue, include the release and BIN hash, radio model/board information, exact steps, expected/actual behaviour and a photo of the relevant screen. Do not attach your full NOR, private codeplug or personal location logs to a public issue.

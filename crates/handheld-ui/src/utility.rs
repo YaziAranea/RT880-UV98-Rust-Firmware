@@ -93,13 +93,13 @@ mod tests {
     }
 }
 
-pub(super) fn shortwave_processing_label(row: u16, out: &mut [u16; WIDTH], view: View, y: u16) {
+pub(super) fn shortwave_processing_label(row: u16, out: &mut Row<'_>, view: View, y: u16) {
     let mut label = Text::new();
     if view.shortwave_mode == ShortwaveMode::Am {
         let filter = ["6", "3", "1"][usize::from(view.shortwave_filter.min(2))];
         let _ = write!(
             label,
-            "AM ФИЛЬТР {filter} КГЦ   SM {}",
+            "\x1f009 {filter} \x1f08F {}",
             if view.shortwave_soft_mute {
                 "ON"
             } else {
@@ -107,38 +107,31 @@ pub(super) fn shortwave_processing_label(row: u16, out: &mut [u16; WIDTH], view:
             }
         );
     } else {
-        let _ = label.write_str("ФИЛЬТР / SM: ДОСТУПНЫ В AM");
+        let _ = label.write_str("\x1f137");
     }
     centered(row, out, y, 1, label.as_str(), color::ACCENT);
 }
 
-pub(super) fn shortwave_scope_page(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+pub(super) fn shortwave_scope_page(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     let view = model.view;
     let mut title = Text::new();
     let _ = write!(
         title,
-        "{}  {}.{:03} КГЦ",
+        "{}  {}.{:03} \x1f08E",
         view.shortwave_mode.label(),
         view.shortwave_khz,
         view.shortwave_fraction_hz
     );
     centered(row, out, 55, 2, title.as_str(), color::TEXT);
     let Some(scope) = model.shortwave_scope.filter(|scope| scope.step_hz > 0) else {
-        centered(row, out, 136, 2, "НАЧАЛО ОБЗОРА", color::MUTED);
-        centered(
-            row,
-            out,
-            266,
-            1,
-            "EXIT: СЛУШАТЬ ВЫБРАННУЮ ЧАСТОТУ",
-            color::ACCENT,
-        );
+        centered(row, out, 136, 2, "\x1f0AF", color::MUTED);
+        centered(row, out, 266, 1, "\x1f017", color::ACCENT);
         return;
     };
     let mut width = Text::new();
     let _ = write!(
         width,
-        "ШАГ {} КГЦ  ПОЛОСА {} КГЦ",
+        "\x1f13A {} \x1f090 {} \x1f08E",
         scope.step_hz / 1000,
         scope.step_hz * 31 / 1000
     );
@@ -195,15 +188,8 @@ pub(super) fn shortwave_scope_page(row: u16, out: &mut [u16; WIDTH], model: &Mod
         }
     }
     shortwave_processing_label(row, out, view, 244);
-    centered(row, out, 260, 1, "ОБЗОР: ЗВУК ПРЕРЫВАЕТСЯ", color::MUTED);
-    centered(
-        row,
-        out,
-        276,
-        1,
-        "↑↓ ЦЕНТР  ДОЛГО 0 / EXIT: ПРИЁМ",
-        color::ACCENT,
-    );
+    centered(row, out, 260, 1, "\x1f0C8", color::MUTED);
+    centered(row, out, 276, 1, "\x1f144", color::ACCENT);
 }
 
 fn coordinate(value: i32, positive: &str, negative: &str) -> Text {
@@ -219,7 +205,7 @@ fn coordinate(value: i32, positive: &str, negative: &str) -> Text {
     text
 }
 
-pub(super) fn utility_page(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) {
+pub(super) fn utility_page(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     let view = model.view;
     match view.screen {
         Screen::Gps => {
@@ -229,11 +215,11 @@ pub(super) fn utility_page(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) 
                 62,
                 2,
                 if !view.gps_enabled {
-                    "GPS ВЫКЛЮЧЕН"
+                    "\x1f01A"
                 } else if view.gps_status.valid {
-                    "ПОЗИЦИЯ НАЙДЕНА"
+                    "\x1f0E7"
                 } else {
-                    "ПОИСК СПУТНИКОВ"
+                    "\x1f0EB"
                 },
                 if view.gps_status.valid {
                     color::GOOD
@@ -242,7 +228,7 @@ pub(super) fn utility_page(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) 
                 },
             );
             let mut line = Text::new();
-            let _ = write!(line, "СПУТНИКИ {:02}", view.gps_status.satellites);
+            let _ = write!(line, "\x1f128 {:02}", view.gps_status.satellites);
             centered(row, out, 99, 2, line.as_str(), color::ACCENT);
             if view.gps_enabled && view.gps_status.valid {
                 centered(
@@ -262,23 +248,23 @@ pub(super) fn utility_page(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) 
                     color::TEXT,
                 );
                 let mut age = Text::new();
-                let _ = write!(age, "ВОЗРАСТ ПОЗИЦИИ {} С", view.gps_status.age_seconds);
+                let _ = write!(age, "\x1f053 {} \x1f10A", view.gps_status.age_seconds);
                 centered(row, out, 213, 1, age.as_str(), color::MUTED);
             } else {
                 centered(row, out, 151, 2, "--.-----", color::MUTED);
                 centered(row, out, 180, 2, "--.-----", color::MUTED);
             }
-            centered(row, out, 264, 1, "MENU: ПИТАНИЕ GPS", color::ACCENT);
+            centered(row, out, 264, 1, "\x1f02A", color::ACCENT);
         }
         Screen::Aprs => {
             let (label, help) = match view.aprs_status {
-                AprsStatus::Unconfigured => ("НЕ НАСТРОЕН", "ПОЗЫВНОЙ: В CPS / ШТАТНОМ CFG"),
-                AprsStatus::Unsupported => ("МОДЕМ НЕ ПОДДЕРЖАН", "ДРУГОЕ ИСПОЛНЕНИЕ ПЛАТЫ"),
-                AprsStatus::NoFix => ("НЕТ ПОЗИЦИИ GPS", "ДОЖДИТЕСЬ ДОСТОВЕРНОЙ ПОЗИЦИИ"),
-                AprsStatus::Ready => ("МАЯК ГОТОВ", "MENU: ОТПРАВИТЬ ОДИН РАЗ"),
-                AprsStatus::Sending => ("ПЕРЕДАЧА ПАКЕТА", "ОТПУСТИТЕ КЛАВИШИ"),
-                AprsStatus::Sent => ("ПАКЕТ ОТПРАВЛЕН", "ДОСТАВКА НЕ ПОДТВЕРЖДЕНА"),
-                AprsStatus::Failed => ("ОШИБКА ПЕРЕДАЧИ", "MENU: ПОВТОР ПОСЛЕ ПРОВЕРКИ"),
+                AprsStatus::Unconfigured => ("\x1f0B1", "\x1f0E9"),
+                AprsStatus::Unsupported => ("\x1f09E", "\x1f078"),
+                AprsStatus::NoFix => ("\x1f0B7", "\x1f06C"),
+                AprsStatus::Ready => ("\x1f099", "\x1f029"),
+                AprsStatus::Sending => ("\x1f0DE", "\x1f0D4"),
+                AprsStatus::Sent => ("\x1f0DB", "\x1f077"),
+                AprsStatus::Failed => ("\x1f0D8", "\x1f02B"),
             };
             let mut identity = Text::new();
             for &c in &view.aprs_callsign {
@@ -305,7 +291,7 @@ pub(super) fn utility_page(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) 
             let mut target = Text::new();
             let _ = write!(
                 target,
-                "{} TX {} МГЦ",
+                "{} TX {} \x1f09A",
                 if view.active_slot == Slot::A {
                     "A"
                 } else {
@@ -313,14 +299,14 @@ pub(super) fn utility_page(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) 
                 },
                 frequency(tx_frequency.unwrap_or(0)).as_str()
             );
-            centered(row, out, 109, 1, "АКТИВНЫЙ КАНАЛ / VFO", color::MUTED);
+            centered(row, out, 109, 1, "\x1f03E", color::MUTED);
             centered(row, out, 127, 1, target.as_str(), color::ACCENT);
             centered(row, out, 165, 2, label, color::TEXT);
             centered(row, out, 207, 1, help, color::MUTED);
-            centered(row, out, 250, 1, "РУЧНОЙ МАЯК / AX.25", color::ACCENT);
+            centered(row, out, 250, 1, "\x1f109", color::ACCENT);
         }
         Screen::TxId => {
-            centered(row, out, 62, 2, "ПЯТЬ ЦИФР ID", color::ACCENT);
+            centered(row, out, 62, 2, "\x1f0F9", color::ACCENT);
             let mut draft = Text::new();
             if view.tx_id_digits > 0 {
                 let _ = write!(
@@ -336,28 +322,14 @@ pub(super) fn utility_page(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) 
             centered(row, out, 112, 4, draft.as_str(), color::TEXT);
             let mut current = Text::new();
             if let Some(id) = view.tx_id {
-                let _ = write!(current, "СЕЙЧАС: {id:05}");
+                let _ = write!(current, "\x1f110 {id:05}");
             } else {
-                let _ = current.write_str("ID НЕ ЗАДАН");
+                let _ = current.write_str("\x1f01C");
             }
             centered(row, out, 166, 2, current.as_str(), color::MUTED);
-            centered(
-                row,
-                out,
-                212,
-                1,
-                "MENU: СОХРАНИТЬ   #: ОЧИСТИТЬ",
-                color::ACCENT,
-            );
-            centered(row, out, 238, 1, "EXIT: ОТМЕНА БЕЗ ИЗМЕНЕНИЙ", color::MUTED);
-            centered(
-                row,
-                out,
-                264,
-                1,
-                "SELECT V ПЕРЕДАЁТ ID, НЕ ИМЯ",
-                color::MUTED,
-            );
+            centered(row, out, 212, 1, "\x1f02F", color::ACCENT);
+            centered(row, out, 238, 1, "\x1f016", color::MUTED);
+            centered(row, out, 264, 1, "\x1f039", color::MUTED);
         }
         _ => {}
     }

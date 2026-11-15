@@ -13,6 +13,7 @@ use uv98_handheld_ui::controller::{
     menu_entries, menu_location, LightMode, MenuEntry, MenuGroup, MenuItem, Mode, Request,
     ScanState, Screen, Setting, ShortcutAction, SideAction, Slot,
 };
+use uv98_handheld_ui::locale::Language;
 use uv98_handheld_ui::render::{
     Modulation, RadioRoute, RadioState, RadioView, SpectrumError, SpectrumState, HEIGHT, WIDTH,
 };
@@ -2412,6 +2413,145 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(empty_app.status().view.list_channel, None);
     tap(&mut empty_app, &mut empty_now, Key::Menu);
     assert_eq!(empty_app.status().view.channel, None);
+    // Public gallery: empty synthetic channel catalog, invented VFO values and
+    // explicitly simulated RF data. No owner's names, location or identifiers.
+    for (language, code) in [
+        (Language::Russian, "ru"),
+        (Language::English, "en"),
+        (Language::German, "de"),
+    ] {
+        open_setting(
+            &mut empty_app,
+            &mut empty_now,
+            MenuItem::Language,
+            Setting::Language,
+        );
+        let before = empty_app.status().view.language;
+        choose_setting(&mut empty_app, &mut empty_now, language as u8);
+        assert_eq!(
+            empty_app.status().view.language,
+            before,
+            "draft changed language"
+        );
+        assert_eq!(confirm_setting(&mut empty_app, &mut empty_now), None);
+        assert_eq!(empty_app.status().view.language, language);
+        frames.push(capture(
+            &mut empty_app,
+            &empty_panel,
+            output,
+            &format!("{code}-menu.png"),
+            empty_ms.get(),
+        )?);
+
+        home(&mut empty_app, &mut empty_now);
+        empty_app.select_slot(Slot::B).unwrap();
+        digits(&mut empty_app, &mut empty_now, "433500");
+        tap(&mut empty_app, &mut empty_now, Key::Menu);
+        empty_app.select_slot(Slot::A).unwrap();
+        digits(&mut empty_app, &mut empty_now, "126400");
+        tap(&mut empty_app, &mut empty_now, Key::Menu);
+        empty_app
+            .set_radio_view(RadioView {
+                state: RadioState::Receiving,
+                rssi: Some(151),
+                meter_floor: 128,
+                squelch_open: true,
+                modulation: Modulation::Am,
+                route: Some(RadioRoute::Vhf),
+                power: Some(0),
+                ..RadioView::OFF
+            })
+            .unwrap();
+        frames.push(capture(
+            &mut empty_app,
+            &empty_panel,
+            output,
+            &format!("{code}-home.png"),
+            empty_ms.get(),
+        )?);
+
+        digits(&mut empty_app, &mut empty_now, "433500");
+        tap(&mut empty_app, &mut empty_now, Key::Menu);
+        empty_app
+            .set_radio_view(RadioView {
+                state: RadioState::Receiving,
+                modulation: Modulation::Fm,
+                route: Some(RadioRoute::Uhf),
+                ..RadioView::OFF
+            })
+            .unwrap();
+        menu(&mut empty_app, &mut empty_now, MenuItem::Spectrum);
+        while empty_app.status().view.spectrum_span_index != 4 {
+            tap(&mut empty_app, &mut empty_now, Key::Digit2);
+        }
+        while empty_app.status().view.spectrum_step_index != 4 {
+            tap(&mut empty_app, &mut empty_now, Key::Digit7);
+        }
+        drain(&mut empty_app);
+        let mut demonstration = history;
+        demonstration.window_id = 36;
+        demonstration.start_10hz = 43_300_000;
+        demonstration.center_10hz = 43_350_000;
+        demonstration.step_10hz = 1250;
+        demonstration.state = SpectrumState::Sweeping;
+        for pass in 1..=16u16 {
+            demonstration.plot.sweep = pass.into();
+            for (bin, level) in demonstration.plot.latest.iter_mut().enumerate() {
+                let peak = [15usize, 42, 66]
+                    .into_iter()
+                    .zip([32usize, 53, 41])
+                    .map(|(center, height)| height.saturating_sub(bin.abs_diff(center) * 10))
+                    .max()
+                    .unwrap();
+                *level = (120 + peak + (bin * 17 + usize::from(pass) * 31) % 6) as u16;
+            }
+            assert!(empty_app.set_spectrum(demonstration).unwrap());
+            drain(&mut empty_app);
+        }
+        frames.push(capture(
+            &mut empty_app,
+            &empty_panel,
+            output,
+            &format!("{code}-spectrum.png"),
+            empty_ms.get(),
+        )?);
+
+        menu(&mut empty_app, &mut empty_now, MenuItem::Shortwave);
+        digits(&mut empty_app, &mut empty_now, "7100");
+        tap(&mut empty_app, &mut empty_now, Key::Menu);
+        empty_app
+            .set_shortwave_status(uv98_handheld_ui::controller::ShortwaveStatus::Listening {
+                part: 0x20,
+                rssi: 41,
+                snr: 17,
+            })
+            .unwrap();
+        hold_request(&mut empty_app, &mut empty_now, Key::Digit0);
+        assert!(empty_app.status().view.shortwave_scope);
+        for age in 0..16u8 {
+            for bin in 0..32u8 {
+                let peak = 32u8.saturating_sub(bin.abs_diff(16) * 8);
+                empty_app
+                    .shortwave_scope_sample(
+                        7_020_000,
+                        5_000,
+                        bin,
+                        12 + (bin + age) % 7 + peak,
+                        8,
+                        bin == 31,
+                    )
+                    .unwrap();
+            }
+        }
+        frames.push(capture(
+            &mut empty_app,
+            &empty_panel,
+            output,
+            &format!("{code}-hf.png"),
+            empty_ms.get(),
+        )?);
+        home(&mut empty_app, &mut empty_now);
+    }
     let (empty_memory, _) = empty_app.into_parts();
     assert!(!empty_memory.selected);
     assert_eq!(
@@ -2443,6 +2583,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "radio_simulation":{"metadata_injected":true,"hardware_backend_present":false,
             "mock_values_not_measurements":true,"rf_image_filename_marker":"SIMULATED"},
         "empty_catalog":{"synthetic_only":true,"input_sha256":empty_hash,"ready_in_vfo":true,"calibration_match":true,"selection_remains_none":true,"bytes_unchanged":true},
+        "localization":{"languages":["ru","en","de"],"default":"ru","runtime_setting":true,"persistent":false,
+            "gallery_uses_empty_channel_catalog":true,"gallery_rf_values_are_simulated":true,
+            "files_per_language":["home","menu","spectrum","hf"]},
         "reads":memory.reads,"render_work":performance,"frame_count":frame_count,"frames":frames,
         "acceptance":["first/adjacent active channels", "channel list choice", "explicit numeric channel confirm",
             "invalid channel does not navigate", "cancel does not commit", "VFO entry commits only on MENU", "six-digit MHz entry pads right",

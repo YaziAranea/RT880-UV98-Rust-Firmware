@@ -114,6 +114,47 @@ impl FirmwarePane {
         self.log.push(text);
     }
 
+    fn personalize_image(&mut self) {
+        let Some(source) = self.image.clone() else {
+            return;
+        };
+        self.armed = false;
+        let Some(manifest) = rfd::FileDialog::new()
+            .set_title("manifest.json полного снимка CPS (4 МиБ, два совпавших чтения)")
+            .add_filter("Манифест резервной копии", &["json"])
+            .pick_file()
+        else {
+            return;
+        };
+        let Some(parent) = rfd::FileDialog::new()
+            .set_title("Папка для нового персонального образа (исходники не изменяются)")
+            .pick_folder()
+        else {
+            return;
+        };
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let output = parent.join(format!("UV98-personal-{stamp}"));
+        match firmware::profile::personalize(&source, &manifest, &output) {
+            Ok(image) => {
+                self.selected_path = Some(image.path.clone());
+                self.image = Some(image);
+                self.finished = false;
+                self.progress = None;
+                self.session_dir = None;
+                self.log.clear();
+                self.error = false;
+                self.message = format!("Персональный образ готов и выбран: {}. Изменён только SHA256 ваших калибровок. Запись ещё не начиналась.", output.display());
+            }
+            Err(error) => {
+                self.error = true;
+                self.message = format!("Образ не подготовлен: {error}");
+            }
+        }
+    }
+
     pub fn poll(&mut self, ctx: &egui::Context) {
         let Some(receiver) = self.receiver.as_ref() else {
             return;
@@ -272,8 +313,14 @@ impl FirmwarePane {
                     ui.monospace(format!("SHA256  {}", image.sha256));
                 }
                 ui.small(
-                    "Принимаются только образы с совпадающим SHA256 из каталога этого комплекта.",
+                    "Принимаются образы каталога комплекта и проверенные персональные копии на их основе.",
                 );
+                ui.add_space(5.0);
+                if ui.add_enabled(self.image.is_some(), egui::Button::new("Подготовить образ для моей рации…")).clicked() {
+                    self.personalize_image();
+                }
+                ui.small("Для первого запуска на другой рации: исходный R36 → manifest.json полного снимка 4 МиБ → новая папка с BIN и каталогом. COM не используется; дампы и исходный BIN сохраняются.");
+                ui.colored_label(WARNING, "Только для той же подтверждённой аппаратной ревизии. Проверка снимка не подтверждает совместимость другой платы.");
             });
             ui.add_space(8.0);
             ui.group(|ui| {
@@ -427,7 +474,7 @@ impl FirmwarePane {
             });
         ui.add_space(8.0);
         ui.small("Записывается приложение MCU. Заводские калибровки и каналы во внешней памяти эта операция не записывает.");
-        ui.small("Возврат стока: выберите штатный образ из папки recovery и выполните те же шаги.");
+        ui.small("Возврат стока: выберите собственный совместимый заводской BIN; CPS проверит его по каталогу. Публичный комплект не содержит заводского BIN.");
     }
 }
 
