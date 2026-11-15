@@ -6,9 +6,25 @@
 //! FM channel/VFO TX. NOR remains read-only; lower physical PTT stays unmapped.
 //! A successful register check does not establish physical board/RF safety.
 
+mod beacon;
+#[path = "shortwave.rs"]
+mod shortwave_bus;
+mod signaling;
+use at32f4xx_pac::at32f423::interrupt;
+
+#[at32f4xx_pac::at32f423::interrupt]
+fn USART2() {
+    unsafe {
+        uv98_gps_at32::on_interrupt();
+    }
+}
+
+use uv98_radio_runtime::shortwave;
+
 use core::{fmt::Debug, num::NonZeroU32, panic::PanicInfo};
 use cortex_m::peripheral::DWT;
 use cortex_m_rt::entry;
+#[cfg(feature = "verbose-faults")]
 use uv98_boot_log::error_text::ErrorText;
 use uv98_boot_log::hardware::{RawMmio, TxLogger};
 use uv98_boot_log::{Frame, Logger, RegisterIo};
@@ -17,12 +33,17 @@ use uv98_diag_startup::{hardware as startup, CycleMillis, CORE_NOMINAL_HZ, CORE_
 use uv98_display::DisplayBus;
 use uv98_handheld_app::{App, InputSample, SpectrumSnapshot, PRESERVED_CALIBRATION_SHA256};
 use uv98_handheld_ui::{
-    controller::{Request, ScanState, Slot, STEP_10HZ},
+    controller::{
+        CrossbandProbe, Request, ScanState, Screen, ShortwaveStatus, Slot, SPECTRUM_INTERVALS,
+        STEP_10HZ,
+    },
+    render,
     render::{Modulation as UiModulation, RadioRoute, RadioState, RadioView, SpectrumState},
 };
 use uv98_nor_read::Bus;
 use uv98_radio_runtime::{
-    lighting, policy, ptt, scan, scope, tx_policy, tx_trial, Runtime, State as RfState,
+    crossband, lighting, policy, ptt, scan, scope, spectrum_flow, tx_policy, tx_trial, Runtime,
+    State as RfState,
 };
 use uv98_rf_sequence::Modulation;
 use uv98_spectrum::compact as spectrum;
@@ -31,7 +52,25 @@ use uv98_spectrum::compact as spectrum;
 #[cfg(all(feature = "upper-exo-tx-trial", feature = "channel-tx"))]
 compile_error!("Select exactly one TX profile");
 const LIVE_TX: bool = cfg!(any(feature = "upper-exo-tx-trial", feature = "channel-tx"));
+const LIVE_RELAY: bool = cfg!(feature = "channel-tx");
 const LOWER_PTT_CODE: Option<u8> = None;
+
+/// What the operator asked the spectrum session to become after the sweep
+/// owner finishes its current restore. The allowed follow-up is decided by the
+/// tested `spectrum_flow` policy, not by the restore reason alone.
+use uv98_radio_runtime::spectrum_flow::{Action as SpectrumAction, Intent as SpectrumIntent};
+
+fn spectrum_error(error: scope::StartError) -> render::SpectrumError {
+    use render::SpectrumError as Ui;
+    use scope::StartError as E;
+    match error {
+        E::NotReceiving | E::Receive(_) => Ui::Receiver,
+        E::Busy | E::Protocol(spectrum::StartError::Busy) => Ui::Busy,
+        E::Window(_) | E::Grid | E::CenterMismatch => Ui::Window,
+        E::Qualification(_) => Ui::Route,
+        E::Protocol(_) => Ui::Receiver,
+    }
+}
 
 #[used]
 #[no_mangle]
@@ -91,14 +130,19 @@ fn event(log: &mut impl Events, code: u32, details: [u32; 3]) {
 fn checked<T, E: Debug>(log: &mut impl Events, result: Result<T, E>, fault: u32) -> T {
     match result {
         Ok(value) => value,
-        Err(error) => {
+        Err(_error) => {
             // SAFETY: terminal takeover; owned peripherals never resume.
             let _ = unsafe { startup::terminal_radio_off_requests() };
-            let text = ErrorText::format(&error);
-            event(log, fault, text.metadata());
-            for frame in text.frames() {
-                log.record(frame);
+            #[cfg(feature = "verbose-faults")]
+            {
+                let text = ErrorText::format(&_error);
+                event(log, fault, text.metadata());
+                for frame in text.frames() {
+                    log.record(frame);
+                }
             }
+            #[cfg(not(feature = "verbose-faults"))]
+            event(log, fault, [0; 3]);
             unsafe { startup::terminal_fail_stop() }
         }
     }
@@ -187,25 +231,159 @@ fn tx_hold_within_limit(start: u32, now: u32) -> bool {
     }
 }
 
+fn radio_settings<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
+    app: &App<N, L, D>,
+) -> Option<policy::Settings> {
+    app.radio_config().map(|cfg| policy::Settings {
+        squelch: cfg.squelch,
+        mic_gain: cfg.mic_gain,
+        fm_volume: cfg.fm_volume,
+        am_volume: cfg.am_volume,
+        squelch_delay: cfg.squelch_delay,
+    })
+}
+
 fn profile<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
     app: &App<N, L, D>,
     settings: &[policy::Overrides; 2],
 ) -> Result<policy::Profile, policy::Error> {
-    let cfg = app.radio_config().ok_or(policy::Error::Settings)?;
+    let cfg = radio_settings(app).ok_or(policy::Error::Settings)?;
     let view = app.status().view;
     let index = if view.active_slot == Slot::A { 0 } else { 1 };
-    policy::profile(
-        view,
-        app.selected_channel(),
-        policy::Settings {
-            squelch: cfg.squelch,
-            mic_gain: cfg.mic_gain,
-            fm_volume: cfg.fm_volume,
-            am_volume: cfg.am_volume,
-            squelch_delay: cfg.squelch_delay,
-        },
-        settings[index],
-    )
+    policy::profile(view, app.selected_channel(), cfg, settings[index])
+}
+
+fn crossband_session<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
+    app: &App<N, L, D>,
+    settings: &[policy::Overrides; 2],
+    incoming: policy::Profile,
+) -> Option<crossband::Session> {
+    let (view, channel) = app.peer_radio_selection();
+    let index = if view.active_slot == Slot::A { 0 } else { 1 };
+    let outgoing = policy::profile(view, channel, radio_settings(app)?, settings[index]).ok()?;
+    if view.active_slot == Slot::B {
+        crossband::Session::arm(incoming, outgoing, Slot::A)
+    } else {
+        crossband::Session::arm(outgoing, incoming, Slot::B)
+    }
+}
+
+fn relay_carrier(signal: uv98_radio_runtime::Signal) -> crossband::Carrier {
+    if signal.audio_open {
+        crossband::Carrier::Open
+    } else if signal.squelch_open {
+        crossband::Carrier::PendingTone
+    } else {
+        crossband::Carrier::Closed
+    }
+}
+
+fn crossband_status(session: &crossband::Session, relaying: bool) -> CrossbandProbe {
+    CrossbandProbe::Ready {
+        a_rx: session.pair(Slot::A).receive().frequency_10hz,
+        b_rx: session.pair(Slot::B).receive().frequency_10hz,
+        traffic: relaying.then(|| {
+            let slot = session.slot();
+            let pair = session.pair(slot);
+            (
+                slot,
+                pair.receive().frequency_10hz,
+                pair.transmit().frequency_10hz,
+            )
+        }),
+        live: LIVE_RELAY,
+    }
+}
+
+fn probe_secondary_frequency<B: uv98_diag_quiesce::RegisterIo>(
+    bus: &mut B,
+    words: [u16; 2],
+) -> Result<bool, B::Error> {
+    if bus.profile() != uv98_rf_bus::Profile::B {
+        return Ok(false);
+    }
+    for (address, mask, expected) in [(0x33, 0x001f, 0), (0x36, 0xffff, 0x007f), (0x30, 0xffff, 0)]
+    {
+        if bus.read(address)? & mask != expected {
+            return Ok(false);
+        }
+    }
+    bus.write(0x38, words[0])?;
+    bus.write(0x39, words[1])?;
+    Ok(bus.read(0x38)? == words[0] && bus.read(0x39)? == words[1])
+}
+
+fn write_relay_register<B: uv98_diag_quiesce::RegisterIo>(
+    bus: &mut B,
+    address: u8,
+    value: u16,
+) -> Result<bool, B::Error> {
+    bus.write(address, value)?;
+    if matches!(address, 0x30 | 0x33 | 0x36 | 0x38 | 0x39) {
+        return Ok(bus.read(address)? == value);
+    }
+    Ok(true)
+}
+
+fn apply_secondary_plan<B: uv98_diag_quiesce::RegisterIo>(
+    bus: &mut B,
+    plan: &uv98_rf_sequence::Plan,
+) -> Result<bool, B::Error> {
+    use uv98_rf_sequence::Step;
+    for &step in plan.operations() {
+        let (register, value) = match step {
+            Step::WriteA { register, value } => (register, value),
+            Step::UpdateA {
+                register,
+                keep_mask,
+                value,
+            } => (register, (bus.read(register)? & keep_mask) | value),
+            Step::DelayMs(ms) => {
+                uv98_display::Delay::delay_ms(&mut Timing::new(), u32::from(ms));
+                continue;
+            }
+            _ => return Ok(false),
+        };
+        if !write_relay_register(bus, register, value)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn stop_relay<A: uv98_diag_quiesce::RegisterIo, B: uv98_diag_quiesce::RegisterIo>(
+    radio: &mut Runtime<uv98_radio_runtime::hardware::RadioIo<A>>,
+    secondary: &mut B,
+) {
+    // Drop the external V/U gate before touching any B register. If either
+    // bus fails, the independent terminal writer still attempts both chips.
+    if radio.relay_route(None).is_err() {
+        stop(0xE065);
+    }
+    stop_secondary(secondary);
+}
+
+fn stop_secondary<B: uv98_diag_quiesce::RegisterIo>(secondary: &mut B) {
+    for (reg, value) in [(0x33, 0), (0x36, 0x007f), (0x30, 0), (0x37, 0x1d00)] {
+        if !matches!(write_relay_register(secondary, reg, value), Ok(true)) {
+            stop(0xE065);
+        }
+    }
+}
+
+/// Build the volatile spectrum window from the UI's independent span/step.
+/// The window is always centred on the confirmed receive frequency; refused
+/// combinations never reach the protocol engine.
+fn spectrum_window(
+    view: uv98_handheld_ui::controller::View,
+    center_10hz: u32,
+) -> Option<uv98_spectrum::Window> {
+    let step = STEP_10HZ
+        .get(usize::from(view.spectrum_step_index))
+        .copied()?;
+    let intervals = u32::from(*SPECTRUM_INTERVALS.get(usize::from(view.spectrum_span_index))?);
+    let span = step.checked_mul(intervals)?;
+    uv98_spectrum::Window::centered(center_10hz, span, step).ok()
 }
 
 fn scan_action<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
@@ -484,6 +662,14 @@ fn main() -> ! {
         event(&mut log, code, [0; 3]);
     });
     checked(&mut log, started, 0xE031);
+    // UI must distinguish an editable lower-key assignment from a physically
+    // identified input source. The constant stays None until the board trace
+    // proves which ADC code belongs to that key.
+    checked(
+        &mut log,
+        app.set_lower_side_mapped(LOWER_PTT_CODE.is_some()),
+        0xE032,
+    );
     event(
         &mut log,
         0x122,
@@ -512,7 +698,33 @@ fn main() -> ! {
         },
         0xE051,
     );
-    let _reserved = radio_pins.reserved;
+    let (tuner_pins, reserved) = radio_pins.reserved.with_shortwave();
+    let (gps_pins, modem_pins, _reserved) = reserved.with_auxiliary();
+    let mut gps = unsafe { uv98_gps_at32::Gps::new(gps_pins) };
+    let mut aprs_raw = [0xffu8; 198];
+    let aprs_config = if app.read_auxiliary_config(3120, &mut aprs_raw) {
+        uv98_signaling::aprs::Config::from_stock_tail(&aprs_raw).ok()
+    } else {
+        None
+    };
+    if let Some(config) = aprs_config {
+        app.set_aprs_identity(*config.source.callsign(), config.source.ssid());
+    }
+    let mut beacon = unsafe { beacon::Beacon::new(modem_pins, aprs_config, aprs_raw[193].min(7)) };
+    let mut gps_configuration = (false, 1u8);
+    let mut gps_ui_at = 0u32;
+    // Preinit disabled and cleared every NVIC line. Only the installed USART2
+    // handler may be enabled by Gps::configure; it owns a separate IRQ ring.
+    unsafe {
+        cortex_m::interrupt::enable();
+    }
+    let mut tuner_bus = shortwave_bus::Bus::new(p.I2C1, tuner_pins, &mut p.CRM);
+    let mut tuner_session: Option<shortwave::Session> = None;
+    let mut tuner_mode_switch = shortwave::ModeSwitch::default();
+    let mut tuner_sweep = uv98_radio_runtime::shortwave_scope::Sweep::default();
+    let mut tuner_failed = None;
+    let mut tuner_function = 0;
+    let mut tuner_repower_at: Option<u32> = None;
     let mut side = checked(
         &mut log,
         unsafe {
@@ -559,13 +771,34 @@ fn main() -> ! {
     let mut current = None;
     let mut scanner = scan::Scheduler::new();
     let mut scope = scope::Scope::new();
+    // Set only by an explicit span/step change while a sweep is active. The
+    // restart waits for the acknowledged RX restoration instead of retuning an
+    // owned sweep; PTT and EXIT never inherit it.
+    let mut restart_spectrum = false;
+    let mut spectrum_center = None;
+    let mut spectrum_edge: Option<(u32, bool)> = None;
+    // Pending action after the sweep's selected/original restore completes.
+    let mut spectrum_intent: Option<SpectrumIntent> = None;
+    // End temporary listening: Some(true) resumes the same window, Some(false)
+    // exits the spectrum session. None means no stop was requested.
+    let mut listen_after: Option<bool> = None;
+    // Publish one final stopped snapshot after the sweep ends, then stop
+    // rewriting an identical snapshot every 250 ms while the scope is idle.
+    let mut publish_spectrum_final = false;
     let mut spectrum_published_at = now;
     let mut tx_slot = None;
     let mut tx_started_at = None;
     let mut tx_authorization: Option<tx_policy::Authorization> = None;
     let mut ptt_guard = ptt::Guard::new();
+    let mut relay_session = None;
+    let mut second_rx = None;
+    let mut watch_config = None;
+    let mut dual_watch = None;
+    let mut relay_active = false;
     let mut last_signal = None;
     let mut signal_at = now;
+    let mut meter_floor = uv98_handheld_ui::meter::NoiseFloor::default();
+    let mut meter_receive = None;
     let mut ui_rssi_at = now;
     let mut telemetry_at = now;
     let mut telemetry_samples = 4u8;
@@ -578,6 +811,11 @@ fn main() -> ! {
     let mut heartbeat_at = now;
     let mut idle = Timing::new();
     let mut adc_previous = None;
+    let mut ui_aux = uv98_handheld_ui::input::AuxFilter::default();
+    app.enable_fast_matrix_input();
+    let mut tx_tones = signaling::TransmitTones::new();
+    let mut tx_key_latched = false;
+    let mut uncertain_tx_since: Option<u32> = None;
     let mut max_loop_cycles = 0;
     let mut max_render_cycles = 0;
     let mut render_rows = 0;
@@ -591,19 +829,83 @@ fn main() -> ! {
         let adc = checked(&mut log, side.sample(), 0xE055);
         let adc_code = uv98_keys::stock_auxiliary_code(adc.raw);
         let key_sample = keys.scan_idle_or_full();
-        let raw = key_sample
+        let mut raw = key_sample
             .as_ref()
             .ok()
             .map(|s| (s.matrix_raw(), s.ptt_pressed()));
+        let input_at = require(time.sample(DWT::cycle_count()), 0xE016);
+        // A keypad contact can change between forward/reverse scans. During
+        // established voice TX, retain only fresh physical PTT for <=32 ms.
+        // Never arm from this fallback or turn uncertain data into a DTMF key.
+        if radio.state() == RfState::Transmitting
+            && matches!(
+                key_sample,
+                Err(uv98_keyscan_at32::Error::UnstableMatrix { .. })
+            )
+        {
+            let since = *uncertain_tx_since.get_or_insert(input_at);
+            if input_at.wrapping_sub(since) < 32 {
+                if let Ok(guard) = keys.guard_scan() {
+                    raw = Some((0, guard.ptt_pressed()));
+                }
+            }
+        } else {
+            uncertain_tx_since = None;
+        }
+        let matrix = raw.map(|(matrix, _)| matrix);
+        let dtmf_key = matrix
+            .and_then(signaling::keypad)
+            .filter(|_| app.status().view.dtmf_enabled && radio.state() == RfState::Transmitting);
+        if dtmf_key.is_some() {
+            tx_key_latched = true;
+        }
+        if matrix == Some(0) && uncertain_tx_since.is_none() {
+            tx_key_latched = false;
+        }
         let upper = raw.is_some_and(|(_, p)| p);
         let lower = LOWER_PTT_CODE == Some(adc_code);
         let raw_ptt = ptt::Input {
             upper,
             lower,
-            clean: raw.is_some_and(|(m, _)| m == 0) && (adc_code == 0xff || lower),
+            clean: raw.is_some_and(|(m, _)| m == 0 || dtmf_key.is_some())
+                && (adc_code == 0xff || lower),
         };
-        let physical_source_held = ptt_guard.observe(raw_ptt, scanner.active() || scope.active());
+        if relay_active && (upper || lower) {
+            stop_relay(&mut radio, &mut secondary);
+            relay_active = false;
+        }
+        let receive_tool_blocks_tx = matches!(
+            app.status().view.screen,
+            Screen::Shortwave | Screen::Crossband
+        ) || tuner_repower_at.is_some();
+        let physical_source_held = ptt_guard.observe(
+            raw_ptt,
+            scanner.active() || scope.active() || receive_tool_blocks_tx,
+        );
         let view = app.status().view;
+        if gps_configuration != (view.gps_enabled, view.gps_baud) {
+            gps.configure(view.gps_enabled, view.gps_baud);
+            gps_configuration = (view.gps_enabled, view.gps_baud);
+        }
+        gps.poll(input_at, 96);
+        if input_at.wrapping_sub(gps_ui_at) >= 500 {
+            gps_ui_at = input_at;
+            let fix = gps.fix(input_at);
+            let report = gps.last_report();
+            let position = fix.map(|fix| fix.position);
+            checked(
+                &mut log,
+                app.set_gps_status(uv98_handheld_ui::controller::GpsStatus {
+                    valid: position.is_some(),
+                    latitude_e7: position.map_or(0, |p| p.latitude_e7),
+                    longitude_e7: position.map_or(0, |p| p.longitude_e7),
+                    satellites: report.and_then(|r| r.satellites).unwrap_or(0),
+                    age_seconds: report
+                        .map_or(0, |r| input_at.wrapping_sub(r.received_at_ms) / 1000),
+                }),
+                0xE032,
+            );
+        }
         let guarded_profile = if cfg!(feature = "channel-tx") {
             profile(&app, &settings).ok()
         } else {
@@ -622,7 +924,58 @@ fn main() -> ! {
                     && (!cfg!(feature = "channel-tx")
                         || tx_authorization.is_some_and(|a| a.still_held(view, p, raw_ptt)))
             });
-        let mut polled = checked(&mut log, radio.tick(now, physical_held), 0xE056);
+        let mut tail_view = view;
+        tail_view.ptt_down = false;
+        tail_view.ptt_slot = None;
+        let allow_tail = !upper
+            && !lower
+            && matrix == Some(0)
+            && uncertain_tx_since.is_none()
+            && adc_code == 0xff
+            && tx_started_at.is_some_and(|start| tx_hold_within_limit(start, now))
+            && guarded_profile.is_some_and(|profile| {
+                tx_authorization.is_some_and(|a| a.tail_configuration_valid(tail_view, profile))
+            });
+        let calibration = app.calibration_view().unwrap_or_else(|| stop(0xE050));
+        let beacon_held = checked(
+            &mut log,
+            beacon.step(
+                &mut radio,
+                &calibration,
+                now,
+                guarded_profile,
+                view.screen == Screen::Aprs,
+                upper,
+                lower,
+                adc_code == 0xff,
+                matrix,
+            ),
+            0xE066,
+        );
+        if beacon.take_finished() {
+            current = None;
+            last_signal = None;
+        }
+        beacon.refresh(gps.fix(now).is_some(), now);
+        checked(&mut log, app.set_aprs_status(beacon.status()), 0xE032);
+        let tx_held = if beacon.active() {
+            beacon_held
+        } else {
+            checked(
+                &mut log,
+                tx_tones.step(
+                    &mut radio,
+                    now,
+                    physical_held,
+                    allow_tail,
+                    dtmf_key,
+                    view.tx_tail,
+                    view.tx_id,
+                ),
+                0xE065,
+            )
+        };
+        let mut polled = checked(&mut log, radio.tick(now, tx_held), 0xE056);
         // Drain a small amount of configuration work without LCD/NOR/UART or
         // idle work between register operations. The 2ms admission budget is
         // checked before each operation; a single synchronous operation may
@@ -630,7 +983,8 @@ fn main() -> ! {
         let burst_started = DWT::cycle_count();
         for _ in 0..7 {
             let now = require(time.sample(DWT::cycle_count()), 0xE016);
-            if !radio.configuration_step_ready(now)
+            if beacon.active()
+                || !radio.configuration_step_ready(now)
                 || DWT::cycle_count().wrapping_sub(burst_started) >= 96_000
                 || polled.tx_ended
             {
@@ -646,9 +1000,13 @@ fn main() -> ! {
                 let input = ptt::Input {
                     upper: guard.as_ref().is_ok_and(|s| s.ptt_pressed()),
                     lower: LOWER_PTT_CODE == Some(aux),
-                    clean: guard.as_ref().is_ok_and(|s| s.matrix_clear()) && aux == 0xff,
+                    clean: guard.as_ref().is_ok_and(|s| s.matrix_clear())
+                        && (aux == 0xff || LOWER_PTT_CODE == Some(aux)),
                 };
-                let same_source = ptt_guard.observe(input, scanner.active() || scope.active());
+                let same_source = ptt_guard.observe(
+                    input,
+                    scanner.active() || scope.active() || receive_tool_blocks_tx,
+                );
                 let now = require(time.sample(DWT::cycle_count()), 0xE016);
                 let guarded_profile = if cfg!(feature = "channel-tx") {
                     profile(&app, &settings).ok()
@@ -685,7 +1043,10 @@ fn main() -> ! {
         }
         // UART logging can block for a frame; physical TX release is handled
         // first. Side-button identities are still telemetry, not inferred PTTs.
-        if !radio.tx_active_or_starting() && adc_previous != Some((adc_code, upper)) {
+        if !radio.tx_active_or_starting()
+            && !beacon.active()
+            && adc_previous != Some((adc_code, upper))
+        {
             event(
                 &mut log,
                 0x171,
@@ -693,25 +1054,42 @@ fn main() -> ! {
             );
             adc_previous = Some((adc_code, upper));
         }
+        let aux_now = require(time.sample(DWT::cycle_count()), 0xE016);
+        let stable_aux = ui_aux.sample(aux_now, uv98_keys::auxiliary_key(adc.raw));
         let sample = match raw {
-            Some((matrix, ptt_pressed)) if adc_code == 0xff || lower => InputSample::WithAux {
-                matrix,
+            Some((matrix, ptt_pressed)) => InputSample::WithAux {
+                matrix: if tx_key_latched { 0 } else { matrix },
                 ptt_pressed,
                 aux: if lower {
                     Some(uv98_keys::Key::Aux16)
+                } else if matrix == 0 {
+                    stable_aux
                 } else {
                     None
                 },
             },
-            _ => InputSample::Unstable,
+            None if matches!(
+                key_sample,
+                Err(uv98_keyscan_at32::Error::UnstableMatrix { .. })
+            ) =>
+            {
+                InputSample::MatrixTransition
+            }
+            None => InputSample::Unstable,
         };
         let now = require(time.sample(DWT::cycle_count()), 0xE016);
         // Any physical side-key activity cancels a sweep. PTT cannot turn this
         // cancellation into transmission; the guard requires a later release
-        // and a new eligible edge on the normal channel screen.
-        scope.event(now, spectrum::Event::Ptt(upper || adc_code != 0xff));
+        // and a new eligible edge on the normal channel screen. Side activity
+        // also cancels a queued span/step restart: the pending restore still
+        // ends with StopReason::Exit, which must not be read as restart intent.
+        let side_activity = upper || lower;
+        if side_activity {
+            restart_spectrum = false;
+        }
+        scope.event(now, spectrum::Event::Ptt(side_activity));
         let update = checked(&mut log, app.sample(now, sample), 0xE032);
-        if let Some(key) = update.pressed {
+        if let Some(key) = update.pressed.filter(|_| !beacon.active()) {
             let v = app.status().view;
             event(
                 &mut log,
@@ -737,7 +1115,17 @@ fn main() -> ! {
         let mut action = scan::Action::None;
         if update.cancel_temporary {
             settings[index].monitor = false;
-            scope.event(now, spectrum::Event::Stop);
+            // EXIT/PTT cancels any queued restart even if the in-flight restore
+            // still completes with StopReason::Exit.
+            restart_spectrum = false;
+            checked(&mut log, app.cancel_spectrum_pending(), 0xE032);
+            if scope.listening() || scope.listen_restoring() {
+                checked(&mut log, app.set_spectrum_listening(false), 0xE032);
+                listen_after = Some(false);
+            } else {
+                spectrum_intent = Some(SpectrumIntent::Exit);
+                scope.event(now, spectrum::Event::Stop);
+            }
             if scanner.active() {
                 action = scanner.cancel();
                 checked(&mut log, app.cancel_scan(), 0xE032);
@@ -747,7 +1135,11 @@ fn main() -> ! {
         if let Some(request) = update.request {
             if matches!(
                 request,
-                Request::SetPower(_) | Request::SetMonitor(_) | Request::SetModulation { .. }
+                Request::SetPower(_)
+                    | Request::SetMonitor(_)
+                    | Request::SetModulation { .. }
+                    | Request::StartSpectrum
+                    | Request::RestartSpectrum
             ) && scanner.active()
             {
                 scanner.cancel();
@@ -756,37 +1148,298 @@ fn main() -> ! {
             }
             match request {
                 Request::StartSpectrum => {
+                    spectrum_center = None;
+                    spectrum_edge = None;
                     let calibration = match app.calibration_view() {
                         Some(c) => c,
                         None => stop(0xE050),
                     };
-                    let rx = profile(&app, &settings).ok().and_then(|p| p.receive);
-                    let step = STEP_10HZ
-                        .get(usize::from(app.status().view.step_index))
-                        .copied();
-                    let started = match (rx, step) {
-                        (Some(rx), Some(step)) => {
-                            scope.start(&radio, &calibration, rx, step, now).is_ok()
-                        }
-                        _ => false,
+                    let started = match profile(&app, &settings).ok().and_then(|p| p.receive) {
+                        Some(rx) => match spectrum_window(app.status().view, rx.frequency_10hz) {
+                            Some(window) => {
+                                scope.start_window(&radio, &calibration, rx, window, now)
+                            }
+                            None => Err(scope::StartError::CenterMismatch),
+                        },
+                        None => Err(scope::StartError::NotReceiving),
                     };
-                    if started {
-                        ptt_guard.disarm();
-                        last_signal = None;
-                        checked(&mut log, app.clear_spectrum(), 0xE032);
+                    match started {
+                        Ok(()) => {
+                            restart_spectrum = false;
+                            spectrum_intent = None;
+                            listen_after = None;
+                            ptt_guard.disarm();
+                            last_signal = None;
+                            checked(&mut log, app.clear_spectrum(), 0xE032);
+                            spectrum_published_at = now.wrapping_sub(250);
+                        }
+                        Err(error) => {
+                            scope.discard();
+                            publish_spectrum_final = false;
+                            checked(&mut log, app.clear_spectrum(), 0xE032);
+                            checked(
+                                &mut log,
+                                app.reject_spectrum_start(spectrum_error(error)),
+                                0xE032,
+                            );
+                        }
+                    }
+                }
+                Request::StopSpectrum => {
+                    restart_spectrum = false;
+                    checked(&mut log, app.cancel_spectrum_pending(), 0xE032);
+                    if scope.listening() || scope.listen_restoring() {
+                        checked(&mut log, app.set_spectrum_listening(false), 0xE032);
+                        listen_after = Some(false);
+                    } else {
+                        spectrum_intent = Some(SpectrumIntent::Exit);
+                        scope.event(now, spectrum::Event::Stop);
+                    }
+                }
+                Request::RestartSpectrum => {
+                    spectrum_edge = None;
+                    if scope.listening() || scope.listen_restoring() {
+                        checked(
+                            &mut log,
+                            app.note_spectrum_error(render::SpectrumError::Busy),
+                            0xE032,
+                        );
+                    } else if scope.can_restart() {
+                        restart_spectrum = true;
+                        spectrum_intent = Some(SpectrumIntent::Restart);
+                        scope.event(now, spectrum::Event::Stop);
+                    } else if scope.active() {
+                        checked(
+                            &mut log,
+                            app.note_spectrum_error(render::SpectrumError::Busy),
+                            0xE032,
+                        );
+                    } else {
+                        let calibration = match app.calibration_view() {
+                            Some(c) => c,
+                            None => stop(0xE050),
+                        };
+                        let started = match profile(&app, &settings).ok().and_then(|p| p.receive) {
+                            Some(rx) => {
+                                match spectrum_window(
+                                    app.status().view,
+                                    spectrum_center.unwrap_or(rx.frequency_10hz),
+                                ) {
+                                    Some(window) => scope.start_panned_window(
+                                        &radio,
+                                        &calibration,
+                                        rx,
+                                        window,
+                                        now,
+                                    ),
+                                    None => Err(scope::StartError::CenterMismatch),
+                                }
+                            }
+                            None => Err(scope::StartError::NotReceiving),
+                        };
+                        match started {
+                            Ok(()) => {
+                                listen_after = None;
+                                last_signal = None;
+                                spectrum_published_at = now.wrapping_sub(250);
+                            }
+                            Err(error) => {
+                                scope.discard();
+                                publish_spectrum_final = false;
+                                checked(&mut log, app.clear_spectrum(), 0xE032);
+                                checked(
+                                    &mut log,
+                                    app.reject_spectrum_start(spectrum_error(error)),
+                                    0xE032,
+                                );
+                            }
+                        }
+                    }
+                }
+                Request::PanSpectrum { forward, fine } => {
+                    let from_listen = (scope.listening() || scope.listen_restoring())
+                        && listen_after != Some(false);
+                    if scope.can_restart() || restart_spectrum || from_listen {
+                        let next = (|| {
+                            let current = scope.window()?;
+                            let delta = if fine {
+                                current.step_10hz()
+                            } else {
+                                current.span_10hz() / 2
+                            };
+                            let base = spectrum_center.unwrap_or(current.center_10hz());
+                            let center = if forward {
+                                base.checked_add(delta)?
+                            } else {
+                                base.checked_sub(delta)?
+                            };
+                            let window = spectrum_window(app.status().view, center)?;
+                            let original = profile(&app, &settings).ok()?.receive?;
+                            let calibration = app.calibration_view()?;
+                            scope::Scope::qualify_window(&calibration, original, window).ok()?;
+                            Some(center)
+                        })();
+                        if let Some(center) = next {
+                            spectrum_center = Some(center);
+                            spectrum_edge = fine.then_some((center, forward));
+                            if from_listen {
+                                checked(&mut log, app.set_spectrum_listening(false), 0xE032);
+                                listen_after = Some(true);
+                            } else if !restart_spectrum {
+                                restart_spectrum = true;
+                                spectrum_intent = Some(SpectrumIntent::Restart);
+                                scope.event(now, spectrum::Event::Stop);
+                            }
+                        } else {
+                            checked(
+                                &mut log,
+                                app.note_spectrum_error(render::SpectrumError::Route),
+                                0xE032,
+                            );
+                        }
+                    } else {
+                        checked(
+                            &mut log,
+                            app.note_spectrum_error(render::SpectrumError::Busy),
+                            0xE032,
+                        );
+                    }
+                }
+                Request::ResumeSpectrum => {
+                    scope.resume();
+                    spectrum_published_at = now.wrapping_sub(250);
+                }
+                Request::ResetSpectrumPeaks => {
+                    if scope.active() {
+                        scope.event(now, spectrum::Event::ClearPeaks);
                         spectrum_published_at = now.wrapping_sub(250);
+                    }
+                }
+                Request::ListenSpectrum { bin } => {
+                    let published =
+                        app.spectrum_view()
+                            .map(|view| spectrum_flow::PublishedWindow {
+                                generation: view.window_id,
+                                start_10hz: view.start_10hz,
+                                step_10hz: view.step_10hz,
+                                len: view.len,
+                            });
+                    let bound =
+                        spectrum_flow::bind_bin(published, scope.window(), scope.generation(), bin);
+                    if bound.is_ok()
+                        && scope.can_accept_bin_action()
+                        && scope.plot().valid(usize::from(bin))
+                    {
+                        spectrum_intent = Some(SpectrumIntent::Listen(bin));
+                        listen_after = None;
+                        scope.event(now, spectrum::Event::Accept { index: bin });
+                    } else {
+                        let reason = if bound.is_err() {
+                            render::SpectrumError::Stale
+                        } else if scope.plot().valid(usize::from(bin)) {
+                            render::SpectrumError::Busy
+                        } else {
+                            render::SpectrumError::Window
+                        };
+                        if !matches!(spectrum_intent, Some(SpectrumIntent::Listen(_))) {
+                            checked(&mut log, app.cancel_spectrum_pending(), 0xE032);
+                        }
+                        checked(&mut log, app.note_spectrum_error(reason), 0xE032);
+                    }
+                }
+                Request::StopListenSpectrum => {
+                    checked(&mut log, app.cancel_spectrum_pending(), 0xE032);
+                    if scope.listening() || scope.listen_restoring() {
+                        // Resume the same sweep window after the original RX
+                        // plan is confirmed again. The UI stops claiming audio
+                        // before the restore completes.
+                        checked(&mut log, app.set_spectrum_listening(false), 0xE032);
+                        listen_after = Some(true);
+                        spectrum_published_at = now.wrapping_sub(250);
+                    }
+                }
+                Request::AcceptSpectrum { bin } => {
+                    // Explicit operator action: only a measured bin on the
+                    // published grid may become the new VFO frequency, and
+                    // only after full RF restore.
+                    let published =
+                        app.spectrum_view()
+                            .map(|view| spectrum_flow::PublishedWindow {
+                                generation: view.window_id,
+                                start_10hz: view.start_10hz,
+                                step_10hz: view.step_10hz,
+                                len: view.len,
+                            });
+                    let bound =
+                        spectrum_flow::bind_bin(published, scope.window(), scope.generation(), bin);
+                    let listened = current.and_then(|profile| profile.receive).filter(|rx| {
+                        scope.listening()
+                            && listen_after.is_none()
+                            && app.status().view.spectrum_listening
+                            && bound
+                                .as_ref()
+                                .is_ok_and(|frequency| *frequency == rx.frequency_10hz)
+                    });
+                    if let Some(rx) = listened {
+                        if !policy::aviation_band(rx.frequency_10hz) {
+                            settings[index].modulation = Some(rx.modulation);
+                        }
+                        checked(
+                            &mut log,
+                            app.accept_spectrum_frequency(rx.frequency_10hz),
+                            0xE032,
+                        );
+                        current = policy::restored_current(profile(&app, &settings).ok(), rx);
+                        checked(&mut log, app.clear_spectrum(), 0xE032);
+                        scope.discard();
+                        publish_spectrum_final = false;
+                        last_signal = None;
+                    } else if bound.is_ok()
+                        && scope.can_accept_bin_action()
+                        && scope.plot().valid(usize::from(bin))
+                    {
+                        spectrum_intent = Some(SpectrumIntent::AcceptVfo(bin));
+                        scope.event(now, spectrum::Event::Accept { index: bin });
+                    } else if bound.is_err() {
+                        checked(
+                            &mut log,
+                            app.note_spectrum_error(render::SpectrumError::Stale),
+                            0xE032,
+                        );
                     } else {
                         checked(&mut log, app.reject_radio_request(request), 0xE032);
                     }
                 }
-                Request::StopSpectrum => scope.event(now, spectrum::Event::Stop),
-                Request::AcceptSpectrum { bin } => {
-                    // Unknown bins have no measurement and cannot be selected.
-                    if scope.active() && scope.plot().valid(usize::from(bin)) {
-                        scope.event(now, spectrum::Event::Accept { index: bin });
-                    } else {
-                        checked(&mut log, app.reject_radio_request(request), 0xE032);
+                Request::SendAprs => {
+                    if LIVE_TX
+                        && !radio.tx_active_or_starting()
+                        && !scope.active()
+                        && !scanner.active()
+                        && !relay_active
+                        && tuner_session.is_none()
+                    {
+                        if let Some(profile) = profile(&app, &settings).ok() {
+                            let calibration =
+                                app.calibration_view().unwrap_or_else(|| stop(0xE050));
+                            let fix = gps
+                                .fix(now)
+                                .map(|fix| (fix.position.latitude_e7, fix.position.longitude_e7));
+                            if radio.state() == RfState::Receiving && current == Some(profile) {
+                                beacon.request(&calibration, profile, fix, now);
+                            }
+                            checked(&mut log, app.set_aprs_status(beacon.status()), 0xE032);
+                            ptt_guard.disarm();
+                        }
                     }
+                }
+                Request::RetryShortwave => {
+                    tuner_failed = None;
+                    tuner_mode_switch.reset_retry();
+                    checked(
+                        &mut log,
+                        app.set_shortwave_status(ShortwaveStatus::Starting),
+                        0xE032,
+                    );
                 }
                 Request::SetDisplayLight(mode) => {
                     lights.set_display(mode, now);
@@ -859,6 +1512,11 @@ fn main() -> ! {
                 Some(c) => c,
                 None => stop(0xE050),
             };
+            let view = app.status().view;
+            scope.set_trigger(
+                Some(u16::from(view.spectrum_trigger)),
+                view.spectrum_auto_listen,
+            );
             let completion = checked(
                 &mut log,
                 scope.step(&mut radio, &calibration, || {
@@ -866,55 +1524,527 @@ fn main() -> ! {
                 }),
                 0xE05E,
             );
-            if let scope::Completion::Restored {
-                selected_frequency,
-                modulation,
-                ..
-            } = completion
-            {
-                if let Some(frequency) = selected_frequency {
-                    settings[index].modulation = Some(modulation);
-                    checked(&mut log, app.accept_spectrum_frequency(frequency), 0xE032);
-                }
+            if let scope::Completion::Restored { request, reason } = completion {
+                let intent = spectrum_intent.take();
                 last_signal = None;
                 telemetry_samples = 4;
-                // Reconcile the complete active-slot policy after restoration.
-                current = None;
+                let action = spectrum_flow::completion(intent, reason);
+                if action != SpectrumAction::BeginListen {
+                    checked(&mut log, app.cancel_spectrum_pending(), 0xE032);
+                }
+                match action {
+                    SpectrumAction::BeginListen => {
+                        let at = require(time.sample(DWT::cycle_count()), 0xE016);
+                        if scope.begin_listen(at) {
+                            // A cancel may already have arrived while the bin
+                            // restore was in flight; the listen-end pass below
+                            // then restores the original plan immediately.
+                            let listening = listen_after.is_none();
+                            if listening {
+                                // Bind the UI to the exact bin/request the RF
+                                // just restored; never to a cursor moved during
+                                // the pending restore.
+                                if let spectrum::StopReason::Accepted { index } = reason {
+                                    let accepted =
+                                        matches!(app.confirm_spectrum_listen(index), Ok(true));
+                                    if accepted {
+                                        current = radio_settings(&app)
+                                            .map(|cfg| policy::listen_profile(request, cfg));
+                                        spectrum_published_at = at.wrapping_sub(250);
+                                    } else {
+                                        // UI rejected this late ACK. Restore the
+                                        // saved receiver now, not after Listen timeout.
+                                        listen_after = Some(false);
+                                        checked(
+                                            &mut log,
+                                            app.set_spectrum_listening(false),
+                                            0xE032,
+                                        );
+                                        checked(&mut log, app.cancel_spectrum_pending(), 0xE032);
+                                        checked(
+                                            &mut log,
+                                            app.note_spectrum_error(render::SpectrumError::Restore),
+                                            0xE032,
+                                        );
+                                    }
+                                } else {
+                                    listen_after = Some(false);
+                                    checked(&mut log, app.set_spectrum_listening(false), 0xE032);
+                                    checked(&mut log, app.cancel_spectrum_pending(), 0xE032);
+                                    checked(
+                                        &mut log,
+                                        app.note_spectrum_error(render::SpectrumError::Restore),
+                                        0xE032,
+                                    );
+                                }
+                            } else {
+                                checked(&mut log, app.set_spectrum_listening(false), 0xE032);
+                                checked(&mut log, app.cancel_spectrum_pending(), 0xE032);
+                            }
+                        } else {
+                            checked(&mut log, app.set_spectrum_listening(false), 0xE032);
+                            checked(&mut log, app.cancel_spectrum_pending(), 0xE032);
+                            checked(
+                                &mut log,
+                                app.note_spectrum_error(render::SpectrumError::Restore),
+                                0xE032,
+                            );
+                        }
+                    }
+                    SpectrumAction::AcceptVfo => {
+                        if !policy::aviation_band(request.frequency_10hz) {
+                            settings[index].modulation = Some(request.modulation);
+                        }
+                        checked(
+                            &mut log,
+                            app.accept_spectrum_frequency(request.frequency_10hz),
+                            0xE032,
+                        );
+                        current = policy::restored_current(profile(&app, &settings).ok(), request);
+                        checked(&mut log, app.clear_spectrum(), 0xE032);
+                        scope.discard();
+                        publish_spectrum_final = false;
+                        spectrum_published_at = now.wrapping_sub(250);
+                    }
+                    SpectrumAction::Restart => {
+                        let mut restarted = false;
+                        let mut discarded = false;
+                        if restart_spectrum {
+                            restart_spectrum = false;
+                            if matches!(reason, spectrum::StopReason::Exit) {
+                                let started = {
+                                    let calibration = match app.calibration_view() {
+                                        Some(c) => c,
+                                        None => stop(0xE050),
+                                    };
+                                    match spectrum_window(
+                                        app.status().view,
+                                        spectrum_center.unwrap_or(request.frequency_10hz),
+                                    ) {
+                                        Some(window) => scope
+                                            .start_panned_window(
+                                                &radio,
+                                                &calibration,
+                                                request,
+                                                window,
+                                                require(time.sample(DWT::cycle_count()), 0xE016),
+                                            )
+                                            .is_ok(),
+                                        None => false,
+                                    }
+                                };
+                                if started {
+                                    restarted = true;
+                                    last_signal = None;
+                                    telemetry_samples = 4;
+                                    spectrum_published_at = now.wrapping_sub(250);
+                                } else {
+                                    scope.discard();
+                                    discarded = true;
+                                    publish_spectrum_final = false;
+                                    checked(&mut log, app.clear_spectrum(), 0xE032);
+                                    checked(
+                                        &mut log,
+                                        app.reject_spectrum_start(render::SpectrumError::Route),
+                                        0xE032,
+                                    );
+                                }
+                            }
+                        }
+                        if !restarted && !discarded {
+                            current =
+                                policy::restored_current(profile(&app, &settings).ok(), request);
+                            publish_spectrum_final = true;
+                            spectrum_published_at = now.wrapping_sub(250);
+                        }
+                    }
+                    SpectrumAction::Finish => {
+                        current = policy::restored_current(profile(&app, &settings).ok(), request);
+                        publish_spectrum_final = true;
+                        spectrum_published_at = now.wrapping_sub(250);
+                    }
+                }
+            }
+        }
+        if scope.listening() || scope.listen_restoring() {
+            let at = require(time.sample(DWT::cycle_count()), 0xE016);
+            if scope.listen_expired(at) && listen_after.is_none() {
+                checked(&mut log, app.set_spectrum_listening(false), 0xE032);
+                listen_after = Some(true);
+            }
+            if let Some(resume) = listen_after {
+                let window = scope.window();
+                let held_bin = scope.completed_plot().held_bin;
+                let restored = {
+                    let calibration = match app.calibration_view() {
+                        Some(c) => c,
+                        None => stop(0xE050),
+                    };
+                    checked(
+                        &mut log,
+                        scope.end_listen(&mut radio, &calibration, at),
+                        0xE05F,
+                    )
+                };
+                if let Some(original) = restored {
+                    checked(&mut log, app.set_spectrum_listening(false), 0xE032);
+                    current = policy::restored_current(profile(&app, &settings).ok(), original);
+                    listen_after = None;
+                    if resume {
+                        let target = spectrum_center
+                            .or_else(|| window.map(|window| window.center_10hz()))
+                            .and_then(|center| spectrum_window(app.status().view, center));
+                        let started = {
+                            let calibration = match app.calibration_view() {
+                                Some(c) => c,
+                                None => stop(0xE050),
+                            };
+                            target.is_some_and(|window| {
+                                scope
+                                    .start_panned_window(&radio, &calibration, original, window, at)
+                                    .is_ok()
+                            })
+                        };
+                        if started {
+                            if let Some(bin) = held_bin.filter(|_| target == window) {
+                                scope.suppress_bin_until_below(bin);
+                            }
+                            spectrum_published_at = at.wrapping_sub(250);
+                        } else {
+                            scope.discard();
+                            publish_spectrum_final = false;
+                            checked(&mut log, app.clear_spectrum(), 0xE032);
+                            checked(
+                                &mut log,
+                                app.reject_spectrum_start(render::SpectrumError::Route),
+                                0xE032,
+                            );
+                        }
+                    } else {
+                        scope.discard();
+                        publish_spectrum_final = false;
+                        checked(&mut log, app.clear_spectrum(), 0xE032);
+                    }
+                }
             }
         }
         let now = require(time.sample(DWT::cycle_count()), 0xE016);
-        if now.wrapping_sub(spectrum_published_at) >= 250 {
+        if (scope.active() || publish_spectrum_final)
+            && now.wrapping_sub(spectrum_published_at) >= 125
+        {
             if let Some(range) = scope.range() {
-                let state = match scope.state() {
-                    spectrum::State::Preparing => SpectrumState::Preparing,
-                    spectrum::State::Tuning
-                    | spectrum::State::Settling
-                    | spectrum::State::Reading
-                    | spectrum::State::SweepComplete => SpectrumState::Sweeping,
-                    spectrum::State::Restoring(_) => SpectrumState::Restoring,
-                    spectrum::State::Failed(_) => SpectrumState::Failed,
-                    spectrum::State::Idle | spectrum::State::Restored(_) => SpectrumState::Stopped,
+                let state = if scope.listening() {
+                    SpectrumState::Listening
+                } else if scope.listen_restoring() {
+                    SpectrumState::Restoring
+                } else {
+                    match scope.state() {
+                        spectrum::State::Preparing => SpectrumState::Preparing,
+                        spectrum::State::Tuning
+                        | spectrum::State::Settling
+                        | spectrum::State::Reading
+                        | spectrum::State::SweepComplete => SpectrumState::Sweeping,
+                        spectrum::State::Restoring(_) => SpectrumState::Restoring,
+                        spectrum::State::Failed(_) => SpectrumState::Failed,
+                        spectrum::State::Idle | spectrum::State::Restored(_) => {
+                            SpectrumState::Stopped
+                        }
+                    }
                 };
                 let snapshot = SpectrumSnapshot {
                     state,
+                    window_id: scope.generation(),
                     start_10hz: range.start_10hz(),
+                    center_10hz: scope
+                        .window()
+                        .map(|window| window.center_10hz())
+                        .or_else(|| range.frequency_10hz(range.len() / 2))
+                        .unwrap_or(range.start_10hz()),
                     step_10hz: range.step_10hz(),
                     len: range.len() as u8,
-                    plot: *scope.plot(),
+                    plot: *scope.completed_plot(),
                 };
-                if checked(&mut log, app.set_spectrum(snapshot), 0xE032) {
+                let edge_cursor = spectrum_edge
+                    .filter(|&(center, _)| {
+                        center == snapshot.center_10hz && scope.can_accept_bin_action()
+                    })
+                    .map(|(_, forward)| if forward { snapshot.len - 1 } else { 0 });
+                if checked(
+                    &mut log,
+                    app.set_spectrum_with_cursor(snapshot, edge_cursor),
+                    0xE032,
+                ) {
+                    if edge_cursor.is_some() {
+                        spectrum_edge = None;
+                    }
                     spectrum_published_at = now;
+                    publish_spectrum_final = false;
+                    if let Some(bin) = snapshot.plot.held_bin {
+                        if spectrum_intent.is_none()
+                            && !side_activity
+                            && scope.can_accept_bin_action()
+                            && scope.plot().valid(usize::from(bin))
+                            && checked(&mut log, app.begin_spectrum_peak_listen(bin), 0xE032)
+                        {
+                            spectrum_intent = Some(SpectrumIntent::Listen(bin));
+                            listen_after = None;
+                            scope.event(now, spectrum::Event::Accept { index: bin });
+                        }
+                    }
                 }
             }
         }
-        let wanted = profile(&app, &settings).ok();
+        let crossband_open = app.status().view.screen == Screen::Crossband;
+        if !LIVE_TX && (!crossband_open || upper || lower) && second_rx.take().is_some() {
+            stop_secondary(&mut secondary);
+        }
+        if !crossband_open {
+            if relay_active {
+                stop_relay(&mut radio, &mut secondary);
+                relay_active = false;
+            }
+            relay_session = None;
+        }
+        let operator_profile = profile(&app, &settings).ok();
+        let view = app.status().view;
+        let watch_pair = if view.dual_watch
+            && view.screen == Screen::Home
+            && view.entry.is_none()
+            && view.scan == ScanState::Stopped
+            && !scanner.active()
+            && !scope.active()
+            && tuner_repower_at.is_none()
+            && !(upper || lower || update.ptt_tx_requested || radio.tx_active_or_starting())
+        {
+            operator_profile
+                .filter(|p| uv98_radio_runtime::watch::eligible(*p))
+                .and_then(|primary| {
+                    let (peer, channel) = app.peer_radio_selection();
+                    let i = usize::from(peer.active_slot == Slot::B);
+                    let other =
+                        policy::profile(peer, channel, radio_settings(&app)?, settings[i]).ok()?;
+                    (uv98_radio_runtime::watch::eligible(other)
+                        && primary.frequency != other.frequency)
+                        .then_some((view.active_slot, primary, other))
+                })
+        } else {
+            None
+        };
+        if watch_config != watch_pair {
+            watch_config = watch_pair;
+            dual_watch = watch_pair.map(|(slot, _, _)| uv98_radio_runtime::watch::Watch::new(slot));
+        }
+        let watch_receive =
+            watch_pair
+                .zip(dual_watch.as_ref())
+                .map(|((selected, primary, other), watch)| {
+                    let slot = watch.slot();
+                    (slot, if slot == selected { primary } else { other })
+                });
+        let mut wanted = relay_session
+            .as_ref()
+            .map(crossband::Session::listening_profile)
+            .or(watch_receive.map(|(_, rx)| rx))
+            .or(operator_profile);
         let now = require(time.sample(DWT::cycle_count()), 0xE016);
-        if radio.initialized() && !radio.tx_active_or_starting() && !scope.active() {
+        let tuner_view = app.status().view;
+        let tuner_open = tuner_view.screen == Screen::Shortwave;
+        let tuner_mode = tuner_view.shortwave_mode;
+        let frequency = tuner_view.shortwave_khz;
+        let tuning = shortwave::Tuning::from_selection(
+            frequency,
+            tuner_view.shortwave_fraction_hz,
+            tuner_mode,
+            tuner_view.shortwave_bfo,
+        );
+        let scope_enabled = tuner_open && tuner_view.shortwave_scope;
+        let requested_tuning = tuner_sweep.request(tuning, scope_enabled);
+        if scope_enabled {
+            checked(&mut log, radio.shortwave_audio(false), 0xE05D);
+        }
+        if tuner_failed.is_some_and(|failed| failed != tuning) {
+            tuner_failed = None;
+            tuner_mode_switch.reset_retry();
+        }
+        let tuner_settled = tuner_mode_switch.settled(tuner_open.then_some(tuner_mode), now);
+        if tuner_repower_at.is_some_and(|at| now.wrapping_sub(at) < 0x8000_0000) {
+            tuner_repower_at = None;
+        }
+        if !tuner_open {
+            tuner_failed = None;
+        }
+        if (!tuner_open || (tuner_settled && tuner_function != tuner_mode.tuner_function()))
+            && tuner_session.take().is_some()
+        {
+            ptt_guard.disarm();
+            checked(&mut log, radio.shortwave_audio(false), 0xE05D);
+            tuner_bus.stop();
+            checked(&mut log, radio.shortwave_power(false), 0xE05D);
+            tuner_repower_at = Some(now.wrapping_add(200));
+        }
+        if tuner_open
+            && tuner_settled
+            && radio.initialized()
+            && !scanner.active()
+            && !scope.active()
+            && !radio.tx_active_or_starting()
+            && tuner_repower_at.is_none()
+            && tuner_failed != Some(tuning)
+        {
+            if tuner_session.is_none() {
+                ptt_guard.disarm();
+                checked(&mut log, radio.stop(), 0xE057);
+                current = None;
+                last_signal = None;
+                checked(&mut log, radio.shortwave_power(true), 0xE05D);
+                tuner_bus.start(&mut p.CRM);
+                tuner_session = Some(shortwave::Session::new(now));
+                tuner_function = tuner_mode.tuner_function();
+            }
+            tuner_session
+                .as_mut()
+                .unwrap()
+                .set_processing(shortwave::Processing {
+                    filter: match tuner_view.shortwave_filter {
+                        1 => shortwave::AmFilter::Voice3k,
+                        2 => shortwave::AmFilter::Narrow1k,
+                        _ => shortwave::AmFilter::Wide6k,
+                    },
+                    soft_mute: tuner_view.shortwave_soft_mute,
+                });
+            let tuner_result = tuner_session.as_mut().unwrap().tick(
+                &mut tuner_bus,
+                now,
+                requested_tuning,
+                |offset, bytes| app.read_shortwave_patch(offset, bytes),
+            );
+            if let Ok(Some(update)) = tuner_result {
+                if let Some(sample) = tuner_sweep.observe(requested_tuning, update) {
+                    let window = uv98_radio_runtime::shortwave_scope::Window::around(tuning);
+                    checked(
+                        &mut log,
+                        app.shortwave_scope_sample(
+                            window.first_khz * 1000,
+                            u32::from(window.step_khz) * 1000,
+                            sample.bin,
+                            sample.rssi,
+                            sample.snr,
+                            sample.complete,
+                        ),
+                        0xE032,
+                    );
+                }
+            }
+            match tuner_result {
+                Ok(Some(shortwave::Update::Identified(id))) => {
+                    event(
+                        &mut log,
+                        0x183,
+                        [
+                            u32::from_le_bytes([id[0], id[1], id[2], id[3]]),
+                            u32::from_le_bytes([id[4], id[5], id[6], id[7]]),
+                            0,
+                        ],
+                    );
+                }
+                Ok(Some(shortwave::Update::PatchProgress(percent))) => {
+                    checked(
+                        &mut log,
+                        app.set_shortwave_status(ShortwaveStatus::Patching(percent)),
+                        0xE032,
+                    );
+                }
+                Ok(Some(shortwave::Update::Patched)) => {
+                    event(&mut log, 0x186, [0x9d29, 0, 0]);
+                }
+                Ok(Some(shortwave::Update::Tuning)) => {
+                    checked(&mut log, radio.shortwave_audio(false), 0xE05D);
+                    checked(
+                        &mut log,
+                        app.set_shortwave_status(ShortwaveStatus::Starting),
+                        0xE032,
+                    );
+                }
+                Ok(Some(shortwave::Update::Tuned { part, rssi, snr })) => {
+                    tuner_mode_switch.reset_retry();
+                    let scanning = !scope_enabled
+                        && checked(&mut log, app.continue_shortwave_scan(rssi, snr), 0xE032);
+                    if !scanning && !scope_enabled {
+                        checked(&mut log, radio.shortwave_audio(true), 0xE05D);
+                        checked(
+                            &mut log,
+                            app.set_shortwave_status(ShortwaveStatus::Listening {
+                                part,
+                                rssi,
+                                snr,
+                            }),
+                            0xE032,
+                        );
+                        event(
+                            &mut log,
+                            0x184,
+                            [frequency, u32::from(rssi), u32::from(snr)],
+                        );
+                    }
+                }
+                Ok(Some(shortwave::Update::Quality { part, rssi, snr })) if !scope_enabled => {
+                    if !tuner_view.shortwave_scan {
+                        checked(&mut log, radio.shortwave_audio(true), 0xE05D);
+                    }
+                    checked(
+                        &mut log,
+                        app.set_shortwave_status(ShortwaveStatus::Listening { part, rssi, snr }),
+                        0xE032,
+                    );
+                }
+                Ok(None) | Ok(Some(shortwave::Update::Quality { .. })) => {}
+                Err(code) => {
+                    checked(&mut log, radio.shortwave_audio(false), 0xE05D);
+                    tuner_bus.stop();
+                    checked(&mut log, radio.shortwave_power(false), 0xE05D);
+                    tuner_session = None;
+                    tuner_repower_at = Some(now.wrapping_add(200));
+                    let retry = tuner_mode_switch.retry(code);
+                    if !retry {
+                        tuner_failed = Some(tuning);
+                    }
+                    let state = if retry {
+                        ShortwaveStatus::Recovering(code)
+                    } else {
+                        ShortwaveStatus::Fault(code)
+                    };
+                    checked(&mut log, app.set_shortwave_status(state), 0xE032);
+                    event(
+                        &mut log,
+                        0x185,
+                        [u32::from(code), frequency, u32::from(retry)],
+                    );
+                }
+            }
+        }
+
+        if radio.initialized()
+            && !radio.tx_active_or_starting()
+            && !scope.active()
+            && !tuner_open
+            && !beacon.active()
+        {
             if current != wanted {
                 telemetry_samples = 4;
             }
             let retune =
                 forced_retune || policy::receive_changed(current, wanted) || polled.tx_ended;
+            if retune && relay_active {
+                stop_relay(&mut radio, &mut secondary);
+                relay_active = false;
+                relay_session = None;
+                wanted = operator_profile;
+                checked(
+                    &mut log,
+                    app.set_crossband_probe(CrossbandProbe::Stopped),
+                    0xE032,
+                );
+            }
             current = wanted;
             if retune {
                 if radio.state() != RfState::Off {
@@ -935,6 +2065,7 @@ fn main() -> ! {
                 }
             }
             if LIVE_TX
+                && app.status().view.screen != Screen::Crossband
                 && wanted.is_some_and(|p| tx_permitted(&app, p, raw_ptt))
                 && ptt_guard.allow_edge()
                 && update.ptt_tx_requested
@@ -969,7 +2100,7 @@ fn main() -> ! {
         }
         let now = require(time.sample(DWT::cycle_count()), 0xE016);
         if radio.state() == RfState::Receiving
-            && !scope.active()
+            && (!scope.active() || scope.listening())
             && now.wrapping_sub(signal_at) >= 1
         {
             if let Some(p) = current {
@@ -981,8 +2112,272 @@ fn main() -> ! {
                 signal_at = now;
             }
         }
+        let mut watch_rx = None;
+        if let (Some((slot, receive)), Some(watch), Some(signal)) =
+            (watch_receive, dual_watch.as_mut(), last_signal)
+        {
+            if current == Some(receive)
+                && radio.state() == RfState::Receiving
+                && now.wrapping_sub(signal_at) < 100
+            {
+                watch.observe(
+                    now,
+                    receive.receive.is_some_and(|rx| rx.tone != 0),
+                    signal.audio_open,
+                );
+                watch_rx = signal.audio_open.then_some(slot);
+            }
+        }
+        checked(&mut log, app.set_watch_rx(watch_rx), 0xE032);
+        let view = app.status().view;
+        if view.screen == Screen::Crossband {
+            if upper || lower {
+                relay_session = None;
+                checked(
+                    &mut log,
+                    app.set_crossband_probe(CrossbandProbe::Stopped),
+                    0xE032,
+                );
+            } else if !LIVE_TX {
+                if view.crossband_probe == CrossbandProbe::Starting
+                    && radio.state() == RfState::Receiving
+                    && !scanner.active()
+                    && !scope.active()
+                {
+                    let (peer, channel) = app.peer_radio_selection();
+                    let i = usize::from(peer.active_slot == Slot::B);
+                    let receive = radio_settings(&app)
+                        .and_then(|cfg| policy::profile(peer, channel, cfg, settings[i]).ok())
+                        .and_then(|p| p.receive)
+                        .filter(|r| r.modulation == Modulation::Fm && r.level > 0);
+                    let status = if let (Some(primary), Some(rx)) =
+                        (current.and_then(|p| p.receive), receive)
+                    {
+                        let calibration = app.calibration_view().unwrap_or_else(|| stop(0xE050));
+                        match uv98_rf_sequence::secondary_receive(&calibration, rx) {
+                            Ok(plan)
+                                if view.active_slot == Slot::A
+                                    && primary.frequency_10hz != rx.frequency_10hz =>
+                            {
+                                let words = checked(
+                                    &mut log,
+                                    uv98_rf_sequence::secondary_frequency(
+                                        &calibration,
+                                        rx.frequency_10hz,
+                                    ),
+                                    0xE065,
+                                );
+                                if matches!(
+                                    probe_secondary_frequency(&mut secondary, words),
+                                    Ok(true)
+                                ) && matches!(
+                                    apply_secondary_plan(&mut secondary, &plan),
+                                    Ok(true)
+                                ) {
+                                    second_rx = Some((
+                                        rx,
+                                        require(time.sample(DWT::cycle_count()), 0xE016),
+                                    ));
+                                    CrossbandProbe::Measuring {
+                                        a_rx: primary.frequency_10hz,
+                                        b_rx: rx.frequency_10hz,
+                                        rssi: 0,
+                                        status: 0,
+                                        tone_match: (rx.tone != 0).then_some(false),
+                                    }
+                                } else {
+                                    stop_secondary(&mut secondary);
+                                    CrossbandProbe::BusError
+                                }
+                            }
+                            _ => CrossbandProbe::InvalidProbeChannels,
+                        }
+                    } else {
+                        CrossbandProbe::InvalidProbeChannels
+                    };
+                    checked(&mut log, app.set_crossband_probe(status), 0xE032);
+                } else if let Some((rx, sampled_at)) = second_rx.as_mut() {
+                    if radio.state() != RfState::Receiving {
+                        stop_secondary(&mut secondary);
+                        second_rx = None;
+                        checked(
+                            &mut log,
+                            app.set_crossband_probe(CrossbandProbe::Stopped),
+                            0xE032,
+                        );
+                    } else if now.wrapping_sub(*sampled_at) >= 250 {
+                        let mut status = checked(&mut log, secondary.read(0x0c), 0xE065);
+                        if status & 1 != 0 {
+                            checked(&mut log, secondary.read(0x0b), 0xE065);
+                            checked(&mut log, secondary.write(0x02, 0), 0xE065);
+                            status = checked(&mut log, secondary.read(0x0c), 0xE065);
+                        }
+                        let rssi = checked(&mut log, secondary.read(0x67), 0xE065) & 0x01ff;
+                        let a_rx = current
+                            .and_then(|p| p.receive)
+                            .unwrap_or_else(|| stop(0xE065))
+                            .frequency_10hz;
+                        let tone_match =
+                            (rx.tone != 0).then(|| uv98_rf_sequence::tone_matches(status, rx.tone));
+                        event(
+                            &mut log,
+                            0x189,
+                            [
+                                a_rx,
+                                rx.frequency_10hz,
+                                u32::from(rssi) << 16 | u32::from(status),
+                            ],
+                        );
+                        checked(
+                            &mut log,
+                            app.set_crossband_probe(CrossbandProbe::Measuring {
+                                a_rx,
+                                b_rx: rx.frequency_10hz,
+                                rssi,
+                                status,
+                                tone_match,
+                            }),
+                            0xE032,
+                        );
+                        *sampled_at = now;
+                    }
+                }
+            } else if view.crossband_probe == CrossbandProbe::Starting
+                && !scanner.active()
+                && !scope.active()
+                && radio.initialized()
+            {
+                let status = if let Some(session) =
+                    operator_profile.and_then(|p| crossband_session(&app, &settings, p))
+                {
+                    let calibration = app.calibration_view().unwrap_or_else(|| stop(0xE050));
+                    let mut status = crossband_status(&session, false);
+                    for slot in [Slot::A, Slot::B] {
+                        let pair = session.pair(slot);
+                        let rx = pair.receive().frequency_10hz;
+                        let tx = pair.transmit().frequency_10hz;
+                        if LIVE_RELAY
+                            && uv98_rf_sequence::relay_transmit(&calibration, pair.transmit())
+                                .is_err()
+                        {
+                            status = CrossbandProbe::InvalidPair;
+                            break;
+                        }
+                        let Ok(words) = uv98_rf_sequence::secondary_frequency(&calibration, tx)
+                        else {
+                            status = CrossbandProbe::InvalidPair;
+                            break;
+                        };
+                        let ok =
+                            matches!(probe_secondary_frequency(&mut secondary, words), Ok(true));
+                        event(&mut log, 0x187, [rx, tx, u32::from(ok)]);
+                        if !ok {
+                            status = CrossbandProbe::BusError;
+                            break;
+                        }
+                    }
+                    if matches!(status, CrossbandProbe::Ready { .. }) {
+                        relay_session = Some(session);
+                    }
+                    status
+                } else {
+                    CrossbandProbe::InvalidPair
+                };
+                checked(&mut log, app.set_crossband_probe(status), 0xE032);
+            } else if let Some(session) = relay_session.as_mut() {
+                let sample = last_signal
+                    .filter(|_| {
+                        radio.state() == RfState::Receiving && now.wrapping_sub(signal_at) < 100
+                    })
+                    .map(|signal| relay_carrier(signal));
+                let action = session.tick(now, sample);
+                if LIVE_RELAY {
+                    match action {
+                        crossband::Action::Start(request) => {
+                            let calibration =
+                                app.calibration_view().unwrap_or_else(|| stop(0xE050));
+                            let plan = checked(
+                                &mut log,
+                                uv98_rf_sequence::relay_transmit(&calibration, request),
+                                0xE065,
+                            );
+                            if !matches!(
+                                apply_secondary_plan(&mut secondary, &plan.setup),
+                                Ok(true)
+                            ) {
+                                stop(0xE065);
+                            }
+                            let rx_profile = wanted.unwrap_or_else(|| stop(0xE065));
+                            let fresh = checked(
+                                &mut log,
+                                radio.observe(
+                                    rx_profile.audio,
+                                    rx_profile.receive.map(|r| r.tone).unwrap_or(0),
+                                ),
+                                0xE065,
+                            );
+                            let rechecked_at = require(time.sample(DWT::cycle_count()), 0xE016);
+                            last_signal = Some(fresh);
+                            signal_at = rechecked_at;
+                            let carrier = relay_carrier(fresh);
+                            if session.tick(rechecked_at, Some(carrier)) == crossband::Action::Stop
+                            {
+                                stop_relay(&mut radio, &mut secondary);
+                            } else {
+                                checked(&mut log, radio.relay_route(Some(plan.route)), 0xE065);
+                                if !matches!(
+                                    write_relay_register(&mut secondary, 0x33, 0x0010),
+                                    Ok(true)
+                                ) || !matches!(
+                                    write_relay_register(&mut secondary, 0x36, plan.power),
+                                    Ok(true)
+                                ) {
+                                    stop(0xE065);
+                                }
+                                relay_active = true;
+                            }
+                        }
+                        crossband::Action::Stop if relay_active => {
+                            stop_relay(&mut radio, &mut secondary);
+                            relay_active = false;
+                        }
+                        _ => {}
+                    }
+                }
+                if action != crossband::Action::None {
+                    let carrier = if LIVE_RELAY {
+                        relay_active
+                    } else {
+                        matches!(action, crossband::Action::Start(_))
+                    };
+                    let pair = session.pair(session.slot());
+                    event(
+                        &mut log,
+                        0x188,
+                        [
+                            pair.receive().frequency_10hz,
+                            pair.transmit().frequency_10hz,
+                            u32::from(carrier),
+                        ],
+                    );
+                    checked(
+                        &mut log,
+                        app.set_crossband_probe(crossband_status(session, carrier)),
+                        0xE032,
+                    );
+                }
+                if session.disarmed() {
+                    relay_session = None;
+                    checked(
+                        &mut log,
+                        app.set_crossband_probe(CrossbandProbe::Stopped),
+                        0xE032,
+                    );
+                }
+            }
+        }
         if radio.state() == RfState::Receiving
-            && !scope.active()
+            && (!scope.active() || scope.listening())
             && telemetry_samples > 0
             && now.wrapping_sub(telemetry_at) >= 500
         {
@@ -1026,7 +2421,7 @@ fn main() -> ! {
                 telemetry_at = now;
             }
         }
-        if scanner.active() {
+        if scanner.active() && !scope.active() {
             let now = require(time.sample(DWT::cycle_count()), 0xE016);
             if let Some(ticket) = scanner.status().ticket {
                 match scanner.tune_ack(ticket, now, radio.state()) {
@@ -1084,7 +2479,12 @@ fn main() -> ! {
             RfState::Transmitting => RadioState::Transmitting,
             RfState::Failed => RadioState::Failed,
         };
-        if let Some(p) = current {
+        let displayed_profile = if watch_receive.is_some() {
+            operator_profile
+        } else {
+            current
+        };
+        if let Some(p) = displayed_profile {
             report.power = Some(p.power);
             report.monitor = p.audio.monitor;
             report.modulation = if p.audio.modulation == Modulation::Fm {
@@ -1100,14 +2500,35 @@ fn main() -> ! {
                 _ => None,
             };
         }
+        let receive = current.and_then(|profile| profile.receive);
+        if receive != meter_receive || radio.state() != RfState::Receiving {
+            meter_floor = uv98_handheld_ui::meter::NoiseFloor::default();
+            meter_receive = receive;
+        }
         if radio.state() == RfState::Receiving {
-            if now.wrapping_sub(ui_rssi_at) >= 200 || app.radio_view().rssi.is_none() {
+            let previous = app.radio_view();
+            let quiet = receive.is_some_and(|rx| rx.level != 0)
+                && last_signal.is_some_and(|signal| !signal.squelch_open);
+            if now.wrapping_sub(ui_rssi_at) >= 100 || previous.rssi.is_none() {
                 report.rssi = last_signal.map(|s| s.rssi);
+                if let Some(raw) = report.rssi.filter(|_| quiet) {
+                    meter_floor.observe_quiet(raw);
+                }
                 ui_rssi_at = now;
             } else {
-                report.rssi = app.radio_view().rssi;
+                report.rssi = previous.rssi;
+            }
+            report.meter_floor = meter_floor.raw();
+            if quiet && !report.monitor {
+                // With the physical squelch closed, avoid showing noise as
+                // a station. Monitor still shows relative RSSI above floor.
+                report.meter_floor = report.meter_floor.max(report.rssi.unwrap_or(0));
             }
             report.squelch_open = last_signal.is_some_and(|s| s.audio_open);
+            if watch_receive.is_some() && watch_rx.is_none() {
+                report.rssi = None;
+                report.meter_floor = 0;
+            }
         }
         if report.state != app.radio_view().state {
             event(
@@ -1139,7 +2560,19 @@ fn main() -> ! {
         }
         // Keep the foreground return to physical PTT polling short during the
         // TX trial. The bound is on row count; electrical latency is unmeasured.
-        let row_budget = if radio.tx_active_or_starting() { 2 } else { 8 };
+        let row_budget = if beacon.active() {
+            1
+        } else if radio.tx_active_or_starting() {
+            2
+        } else if scope.active()
+            || current.is_some_and(|profile| profile.audio.modulation == Modulation::Am)
+        {
+            4
+        } else if app.status().view.entry.is_some() || raw.is_some_and(|(matrix, _)| matrix != 0) {
+            3
+        } else {
+            6
+        };
         let drawn = checked(&mut log, app.render_step(row_budget), 0xE032);
         max_render_cycles = max_render_cycles.max(DWT::cycle_count().wrapping_sub(render_start));
         render_rows += u32::from(drawn.rows);
@@ -1156,7 +2589,10 @@ fn main() -> ! {
                 redraw_since = None;
             }
         }
-        if now.wrapping_sub(heartbeat_at) >= 2000 && !radio.tx_active_or_starting() {
+        if now.wrapping_sub(heartbeat_at) >= 2000
+            && !radio.tx_active_or_starting()
+            && !beacon.active()
+        {
             event(
                 &mut log,
                 0x172,
@@ -1173,7 +2609,9 @@ fn main() -> ! {
         }
         // Debounce, AGC and scan deadlines use the monotonic clock, not loop
         // counts. A fixed 1ms sleep previously delayed every UI batch.
-        idle.us(100);
+        if !drawn.pending {
+            idle.us(100);
+        }
     }
 }
 

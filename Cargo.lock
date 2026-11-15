@@ -2773,7 +2773,7 @@ version = "0.1.0"
 
 [[package]]
 name = "uv98-cps"
-version = "0.3.1"
+version = "0.5.0"
 dependencies = [
  "eframe",
  "encoding_rs",
@@ -2785,6 +2785,8 @@ dependencies = [
  "uv98-codeplug",
  "uv98-cps-core",
  "uv98-radio-read",
+ "uv98-signaling",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2817,12 +2819,14 @@ dependencies = [
  "uv98-board-at32",
  "uv98-board-pins",
  "uv98-boot-log",
+ "uv98-calibration",
  "uv98-clock-profile",
  "uv98-codeplug",
  "uv98-diag-app",
  "uv98-diag-quiesce",
  "uv98-diag-startup",
  "uv98-display",
+ "uv98-gps-at32",
  "uv98-handheld-app",
  "uv98-handheld-ui",
  "uv98-keys",
@@ -2834,6 +2838,7 @@ dependencies = [
  "uv98-rf-bus",
  "uv98-rf-sequence",
  "uv98-sidekeys-at32",
+ "uv98-signaling",
  "uv98-spectrum",
 ]
 
@@ -2898,6 +2903,14 @@ name = "uv98-display"
 version = "0.1.0"
 
 [[package]]
+name = "uv98-gps-at32"
+version = "0.1.0"
+dependencies = [
+ "uv98-board-pins",
+ "uv98-gps-nmea",
+]
+
+[[package]]
 name = "uv98-gps-nmea"
 version = "0.1.0"
 
@@ -2915,6 +2928,8 @@ dependencies = [
  "uv98-keys",
  "uv98-keyscan-at32",
  "uv98-nor-read",
+ "uv98-radio-runtime",
+ "uv98-rf-sequence",
  "uv98-spectrum",
 ]
 
@@ -2986,6 +3001,7 @@ name = "uv98-radio-runtime"
 version = "0.1.0"
 dependencies = [
  "at32f4xx-pac",
+ "sha2",
  "uv98-band-plan",
  "uv98-board-pins",
  "uv98-calibration",
@@ -3064,6 +3080,13 @@ dependencies = [
  "at32f4xx-pac",
  "uv98-board-pins",
  "uv98-keys",
+]
+
+[[package]]
+name = "uv98-signaling"
+version = "0.1.0"
+dependencies = [
+ "uv98-board-pins",
 ]
 
 [[package]]

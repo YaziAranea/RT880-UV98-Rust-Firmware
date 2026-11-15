@@ -137,6 +137,53 @@ pub struct SideAdcPins {
 pub struct ReservedAfterRadio {
     _single_context: PhantomData<*mut ()>,
 }
+/// PC0/PC1, I2C1 AF7. PC5 tuner power remains with RadioControlPins.
+pub struct ShortwavePins {
+    _single_context: PhantomData<*mut ()>,
+}
+pub struct RemainingPins {
+    _single_context: PhantomData<*mut ()>,
+}
+/// GPS USART2 RX PA3 and its stock enable PB9. Does not own UART TX.
+pub struct GpsPins {
+    _single_context: PhantomData<*mut ()>,
+}
+/// Stock modem C-BUS PA0/PA1/PA2/PF1, selector PB4 and TX audio gate PB7.
+/// PC3 audio routing remains owned by RadioControlPins.
+pub struct ModemPins {
+    _single_context: PhantomData<*mut ()>,
+}
+pub struct ReservedAfterAuxiliary {
+    _single_context: PhantomData<*mut ()>,
+}
+impl RemainingPins {
+    pub fn with_auxiliary(self) -> (GpsPins, ModemPins, ReservedAfterAuxiliary) {
+        (
+            GpsPins {
+                _single_context: PhantomData,
+            },
+            ModemPins {
+                _single_context: PhantomData,
+            },
+            ReservedAfterAuxiliary {
+                _single_context: PhantomData,
+            },
+        )
+    }
+}
+impl ReservedAfterRadio {
+    pub fn with_shortwave(self) -> (ShortwavePins, RemainingPins) {
+        (
+            ShortwavePins {
+                _single_context: PhantomData,
+            },
+            RemainingPins {
+                _single_context: PhantomData,
+            },
+        )
+    }
+}
+
 pub struct RadioPins {
     pub control: RadioControlPins,
     pub side_adc: SideAdcPins,

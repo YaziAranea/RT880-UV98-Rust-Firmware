@@ -55,6 +55,23 @@ impl Authorization {
     pub fn still_held(self, view: View, profile: policy::Profile, input: Input) -> bool {
         authorize(view, profile, input) == Ok(self)
     }
+
+    /// Configuration-only validation for a separately timed end-of-TX ID.
+    /// This never authorizes a fresh transmission and never represents a
+    /// physical PTT hold. The owner must enforce clean release, a short tail
+    /// deadline, the original TOT and cancellation on every new input.
+    pub fn tail_configuration_valid(self, mut view: View, profile: policy::Profile) -> bool {
+        if view.ptt_slot.is_some() || view.ptt_down {
+            return false;
+        }
+        view.ptt_slot = Some(self.slot);
+        let original_source = Input {
+            upper: self.source == Source::Upper,
+            lower: self.source == Source::Lower,
+            clean: true,
+        };
+        authorize(view, profile, original_source) == Ok(self)
+    }
 }
 
 /// Call after loading the context selected by the debounced PTT event.
@@ -128,6 +145,8 @@ pub fn authorize(
             mode: view.mode,
             channel: view.channel,
             vfo_10hz: view.vfo_10hz,
+            shift_index: view.shift_index,
+            tx_tone_index: view.tx_tone_index,
             zone: view.zone,
             step_index: view.step_index,
             reverse: view.reverse,
@@ -210,6 +229,35 @@ mod tests {
     }
 
     #[test]
+    fn id_tail_needs_same_committed_context_and_no_new_ptt() {
+        let raw = record(14_550_000, 14_490_000);
+        let held = view();
+        let profile = profile(held, &raw, 1);
+        let allowed = authorize(held, profile, UPPER).unwrap();
+        assert!(!allowed.tail_configuration_valid(held, profile));
+        let mut released = held;
+        released.ptt_slot = None;
+        released.ptt_down = false;
+        released.side_down = [false, false];
+        assert!(allowed.tail_configuration_valid(released, profile));
+        released.locked = true;
+        assert!(!allowed.tail_configuration_valid(released, profile));
+        released.locked = false;
+        released.active_slot = Slot::B;
+        assert!(!allowed.tail_configuration_valid(released, profile));
+        released.active_slot = Slot::A;
+        released.side_bindings[0] = SideAction::PttB;
+        assert!(!allowed.tail_configuration_valid(released, profile));
+        released.side_bindings = held.side_bindings;
+        let mut changed = profile;
+        changed.transmit.as_mut().unwrap().frequency_10hz += 1250;
+        assert!(!allowed.tail_configuration_valid(released, changed));
+        changed = profile;
+        changed.transmit.as_mut().unwrap().power = 2;
+        assert!(!allowed.tail_configuration_valid(released, changed));
+    }
+
+    #[test]
     fn all_current_band_boundaries_powers_and_routes_have_calibrated_plans() {
         let calibration = Calibration::parse(include_bytes!(
             "../../calibration/tests/fixtures/uv98-plus-stock-1.16.bin"
@@ -224,7 +272,7 @@ mod tests {
             (4_500_000, 3),
             (6_400_000, 3),
             (6_400_001, 3),
-            (13_600_000, 3),
+            (13_700_000, 3),
             (17_400_000, 3),
             (25_999_999, 3),
             (26_000_000, 4),

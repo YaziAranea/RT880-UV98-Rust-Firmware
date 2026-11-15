@@ -1,0 +1,160 @@
+# DRX-00 — аппаратная возможность одновременного A/B RX
+
+Дата: 2026-11-10. Только offline: схема, stock disassembly, host-модели.
+COM/прошивка/RF/PTT не запускались; калибровки, NOR, codeplug и старые
+релизы не изменялись. Production-образ не получил новых B MMIO.
+
+## 1. Вывод
+
+**Ни одна пара одновременно работающих приёмников не подтверждена.**
+Для related-схемы RT880 V2 вторичный BK4819 (U400/B) не имеет доказанного
+подключения RX-входа к антенне; последовательный C433 на линии EARO помечен
+NC (NC относится к C433, не к самому выводу EARO); аудиотракт — один
+аналоговый селектор, а не микшер. Поэтому:
+
+- для RT880 V2 по этой схеме B-RX **unsupported** для этой ревизии: схема не
+  показывает подключённый вход B к антенне и установленную связь C433; пока
+  иное не доказано для конкретной платы;
+- для пользовательской UV98 Plus ревизия не установлена, поэтому статус
+  **unverified**, а не «работает» и не «физически невозможно»;
+- требование «оба сигнала слышны одновременно» без внешнего микшера/двух
+  трактов **не поддержано**; PC4 выбирает один источник.
+
+Прошивка не создаёт соединение, которого нет по схеме. B остаётся asleep;
+новых GPIO/регистров для B в рабочем образе нет.
+
+## 2. Источники и степень доверия
+
+| ID | Источник | SHA/адрес | Что подтверждает | Доверие |
+|---|---|---|---|---|
+| S1 | `C:/Users/User/Desktop/USB/rt880/RT880 V2.pdf` стр.1–3 | `b7858c30fbe6eb8bf57967d57d9985b29951ccffa766ca5ac9240796c9fab32a` | A/B chips, LNAIN/EARO, U501, PF0/K200 | related schematic |
+| S2 | related RT880 1.16 application | `eaef215c…16bfc` | A/B bus, init/RX/frequency/audio helpers | related application, не MCU-readback UV98 |
+| S3 | `research/rf-startup/EVIDENCE-RU.txt` | — | A/B pins, init 08004DC0/08003D34, RX start 08004FA0/08003E3C, sleep B 08003EC0 | bounded disassembly |
+| S4 | `research/rf-bus/EVIDENCE-RU.txt` | — | две независимые 3-wire шины; транспорт без RF-семантики | host/oracle |
+| S5 | `research/receive-design/EVIDENCE-RU.txt` | — | secondary selector не обновляет RX route обычно; B получает только 38/39; width helper пишет A43 | bounded disassembly |
+| S6 | `research/rx-runtime/EVIDENCE-RU.txt` | — | A67 RSSI/A0C squelch; A/B audio-mode helpers; PF8 global mute; B67 caller не найден | bounded disassembly |
+| S7 | `research/band-switch/EVIDENCE-RU.txt` | — | PF0/K200 общий антенный узел; A33 RX/TX; B33 bit4 A/B-SW связан с TX-питанием U403 | schematic+stock |
+| S8 | `research/radio018/MIC-PATH-PC3-RU.txt` | — | U501 SW1: PC4 LOW=AFOUT4819, HIGH=MOD4819B; один источник | schematic |
+| S9 | `research/radio018/GPS-SI4732-APRS-ANC-EVIDENCE-RU.txt` | — | основной AF-тракт аналоговый A→U501→AUDIO; RX PCM нет | schematic+software |
+
+Проверка PDF выполнена в этой сессии: файл существует, SHA256 совпал.
+`page2.png` — рендер, не фотография UV98. Увеличенные crop-файлы
+`page2-B-crop.png`, `page2-B-input-crop.png`, `page2-B-net-crop.png`
+показывают соединения B; это вспомогательные изображения, не новое железо.
+
+## 3. Матрица DRX-00
+
+Обозначения: **P** — подтверждено программно/наблюдением, **S** — по related
+схеме, **U** — не подтверждено.
+
+### A / U201
+
+| Звено | Факт | Статус |
+|---|---|---|
+| chip | U201 BK4819, отдельная 3-wire шина | P |
+| RF input/antenna | основной антенный путь через K200/фильтры; A RX реально работает на станции (r5) | S + наблюдение владельца |
+| filters/relay | PF0/K200, A33 route; общий антенный узел | S/P |
+| calibration | factory 4096-байтный блок используется primary | P |
+| init/wake | 08004DC0, RX start 08004FA0 | P |
+| freq/mod/width | 08004B88, selector mode0; width helper A43 | P |
+| RSSI/SQL/tone/AGC | A67 raw9, A0C bit1, tone path bounded; AM AGC отдельный | P |
+| AF output | AFOUT4819 → U501 SW1 NC0 → AUDIO; PF8 global mute | S/P |
+| speaker | один аналоговый тракт | S |
+
+Точная электрическая чувствительность/калибровка dBm и ревизия PCB UV98 Plus
+этим не доказаны.
+
+### B / U400
+
+| Звено | Факт | Статус |
+|---|---|---|
+| chip | U400 BK4819, CS PC7/SCK PC8/DATA PC6 | P |
+| RF input/antenna | LNAIN pin15 → L400 47nH → C461 100pF → открытый верхний конец; антенной/именованной сети нет. Ветки ANT→B на стр.2 не найдено | S; для UV98 Plus U |
+| filters/relay | отдельного B-антенного фильтра/ветки нет; B33 bit4 A/B-SW связан с TX-питанием U403, не с антенной | U/S |
+| calibration | отдельная B-калибровка не установлена; secondary получает только 38/39 | U |
+| init/wake | 08003D34; sleep 08003EC0; RX start 08003E3C | P |
+| freq/mod/width | 08003CCC; secondary selector обычно не меняет RX route; A43 helper нельзя механически перенести на B43 | P |
+| RSSI/SQL/tone/AGC | штатный B67 caller/B squelch/tone не найден; A-формулу нельзя переносить | U |
+| AF output | EARO pin8 → C433, помечен **NC** → AF OUT4819B (не MOD4819B) | S |
+| speaker | U501 SW1: NO1=MOD4819B, NC0=AFOUT4819; PC4 выбирает один источник, не оба; микшера нет | S |
+
+Трассировка U400/B, стр.2 (пересечения без точки не являются соединением):
+
+| pin | компонент | сеть/окончание | примечание |
+|---|---|---|---|
+| 15 LNAIN | L400 47nH → C461 100pF | открытый верхний конец | RX-вход B к антенне не показан |
+| 14 MICP | C431 105P (маркировка схемы) | GND | C431 относится к MICP, **не** к LNAIN |
+| 13 MICN | C489 105P (маркировка схемы) | MOD4819B | modulation/mic-сеть, не RX-аудио B |
+| 8 EARO | C433 (NC) | AF OUT4819B | выход B по схеме не установлен |
+
+LNAIN не объявлять заземлённым: C431 — отдельная цепь MICP→GND, а L400/C461
+заканчиваются открытым концом. MOD4819B — не аудиовыход второго приёмника;
+это modulation/mic-сеть, выбираемая U501/PC4 наряду с AFOUT4819. Даже если
+C433 был бы установлен, один SPDT-селектор U501 не даёт одновременного звука
+обоих RX. Схема RT880 V2 не доказывает подключённый вход B к антенне и
+установленную выходную связь C433; ревизия UV98 Plus остаётся unverified.
+
+### Общие ресурсы
+
+| Ресурс | Влияние | Статус |
+|---|---|---|
+| PF0 / K200 | один механический антенный селектор/реле; разветвление ANT на два RX не показано | S |
+| A33 | RX route/mask + TX bits; primary ownership | P |
+| B33 bit4 A/B-SW | связан с TX-питанием U403; не переключатель звука | S/P |
+| PC4 / U501 SW1 | выбирает AFOUT4819 или MOD4819B; не микшер | S |
+| PF8 | общий AF MUTE | P/S |
+| питание 5RT/5T/5T29/5T50M, TX PA | общие узлы; независимость двух RX не доказана | S |
+| Si4732/R-12 | chip/reset/audio не подтверждены; отдельная комбинация, не универсальный dual | U |
+
+## 4. Пары
+
+| Пара | Вердикт | Причина |
+|---|---|---|
+| VHF+VHF | unverified; RT880 V2 — unsupported | B RF-вход и AF не подключены по схеме |
+| VHF+UHF | unverified; RT880 V2 — unsupported | то же |
+| UHF+UHF | unverified; RT880 V2 — unsupported | то же |
+| air-AM+FM | unverified | B RF/AF; AM/ATIS качество отдельно не принято |
+| CB+FM | unverified | B RF/AF; CB-калибровки не установлены |
+| 800+FM | unverified | B RF/AF; 800 идёт через primary selector |
+| BK+Si4732 | unverified | R-12 chip/reset/audio не доказаны; не универсальный dual VHF/UHF |
+
+Ни одна пара не помечена supported. Два BK4819 сами по себе ничего не
+доказывают; два Runtime/два RSSI/два ACK — тоже.
+
+## 5. Что изменит вердикт
+
+Минимальные факты, каждый — отдельно:
+
+1. Фото/прозвонка именно UV98 Plus: путь B LNAIN→L400→C461 и его верхний
+   конец; отдельные C431 (MICP→GND), C489 (MICN→MOD4819B), C433/EARO;
+   установлены ли U400 и B-shield. Не связывать LNAIN с MICN/MOD-цепью.
+2. Подтверждённая ревизия платы и соответствие её схеме RT880 V2.
+3. Read-only наблюдение B RX на этой станции без изменения stock/NOR/
+   калибровок; проверить EARO/C433/AF OUT4819B и отдельно установить дальнейший
+   путь к усилителю/динамику. Связь AF OUT4819B→U501 не доказана.
+4. Документированный микшер/два выхода, если нужны оба звука одновременно.
+5. Для Si4732 — отдельная проверка R-12, не «второй BK».
+
+До этих фактов — только capability-модель, mocks и docs. Разборку корпуса
+сейчас не запрашивать; это вечерняя задача владельца, если он решит.
+
+## 6. Код и границы
+
+- `crates/radio-runtime/src/capabilities.rs` — pure модель:
+  `LogicalSlot → PhysicalReceiver`, `PairStatus`, `AudioCapability`,
+  `tx_backend`, `simultaneous_rx_supported() == false`.
+  Никаких MMIO/GPIO; модуль не подключён к production scheduler.
+  `receiver_for_slot(B) → SecondaryB` — гипотеза DRX-01, не production.
+- `research/dual-rx/DRX-00-capabilities.json` — machine-readable матрица
+  с источниками/confidence.
+- Host-тесты: ни одна пара не supported; B-пары unverified с причиной;
+  дубликаты unsupported; TX через B запрещён; audio не mixer.
+- Production B остаётся asleep; новых B MMIO/GPIO нет. Существующая
+  channel-tx policy и TOT не изменялись.
+
+## 7. Ограничения
+
+Схема RT880 V2 — related, не фотография UV98 Plus; stock SHA — related
+application, не MCU-readback пользовательской рации. Никаких электрических
+измерений, фото платы, COM или RF в этом этапе не было. PAN/DMA/водопад,
+AM/ATIS, TX-stop/TOT, нижний PTT, GPS/APRS/DSP не закрываются этим этапом.

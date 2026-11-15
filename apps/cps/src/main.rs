@@ -3,6 +3,11 @@ mod calibration_io;
 mod calibration_pane;
 mod calibration_report;
 mod file_io;
+mod firmware;
+mod firmware_pane;
+#[cfg(windows)]
+mod firmware_windows;
+mod navigation_pane;
 mod radio;
 mod text_codec;
 use eframe::egui::{self, Color32, RichText};
@@ -22,7 +27,24 @@ const TITLE: &str = concat!("UV98 CPS — ", env!("CARGO_PKG_VERSION"));
 const FIELDS: [Field; 24] = Field::ALL;
 
 fn main() -> eframe::Result {
-    let initial = std::env::args_os().nth(1).map(PathBuf::from);
+    let mut arguments = std::env::args_os().skip(1);
+    let first = arguments.next();
+    let firmware_page = first
+        .as_ref()
+        .is_some_and(|arg| arg == "--firmware" || arg == "--firmware-preview");
+    let firmware_preview = first
+        .as_ref()
+        .is_some_and(|arg| arg == "--firmware-preview");
+    let firmware_path = firmware_page
+        .then(|| arguments.next())
+        .flatten()
+        .map(PathBuf::from);
+    let backup_page = first.as_ref().is_some_and(|arg| arg == "--backup");
+    let initial = if firmware_page || backup_page {
+        None
+    } else {
+        first.map(PathBuf::from)
+    };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 800.0])
@@ -58,6 +80,16 @@ fn main() -> eframe::Result {
             if let Some(path) = initial {
                 app.load(path);
             }
+            if backup_page {
+                app.tab = Tab::Radio;
+            }
+            if firmware_page {
+                app.tab = Tab::Firmware;
+                app.firmware.set_preview(firmware_preview);
+                if let Some(path) = firmware_path {
+                    app.firmware.load_image(path);
+                }
+            }
             Ok(Box::new(app))
         }),
     )
@@ -69,9 +101,11 @@ enum Tab {
     Channels,
     Zones,
     Settings,
+    Navigation,
     Changes,
     Radio,
     Calibration,
+    Firmware,
 }
 #[derive(Clone, Copy)]
 enum Action {
@@ -227,11 +261,13 @@ struct App {
     zone_index: usize,
     zone_draft: Option<ZoneDraft>,
     settings_draft: Option<SettingsDraft>,
+    navigation_draft: Option<navigation_pane::Draft>,
     notice: String,
     notice_error: bool,
     pending_action: Option<Action>,
     close_allowed: bool,
     radio: radio::RadioPane,
+    firmware: firmware_pane::FirmwarePane,
     calibrations: calibration_pane::CalibrationPane,
 }
 impl Default for App {
@@ -248,11 +284,13 @@ impl Default for App {
             zone_index: 0,
             zone_draft: None,
             settings_draft: None,
+            navigation_draft: None,
             notice: "Откройте сохранённый файл .880dmf или .98pdmf".into(),
             notice_error: false,
             pending_action: None,
             close_allowed: false,
             radio: radio::RadioPane::default(),
+            firmware: firmware_pane::FirmwarePane::default(),
             calibrations: calibration_pane::CalibrationPane::default(),
         }
     }
@@ -273,6 +311,10 @@ impl App {
                 .settings_draft
                 .as_ref()
                 .is_some_and(SettingsDraft::changed)
+            || self
+                .navigation_draft
+                .as_ref()
+                .is_some_and(navigation_pane::Draft::changed)
     }
     fn unsaved(&self) -> bool {
         self.document
@@ -280,9 +322,15 @@ impl App {
             .is_some_and(|document| document.bytes() != self.last_export)
     }
     fn navigation_allowed(&mut self) -> bool {
-        if self.radio.busy() {
+        if self.firmware.busy() {
             self.message(
-                "Дождитесь завершения чтения или нажмите «Отменить» на вкладке «Радиостанция».",
+                "Дождитесь завершения записи на вкладке «Прошивка». Не отключайте рацию и кабель.",
+                true,
+            );
+            false
+        } else if self.radio.busy() {
+            self.message(
+                "Дождитесь завершения чтения или нажмите «Отменить» на вкладке «Резервные копии».",
                 true,
             );
             false
@@ -298,6 +346,7 @@ impl App {
     }
     fn can_apply_snapshot(&self) -> bool {
         !self.radio.busy()
+            && !self.firmware.busy()
             && !self.pending_form()
             && !self.unsaved()
             && self
@@ -349,10 +398,12 @@ impl App {
         self.channel_draft = None;
         self.zone_draft = None;
         self.settings_draft = None;
+        self.navigation_draft = None;
         let Some(document) = &self.document else {
             return;
         };
         let view = document.view();
+        self.navigation_draft = navigation_pane::Draft::new(view.cfg());
         if let Some(index) = self.channel_index {
             if let Ok(channel) = channels::channel(view.channels(), index) {
                 if channel.is_active() {
@@ -375,6 +426,10 @@ impl App {
         }
     }
     fn request_action(&mut self, action: Action, ctx: &egui::Context) {
+        if self.firmware.busy() {
+            self.firmware.close_blocked();
+            return;
+        }
         if self.radio.busy() {
             self.message(
                 "Чтение ещё выполняется. Сначала дождитесь завершения или отмените его.",
@@ -393,6 +448,13 @@ impl App {
         }
     }
     fn perform_action(&mut self, action: Action, ctx: &egui::Context) {
+        if self.firmware.busy() {
+            if matches!(action, Action::Close) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            }
+            self.firmware.close_blocked();
+            return;
+        }
         if self.radio.busy() {
             if matches!(action, Action::Close) {
                 self.radio.cancel();
@@ -462,7 +524,7 @@ impl App {
         }
     }
     fn apply_channel(&mut self) {
-        if self.radio.busy() {
+        if self.radio.busy() || self.firmware.busy() {
             return;
         }
         let result = (|| -> Result<usize, String> {
@@ -485,7 +547,7 @@ impl App {
         self.finish_edit(result);
     }
     fn apply_zone(&mut self) {
-        if self.radio.busy() {
+        if self.radio.busy() || self.firmware.busy() {
             return;
         }
         let result = (|| -> Result<usize, String> {
@@ -535,7 +597,7 @@ impl App {
         self.finish_edit(result);
     }
     fn apply_settings(&mut self) {
-        if self.radio.busy() {
+        if self.radio.busy() || self.firmware.busy() {
             return;
         }
         let result = (|| -> Result<usize, String> {
@@ -568,6 +630,35 @@ impl App {
                 self.message(format!("Применено. Изменено байт: {changed}. Для записи файла нажмите «Сохранить копию»."), false);
             }
             Err(error) => self.message(error, true),
+        }
+    }
+
+    fn apply_navigation(&mut self) {
+        if self.radio.busy() || self.firmware.busy() {
+            return;
+        }
+        let result = (|| -> Result<usize, String> {
+            let draft = self
+                .navigation_draft
+                .as_ref()
+                .ok_or("Настройки GPS/APRS недоступны")?;
+            draft.apply(self.document.as_mut().ok_or("Файл не открыт")?)
+        })();
+        self.finish_edit(result);
+    }
+
+    fn navigation_ui(&mut self, ui: &mut egui::Ui) {
+        let mut action = navigation_pane::Action::default();
+        egui::CentralPanel::default().show(ui, |ui| {
+            if let Some(draft) = &mut self.navigation_draft {
+                action = draft.show(ui);
+            }
+        });
+        if action.apply {
+            self.apply_navigation();
+        } else if action.reset {
+            self.refresh_forms();
+            self.message("Форма GPS/APRS возвращена к данным документа.", false);
         }
     }
 }
@@ -606,12 +697,12 @@ impl App {
     }
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        let busy = self.radio.busy();
+        let busy = self.radio.busy() || self.firmware.busy();
         egui::Panel::top("toolbar").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("UV98 CPS").size(23.0).strong());
                 ui.label(
-                    RichText::new(concat!(env!("CARGO_PKG_VERSION"), " · КАЛИБРОВКИ"))
+                    RichText::new(concat!(env!("CARGO_PKG_VERSION"), " · RUST / CPS"))
                         .color(Color32::from_rgb(100, 204, 202)),
                 );
                 ui.separator();
@@ -643,18 +734,20 @@ impl App {
                     self.message("Последняя правка отменена.", false);
                 }
             });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 for (tab, label) in [
                     (Tab::Channels, "Каналы"),
                     (Tab::Zones, "Зоны"),
                     (Tab::Settings, "Настройки"),
+                    (Tab::Navigation, "GPS / APRS"),
                     (Tab::Calibration, "Калибровки"),
                     (Tab::Changes, "Изменения"),
-                    (Tab::Radio, "Радиостанция"),
+                    (Tab::Radio, "Резервные копии"),
+                    (Tab::Firmware, "Прошивка"),
                 ] {
                     if ui
                         .add_enabled(
-                            !busy || tab == Tab::Radio,
+                            !busy || tab == self.tab,
                             egui::Button::new(label).selected(self.tab == tab),
                         )
                         .clicked()
@@ -682,6 +775,8 @@ impl App {
                 ui.small(
                     "Калибровки сохраняются отдельно от файла каналов. Запись в станцию отключена.",
                 );
+            } else if self.tab == Tab::Firmware {
+                ui.small("Прошивка запускается только кнопкой «Записать прошивку» после проверки файла и подготовки загрузчика.");
             } else if !self.notice.is_empty() {
                 let color = if self.notice_error {
                     Color32::from_rgb(255, 172, 133)
@@ -691,7 +786,7 @@ impl App {
                 ui.colored_label(color, &self.notice);
             }
             ui.horizontal(|ui| {
-                ui.small("Редактор файлов CPS · Чтение рации; запись отключена");
+                ui.small("Файлы CPS и калибровки · Чтение рации · Прошивка приложения MCU");
                 if let Some(document) = &self.document {
                     ui.separator();
                     ui.small(format!(
@@ -1064,8 +1159,13 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.radio.poll(&ctx);
+        self.firmware.poll(&ctx);
         if !self.close_allowed && ctx.input(|input| input.viewport().close_requested()) {
-            if self.radio.busy() {
+            if self.firmware.busy() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.pending_action = None;
+                self.firmware.close_blocked();
+            } else if self.radio.busy() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 self.radio.cancel();
                 self.pending_action = None;
@@ -1075,13 +1175,22 @@ impl eframe::App for App {
                 self.pending_action = Some(Action::Close);
             }
         }
-        // The only interactive work area while the reader runs is its own pane.
-        if self.radio.busy() {
+        // A serial operation owns navigation until the worker closes its port.
+        if self.firmware.busy() {
+            self.tab = Tab::Firmware;
+        } else if self.radio.busy() {
             self.tab = Tab::Radio;
         }
         self.toolbar(ui);
         if self.tab == Tab::Radio {
             self.radio_ui(ui);
+        } else if self.tab == Tab::Firmware {
+            let other_busy = self.radio.busy();
+            egui::CentralPanel::default().show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("firmware_page")
+                    .show(ui, |ui| self.firmware.ui(ui, other_busy));
+            });
         } else if self.tab == Tab::Calibration {
             let live = self.radio.calibration_snapshot();
             egui::CentralPanel::default().show(ui, |ui| {
@@ -1112,9 +1221,11 @@ impl eframe::App for App {
                 Tab::Channels => self.channels_ui(ui),
                 Tab::Zones => self.zones_ui(ui),
                 Tab::Settings => self.settings_ui(ui),
+                Tab::Navigation => self.navigation_ui(ui),
                 Tab::Changes => self.changes_ui(ui),
                 Tab::Radio => unreachable!("radio pane is handled above"),
                 Tab::Calibration => unreachable!("calibration pane is handled above"),
+                Tab::Firmware => unreachable!("firmware pane is handled above"),
             }
         }
         self.confirmation(&ctx);

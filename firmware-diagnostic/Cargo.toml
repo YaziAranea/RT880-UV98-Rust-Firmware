@@ -10,6 +10,7 @@ description = "Experimental radio diagnostic image for the related UV98/RT880 bo
 default = []
 upper-exo-tx-trial = []
 channel-tx = []
+verbose-faults = []
 
 [[bin]]
 name = "uv98-diag-firmware"
@@ -45,3 +46,8 @@ uv98-sidekeys-at32 = { path = "../crates/sidekeys-at32", features = ["hardware"]
 uv98-rf-sequence = { path = "../crates/rf-sequence" }
 uv98-handheld-ui = { path = "../crates/handheld-ui" }
 uv98-codeplug = { path = "../crates/codeplug" }
+
+uv98-signaling = { path = "../crates/signaling", features = ["hardware"] }
+uv98-gps-at32 = { path = "../crates/gps-at32", features = ["hardware"] }
+
+uv98-calibration = { path = "../crates/calibration" }

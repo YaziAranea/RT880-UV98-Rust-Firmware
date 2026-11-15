@@ -1,0 +1,266 @@
+{
+  "schema": 1,
+  "kind": "drx00_capability_matrix",
+  "date": "2026-11-10",
+  "target": "iRadio UV-98 Plus; related schematic RT880 V2",
+  "verdict": "no_supported_dual_rx_pair",
+  "production_secondary_mmio": false,
+  "sources": [
+    {
+      "id": "schematic-rt880-v2",
+      "path": "C:/Users/User/Desktop/USB/rt880/RT880 V2.pdf",
+      "sha256": "b7858c30fbe6eb8bf57967d57d9985b29951ccffa766ca5ac9240796c9fab32a",
+      "confidence": "schematic_related",
+      "note": "Page 2 U400/B LNAIN, EARO and U501 audio mux; not a UV98 Plus PCB identity proof."
+    },
+    {
+      "id": "stock-rt880-116",
+      "path": "C:/Users/User/Documents/Codex/2026-11-08/https-github-com-morluto-rea-https/outputs/UV98-recovery-preparation-2026-11-08/stock-candidate/RT-880_Upgrade_V1_16_250915.bin",
+      "sha256": "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc",
+      "confidence": "related_application",
+      "note": "Bounded disassembly only; not the user's MCU readback. Located in the original workspace outputs; not part of this source snapshot."
+    },
+    {
+      "id": "rf-startup",
+      "path": "research/rf-startup/EVIDENCE-RU.txt",
+      "confidence": "proven_software",
+      "note": "A/B bus pins, init/sleep addresses, GPIO ownership."
+    },
+    {
+      "id": "rf-bus",
+      "path": "research/rf-bus/EVIDENCE-RU.txt",
+      "confidence": "proven_software",
+      "note": "Two independent 3-wire buses; transport only."
+    },
+    {
+      "id": "receive-design",
+      "path": "research/receive-design/EVIDENCE-RU.txt",
+      "confidence": "proven_software",
+      "note": "Primary/secondary selector asymmetry; B gets only words 38/39; width helper writes A43."
+    },
+    {
+      "id": "rx-runtime",
+      "path": "research/rx-runtime/EVIDENCE-RU.txt",
+      "confidence": "proven_software",
+      "note": "A67 RSSI, A0C squelch, A/B audio-mode helpers, PF8 global mute; no B RSSI caller found."
+    },
+    {
+      "id": "band-switch",
+      "path": "research/band-switch/EVIDENCE-RU.txt",
+      "confidence": "proven_software+schematic",
+      "note": "PF0/K200 shared antenna relay; A33 route; B33 bit4 A/B-SW tied to TX power U403."
+    },
+    {
+      "id": "mic-path-pc3",
+      "path": "research/radio018/MIC-PATH-PC3-RU.txt",
+      "confidence": "schematic",
+      "note": "U501 SW1 = PC4 selects AFOUT4819 or MOD4819B; one source, no mixer. MOD4819B is a modulation/mic net, not B receive audio."
+    },
+    {
+      "id": "gps-si4732",
+      "path": "research/radio018/GPS-SI4732-APRS-ANC-EVIDENCE-RU.txt",
+      "confidence": "schematic+software",
+      "note": "Main AF path is analog AFOUT4819 -> U501 -> AUDIO; no RX PCM path."
+    }
+  ],
+  "receivers": {
+    "A": {
+      "chip": "U201 BK4819",
+      "bus_pins": [
+        "PA8 CS",
+        "PF6 SCK",
+        "PC9 DATA"
+      ],
+      "rf_input": {
+        "status": "proven_working_on_user_radio",
+        "confidence": "observed_device",
+        "note": "Existing r5 receive works; route/filters are the primary path, sensitivity not measured here."
+      },
+      "filters_relay": {
+        "status": "shared_pf0_k200_primary_path",
+        "confidence": "schematic_related"
+      },
+      "calibration": {
+        "status": "factory_block_used_by_primary",
+        "confidence": "proven_software"
+      },
+      "init": {
+        "address": "08004DC0",
+        "confidence": "proven_software"
+      },
+      "rx_start": {
+        "address": "08004FA0",
+        "confidence": "proven_software"
+      },
+      "frequency": {
+        "address": "08004B88",
+        "confidence": "proven_software"
+      },
+      "rssi_sql_tone": {
+        "status": "A67 raw9, A0C bit1 squelch, tone path bounded",
+        "confidence": "proven_software"
+      },
+      "af_output": {
+        "status": "AFOUT4819 via U501 SW1 NC0 -> AUDIO; PF8 global mute",
+        "confidence": "schematic+software"
+      },
+      "speaker": {
+        "status": "single analog speaker path",
+        "confidence": "schematic_related"
+      }
+    },
+    "B": {
+      "chip": "U400 BK4819",
+      "bus_pins": [
+        "PC7 CS",
+        "PC8 SCK",
+        "PC6 DATA"
+      ],
+      "rf_input": {
+        "status": "not_connected_to_antenna_in_schematic",
+        "confidence": "schematic_related",
+        "note": "LNAIN pin15 -> L400 47nH -> C461 100pF -> open upper end. MICP pin14 -> C431 -> GND. MICN pin13 -> C489 -> MOD4819B (modulation/mic path). No antenna connection is shown for LNAIN; MICP and MICN are separate microphone/modulation pins. Not measured on UV98 Plus.",
+        "pin_net_table": [
+          {"pin": "15 LNAIN", "components": "L400 47nH -> C461 100pF", "net": "open upper end", "meaning": "no antenna connection shown"},
+          {"pin": "14 MICP", "components": "C431 105P (schematic marking)", "net": "GND", "meaning": "not LNAIN"},
+          {"pin": "13 MICN", "components": "C489 105P (schematic marking)", "net": "MOD4819B", "meaning": "modulation/mic path, not B RX audio"},
+          {"pin": "8 EARO", "components": "C433 (NC)", "net": "AF OUT4819B", "meaning": "B output not installed in schematic"}
+        ]
+      },
+      "filters_relay": {
+        "status": "no_proven_B_antenna_branch",
+        "confidence": "unverified"
+      },
+      "calibration": {
+        "status": "no_proven_separate_B_calibration",
+        "confidence": "unverified"
+      },
+      "init": {
+        "address": "08003D34",
+        "confidence": "proven_software"
+      },
+      "sleep": {
+        "address": "08003EC0",
+        "confidence": "proven_software"
+      },
+      "rx_start": {
+        "address": "08003E3C",
+        "confidence": "proven_software"
+      },
+      "frequency": {
+        "address": "08003CCC",
+        "confidence": "proven_software"
+      },
+      "rssi_sql_tone": {
+        "status": "no stock B67 RSSI caller or B squelch/tone path proven",
+        "confidence": "unverified"
+      },
+      "af_output": {
+        "status": "EARO pin8 -> C433 marked NC -> AF OUT4819B",
+        "confidence": "schematic_related"
+      },
+      "speaker": {
+        "status": "PC4/U501 can select AFOUT4819 or MOD4819B, not mix; MOD4819B is not B receive audio; C433 unpopulated in schematic",
+        "confidence": "schematic_related"
+      }
+    }
+  },
+  "shared_resources": [
+    {
+      "name": "PF0 / K200 antenna relay",
+      "status": "shared",
+      "confidence": "schematic_related",
+      "note": "One mechanical antenna selector; simultaneous split not proven."
+    },
+    {
+      "name": "A33 RX/TX route bits",
+      "status": "primary_owned",
+      "confidence": "proven_software"
+    },
+    {
+      "name": "B33 bit4 A/B-SW",
+      "status": "shared_with_TX_power_U403",
+      "confidence": "schematic+software",
+      "note": "Not an audio A/B switch."
+    },
+    {
+      "name": "PC4 / U501 SW1",
+      "status": "shared_audio_source_select",
+      "confidence": "schematic",
+      "note": "SPDT selector: AFOUT4819 or MOD4819B, not a mixer. MOD4819B is the MICN/modulation net, not a second RX audio output."
+    },
+    {
+      "name": "PF8",
+      "status": "global_audio_mute",
+      "confidence": "proven_software+schematic"
+    },
+    {
+      "name": "TX PA / 5RT / 5T29 etc.",
+      "status": "shared_TX_power",
+      "confidence": "schematic_related"
+    }
+  ],
+  "pairs": [
+    {
+      "pair": "VHF+VHF",
+      "status": "unverified",
+      "reason": "B RF input and audio not proven; RT880 V2 schematic shows no antenna connection.",
+      "rt880_v2": "unsupported_B_rf_and_audio",
+      "uv98_plus": "unverified"
+    },
+    {
+      "pair": "VHF+UHF",
+      "status": "unverified",
+      "reason": "B RF input and audio not proven.",
+      "rt880_v2": "unsupported_B_rf_and_audio",
+      "uv98_plus": "unverified"
+    },
+    {
+      "pair": "UHF+UHF",
+      "status": "unverified",
+      "reason": "B RF input and audio not proven.",
+      "rt880_v2": "unsupported_B_rf_and_audio",
+      "uv98_plus": "unverified"
+    },
+    {
+      "pair": "air_AM+FM",
+      "status": "unverified",
+      "reason": "B RF/audio unproven; AM/ATIS quality also unresolved.",
+      "rt880_v2": "unsupported_B_rf_and_audio",
+      "uv98_plus": "unverified"
+    },
+    {
+      "pair": "CB+FM",
+      "status": "unverified",
+      "reason": "B RF/audio unproven; CB calibrations not established.",
+      "rt880_v2": "unsupported_B_rf_and_audio",
+      "uv98_plus": "unverified"
+    },
+    {
+      "pair": "800+FM",
+      "status": "unverified",
+      "reason": "B RF/audio unproven; 800 route uses primary selector.",
+      "rt880_v2": "unsupported_B_rf_and_audio",
+      "uv98_plus": "unverified"
+    },
+    {
+      "pair": "BK+Si4732",
+      "status": "unverified",
+      "reason": "R-12 Si4732 installed chip/reset/audio not proven; not a universal dual VHF/UHF claim.",
+      "rt880_v2": "unverified",
+      "uv98_plus": "unverified"
+    }
+  ],
+  "audio": {
+    "mix_both": "unverified",
+    "select_one": "schematic_supported",
+    "reason": "U501 BL1555 is a single-pole selector controlled by PC4: AFOUT4819 or MOD4819B. MOD4819B is a modulation/mic net, not B receive audio. PF8 is a global mute. No mixer or two-speaker path is documented."
+  },
+  "minimal_facts_to_change_verdict": [
+    "Continuity/photo of the exact UV98 Plus B LNAIN path (L400/C461 upper end) to the antenna network and C433/EARO population.",
+    "Board revision and whether U400, L400/C461, C431 (MICP), C489 (MICN), C433 (EARO) and the B shield are populated.",
+    "A read-only B RX observation on the user's board, without changing stock/NOR/calibration.",
+    "Proven audio path for B and a documented mixer if both signals must be audible."
+  ],
+  "production_change": "none; B stays asleep, no new B MMIO in the working image"
+}

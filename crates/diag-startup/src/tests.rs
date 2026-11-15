@@ -238,7 +238,7 @@ fn terminal_rf_a_emits_four_msb_frames_after_gates_without_touching_relay_or_wat
             .iter()
             .filter(|event| **event == Event::TerminalRfDelay)
             .count(),
-        196
+        392
     );
     let mut chip = BTreeMap::from([
         (0x33u8, 0x00ffu16),
@@ -256,7 +256,7 @@ fn terminal_rf_a_emits_four_msb_frames_after_gates_without_touching_relay_or_wat
     for (port, owned) in [
         (GPIOA, 0x0110u16),
         (GPIOB, 0x0800),
-        (GPIOC, 0x8230),
+        (GPIOC, 0x83f0),
         (GPIOF, 0x0140),
     ] {
         for offset in [CFGR, OMODE, ODRVR, PULL, ODT] {
@@ -299,7 +299,7 @@ fn terminal_rf_rejects_identity_clocks_locks_and_readback_before_serial_select()
         assert!(!io
             .writes()
             .any(|(address, value)| address == GPIOA + CLR && value & 0x100 != 0));
-        assert!(!io.events.contains(&Event::TerminalRfDelay));
+        assert_eq!(io.events.contains(&Event::TerminalRfDelay), mask != 0x8000);
     }
     for (port, mask) in [(GPIOC, 0x8000), (GPIOC, 0x200), (GPIOF, 0x40)] {
         let mut io = Mock::new();
@@ -311,7 +311,7 @@ fn terminal_rf_rejects_identity_clocks_locks_and_readback_before_serial_select()
         assert!(!io
             .writes()
             .any(|(address, value)| address == GPIOA + CLR && value & 0x100 != 0));
-        assert!(!io.events.contains(&Event::TerminalRfDelay));
+        assert_eq!(io.events.contains(&Event::TerminalRfDelay), mask != 0x8000);
     }
     let mut io = Mock::new();
     io.ignore_gpio_clock = true;

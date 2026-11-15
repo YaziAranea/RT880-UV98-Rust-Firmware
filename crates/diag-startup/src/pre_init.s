@@ -56,22 +56,22 @@
     bne .Lrf_delay\@
 .endm
 
-.macro diag_rf_a_write frame
+.macro diag_rf_write frame, cs_port, cs_pin, sck_port, sck_pin, data_pin
     /* SCK low before selecting, then address/high/low bytes MSB-first. */
-    diag_load r0, 0x40021400
-    movs r1, #0x40
+    diag_load r0, \sck_port
+    movw r1, #\sck_pin
     str r1, [r0, #0x28]
-    diag_load r0, 0x40020000
-    movw r1, #0x100
+    diag_load r0, \cs_port
+    movw r1, #\cs_pin
     str r1, [r0, #0x28]
     diag_load r12, (\frame << 8)
     movs r3, #24
 .Lrf_bit\@:
-    diag_load r0, 0x40021400
-    movs r1, #0x40
+    diag_load r0, \sck_port
+    movw r1, #\sck_pin
     str r1, [r0, #0x28]
     diag_load r0, 0x40020800
-    movw r1, #0x200
+    movw r1, #\data_pin
     lsls.w r12, r12, #1
     bcc .Lrf_zero\@
     str r1, [r0, #0x18]
@@ -80,14 +80,14 @@
     str r1, [r0, #0x28]
 .Lrf_setup\@:
     diag_rf_phase
-    diag_load r0, 0x40021400
-    movs r1, #0x40
+    diag_load r0, \sck_port
+    movw r1, #\sck_pin
     str r1, [r0, #0x18]
     diag_rf_phase
     subs r3, #1
     bne .Lrf_bit\@
-    diag_load r0, 0x40020000
-    movw r1, #0x100
+    diag_load r0, \cs_port
+    movw r1, #\cs_pin
     str r1, [r0, #0x18]
     diag_rf_phase
 .endm
@@ -202,6 +202,7 @@
     diag_rf_output_present 0x40020800, 0x8030, 0, 0xc0000f00, 0x40000500, 0x80000a00, \bad
     diag_rf_output_present 0x40020400, 0x0800, 0, 0x00c00000, 0x00400000, 0x00800000, \bad
     diag_rf_output_present 0x40021400, 0x0100, 0, 0x00030000, 0x00010000, 0x00020000, \bad
+    diag_rf_output_present 0x40020000, 0x0010, 0, 0x00000300, 0x00000100, 0x00000200, \bad
     diag_rf_unlocked 0x40020000, 0x0100, \bad
     diag_rf_unlocked 0x40021400, 0x0040, \bad
     diag_rf_unlocked 0x40020800, 0x0200, \bad
@@ -214,11 +215,31 @@
     diag_rf_output_present 0x40020800, 0x0200, 0, 0x000c0000, 0x00040000, 0x00080000, \bad
     /* BK4802A register33 includes V/U PA bits3/2; MCU gates alone cannot
      * disable them. These are write requests, not RF readback or RF-off proof. */
-    diag_rf_a_write 0x330000
-    diag_rf_a_write 0x36007f
-    diag_rf_a_write 0x300000
-    diag_rf_a_write 0x371d00
+    diag_rf_write 0x330000, 0x40020000, 0x100, 0x40021400, 0x40, 0x200
+    diag_rf_write 0x36007f, 0x40020000, 0x100, 0x40021400, 0x40, 0x200
+    diag_rf_write 0x300000, 0x40020000, 0x100, 0x40021400, 0x40, 0x200
+    diag_rf_write 0x371d00, 0x40020000, 0x100, 0x40021400, 0x40, 0x200
     dsb
+    mov.w r12, #0
+.endm
+
+
+.macro diag_rf_b_off bad
+    diag_rf_output_present 0x40020800, 0x8030, 0, 0xc0000f00, 0x40000500, 0x80000a00, \bad
+    diag_rf_output_present 0x40020400, 0x0800, 0, 0x00c00000, 0x00400000, 0x00800000, \bad
+    diag_rf_output_present 0x40021400, 0x0100, 0, 0x00030000, 0x00010000, 0x00020000, \bad
+    diag_rf_output_present 0x40020000, 0x0010, 0, 0x00000300, 0x00000100, 0x00000200, \bad
+    diag_rf_unlocked 0x40020800, 0x01c0, \bad
+    diag_output 0x40020800, 0, 0x0080, 0x0080, 0x0000c000, 0x00004000, 0x00008000, 0, 1, \bad
+    diag_output 0x40020800, 0x0140, 0, 0x0140, 0x00033000, 0x00011000, 0x00022000, 0, 1, \bad
+    dsb
+    diag_rf_output_present 0x40020800, 0x01c0, 0x0080, 0x0003f000, 0x00015000, 0x0002a000, \bad
+    diag_rf_write 0x330000, 0x40020800, 0x80, 0x40020800, 0x100, 0x40
+    diag_rf_write 0x36007f, 0x40020800, 0x80, 0x40020800, 0x100, 0x40
+    diag_rf_write 0x300000, 0x40020800, 0x80, 0x40020800, 0x100, 0x40
+    diag_rf_write 0x371d00, 0x40020800, 0x80, 0x40020800, 0x100, 0x40
+    dsb
+    diag_rf_output_present 0x40020800, 0x01c0, 0x0180, 0x0003f000, 0x00015000, 0x0002a000, \bad
     mov.w r12, #0
 .endm
 
@@ -297,8 +318,11 @@ __pre_init:
     diag_modify 0x40023830, 0, 0x27
     diag_rf_require 0x40023830, 0x27, 0x27, .Ldiag_early_rf_failure
     dsb
-    diag_rf_a_off .Ldiag_early_rf_failure
+    diag_rf_a_off .Ldiag_early_a_failed
+    diag_rf_b_off .Ldiag_early_rf_failure
     b.w .Ldiag_early_rf_done
+.Ldiag_early_a_failed:
+    diag_rf_b_off .Ldiag_early_rf_failure
 .Ldiag_early_rf_failure:
     /* A partially configured/guard-rejected off attempt must never proceed
      * into ordinary main, even if inherited pin fields happened to look good. */
@@ -537,7 +561,9 @@ __diag_terminal_fail_stop:
     cmp r1, #0x27
     bne.w .Ldiag_terminal_report
     dsb
-    diag_rf_a_off .Ldiag_terminal_report
+    diag_rf_a_off .Ldiag_terminal_rf_b
+.Ldiag_terminal_rf_b:
+    diag_rf_b_off .Ldiag_terminal_report
 .Ldiag_terminal_report:
     /* RF-low attempts precede terminal clock/UART work. Abandoned SPI must
      * not continue across the frequency change even if a pin guard failed. */
@@ -559,5 +585,6 @@ __diag_terminal_fail_stop:
 .purgem diag_rf_unlocked
 .purgem diag_rf_output_present
 .purgem diag_rf_phase
-.purgem diag_rf_a_write
+.purgem diag_rf_write
+.purgem diag_rf_b_off
 .purgem diag_rf_a_off

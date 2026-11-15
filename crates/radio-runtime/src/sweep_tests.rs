@@ -100,7 +100,7 @@ fn assert_no_tx(runtime: &Runtime<Mock>) {
     assert!(!runtime.io.events.iter().any(|e| match e {
         Event::Write(0x36, v) => *v != 0x007f,
         Event::Write(0x33, v) => *v & 0x0c != 0,
-        Event::Write(0x30, v) => ![0, 0x0200, 0xbff1].contains(v),
+        Event::Write(0x30, v) => ![0, 0x0200, 0xbff0, 0xbff1].contains(v),
         Event::Hf(a, b) => *a || *b,
         Event::Mute(false) => true,
         Event::Indicators(_, true) => true,
@@ -123,6 +123,7 @@ fn enter_verifies_origin_mutes_and_pins_fixed_gain() {
     runtime.sweep_enter(range, 1).unwrap();
     assert_eq!(runtime.state(), State::Sweeping);
     assert!(!runtime.audio_open());
+    assert_eq!(runtime.io.words[0x43], 0x01bc);
     assert_eq!(runtime.io.words[0x13], 0x03be);
     assert_eq!(runtime.io.words[0x47], 0x6040);
     assert_eq!(runtime.am_gain_word, None);
@@ -132,7 +133,7 @@ fn enter_verifies_origin_mutes_and_pins_fixed_gain() {
 }
 
 #[test]
-fn six_writes_use_fresh_route_word_and_settle_starts_after_io_ack() {
+fn retune_resets_rssi_after_route_and_settles_after_io_ack() {
     let (mut runtime, range) = ready();
     runtime.sweep_enter(range, 1).unwrap();
     runtime.io.words[0x33] = 0xa550; // Fresh unrelated GPIO bits must survive.
@@ -155,16 +156,20 @@ fn six_writes_use_fresh_route_word_and_settle_starts_after_io_ack() {
             (0x37, 0x1f0f),
             (0x30, 0x0200),
             (0x30, 0xbff1),
-            (0x33, 0xa550)
+            (0x30, 0xbff0),
+            (0x30, 0xbff1),
         ]
     );
     clear(&mut runtime);
     // Suppose tuning consumed90ms: no early sample using pre-I/O time10.
     assert_eq!(runtime.sweep_read_rssi(100).unwrap(), None);
-    assert_eq!(runtime.sweep_read_rssi(109).unwrap(), None);
+    assert_eq!(
+        runtime.sweep_read_rssi(100 + super::SETTLE_MS - 1).unwrap(),
+        None
+    );
     assert!(!runtime.io.events.contains(&Event::Read(0x67)));
     assert_eq!(
-        runtime.sweep_read_rssi(110).unwrap(),
+        runtime.sweep_read_rssi(100 + super::SETTLE_MS).unwrap(),
         Some(Sample {
             index: 0,
             frequency_10hz: 12_639_999,

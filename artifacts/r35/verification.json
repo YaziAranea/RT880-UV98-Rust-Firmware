@@ -1,0 +1,311 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "started_at": "2026-11-15T18:04:44.1214207Z",
+  "completed_at": "2026-11-15T18:05:27.3261555Z",
+  "rustc": [
+    "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "binary: rustc",
+    "commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67",
+    "commit-date: 2026-10-13",
+    "host: x86_64-pc-windows-gnullvm",
+    "release: 1.99.1",
+    "LLVM version: 23.1.1"
+  ],
+  "target": "thumbv7em-none-eabi",
+  "package": "uv98-diag-firmware",
+  "commands": [
+    {
+      "executable": "cargo",
+      "arguments": [
+        "fmt",
+        "-p",
+        "uv98-signaling",
+        "-p",
+        "uv98-gps-at32",
+        "-p",
+        "uv98-spectrum",
+        "-p",
+        "uv98-gps-nmea",
+        "-p",
+        "uv98-radio-runtime",
+        "-p",
+        "uv98-rf-sequence",
+        "-p",
+        "uv98-sidekeys-at32",
+        "-p",
+        "uv98-handheld-ui",
+        "-p",
+        "uv98-handheld-app",
+        "-p",
+        "uv98-handheld-image-sim",
+        "-p",
+        "uv98-boot-log",
+        "-p",
+        "uv98-diag-startup",
+        "-p",
+        "uv98-diag-quiesce",
+        "-p",
+        "uv98-diag-app",
+        "-p",
+        "uv98-board-pins",
+        "-p",
+        "uv98-rf-at32",
+        "-p",
+        "uv98-diagnostic",
+        "-p",
+        "uv98-display",
+        "-p",
+        "uv98-keys",
+        "-p",
+        "uv98-keyscan-at32",
+        "-p",
+        "uv98-rf-bus",
+        "-p",
+        "uv98-nor-read",
+        "-p",
+        "uv98-board-at32",
+        "-p",
+        "uv98-lcd-at32",
+        "-p",
+        "uv98-clock-profile",
+        "-p",
+        "uv98-board-diagnostic",
+        "-p",
+        "uv98-board-policy",
+        "-p",
+        "uv98-diag-image-sim",
+        "-p",
+        "uv98-diag-firmware",
+        "--",
+        "--check"
+      ],
+      "exit_code": 0
+    },
+    {
+      "executable": "python",
+      "arguments": [
+        "tools/check_oracles.py"
+      ],
+      "exit_code": 0
+    },
+    {
+      "executable": "python",
+      "arguments": [
+        "tools/check_board_oracles.py"
+      ],
+      "exit_code": 0
+    },
+    {
+      "executable": "rtk",
+      "arguments": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "--target",
+        "x86_64-pc-windows-gnullvm",
+        "-p",
+        "uv98-signaling",
+        "-p",
+        "uv98-gps-at32",
+        "-p",
+        "uv98-spectrum",
+        "-p",
+        "uv98-gps-nmea",
+        "-p",
+        "uv98-radio-runtime",
+        "-p",
+        "uv98-rf-sequence",
+        "-p",
+        "uv98-sidekeys-at32",
+        "-p",
+        "uv98-handheld-ui",
+        "-p",
+        "uv98-handheld-app",
+        "-p",
+        "uv98-handheld-image-sim",
+        "-p",
+        "uv98-boot-log",
+        "-p",
+        "uv98-diag-startup",
+        "-p",
+        "uv98-diag-quiesce",
+        "-p",
+        "uv98-diag-app",
+        "-p",
+        "uv98-board-pins",
+        "-p",
+        "uv98-rf-at32",
+        "-p",
+        "uv98-diagnostic",
+        "-p",
+        "uv98-display",
+        "-p",
+        "uv98-keys",
+        "-p",
+        "uv98-keyscan-at32",
+        "-p",
+        "uv98-rf-bus",
+        "-p",
+        "uv98-nor-read",
+        "-p",
+        "uv98-board-at32",
+        "-p",
+        "uv98-lcd-at32",
+        "-p",
+        "uv98-clock-profile",
+        "-p",
+        "uv98-board-diagnostic",
+        "-p",
+        "uv98-board-policy",
+        "-p",
+        "uv98-diag-image-sim"
+      ],
+      "exit_code": 0
+    },
+    {
+      "executable": "python",
+      "arguments": [
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tools",
+        "-p",
+        "test_check_elf.py",
+        "-v"
+      ],
+      "exit_code": 0
+    },
+    {
+      "executable": "python",
+      "arguments": [
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tools",
+        "-p",
+        "test_export_diagnostic_image.py",
+        "-v"
+      ],
+      "exit_code": 0
+    },
+    {
+      "executable": "python",
+      "arguments": [
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tools",
+        "-p",
+        "test_package_diagnostic_image.py",
+        "-v"
+      ],
+      "exit_code": 0
+    },
+    {
+      "executable": "python",
+      "arguments": [
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "research/recovery",
+        "-p",
+        "test_image_preflight.py",
+        "-q"
+      ],
+      "exit_code": 0
+    },
+    {
+      "executable": "python",
+      "arguments": [
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tools/boot-log",
+        "-p",
+        "test_capture_boot_log.py",
+        "-v"
+      ],
+      "exit_code": 0
+    },
+    {
+      "executable": "rtk",
+      "arguments": [
+        "cargo",
+        "build",
+        "--locked",
+        "--offline",
+        "--release",
+        "--target",
+        "thumbv7em-none-eabi",
+        "-p",
+        "uv98-diag-firmware",
+        "--features",
+        "channel-tx"
+      ],
+      "exit_code": 0
+    },
+    {
+      "executable": "python",
+      "arguments": [
+        "tools/export_diagnostic_image.py",
+        "target/thumbv7em-none-eabi/release/uv98-diag-firmware",
+        "C:\\Users\\User\\Documents\\Codex\\2026-11-08\\https-github-com-morluto-rea-https\\outputs\\UV98-r35-20261116-build3\\image"
+      ],
+      "exit_code": 0
+    },
+    {
+      "executable": "python",
+      "arguments": [
+        "tools/check_diag_preinit.py",
+        "C:\\Users\\User\\Documents\\Codex\\2026-11-08\\https-github-com-morluto-rea-https\\outputs\\UV98-r35-20261116-build3\\image\\UV98-diag-0.1.8.elf",
+        "--report",
+        "C:\\Users\\User\\Documents\\Codex\\2026-11-08\\https-github-com-morluto-rea-https\\outputs\\UV98-r35-20261116-build3\\image\\early-machine-code-check.json"
+      ],
+      "exit_code": 0
+    },
+    {
+      "executable": "python",
+      "arguments": [
+        "tools\\boot-log\\verify_boot_log_emulation.py",
+        "--report",
+        "C:\\Users\\User\\Documents\\Codex\\2026-11-08\\https-github-com-morluto-rea-https\\outputs\\UV98-r35-20261116-build3\\image\\early-machine-code-check.json",
+        "--output",
+        "C:\\Users\\User\\Documents\\Codex\\2026-11-08\\https-github-com-morluto-rea-https\\outputs\\UV98-r35-20261116-build3\\boot-log-emulation-decode"
+      ],
+      "exit_code": 0
+    },
+    {
+      "executable": "cargo",
+      "arguments": [
+        "run",
+        "--locked",
+        "--offline",
+        "--release",
+        "-p",
+        "uv98-handheld-image-sim",
+        "--",
+        "C:\\Users\\User\\Documents\\Codex\\2026-11-08\\https-github-com-morluto-rea-https\\outputs\\uv98-backup-2026-11-08\\storage-read-01\\storage-address-space.bin",
+        "C:\\Users\\User\\Documents\\Codex\\2026-11-08\\https-github-com-morluto-rea-https\\outputs\\UV98-r35-20261116-build3\\preview"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "firmware_features": [
+    "channel-tx"
+  ],
+  "preserved_nor_sha256": "1e8f4c5c5373392a08a041da9132e22d21ad0dba4fca97b9bb4f21ade77c55a3",
+  "preserved_calibration_sha256": "8906c3d9847eeeefe0ee6aad6aa4302949bd5e5984f3c64ed02edb8cf6fb0ff7",
+  "preserved_inputs_unchanged": true,
+  "device_accessed": false,
+  "flash_performed": false,
+  "hardware_qualified": false,
+  "recovery_verified": false,
+  "scope": "Host tests, actual linked ARM image, ELF/BIN structure, saved-NOR app simulation"
+}

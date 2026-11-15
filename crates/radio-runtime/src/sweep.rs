@@ -5,7 +5,12 @@
 use crate::{Error, Fault, Io, Runtime, State};
 use uv98_rf_sequence::{sweep::QualifiedRange, Step};
 
-pub const SETTLE_MS: u32 = 10;
+// RSSI integration after the reset pulse. Keep RF bus timing and readbacks.
+pub const SETTLE_MS: u32 = 5;
+// BK4819 scan filter from fagci spectrum GetBWRegValueForScan. Full RX
+// restore programs the saved channel's bandwidth again before unmuting.
+const SCAN_BANDWIDTH: u16 = 0x01bc;
+const SWEEP_RX: u16 = 0xbff1;
 pub const SAMPLE_TIMEOUT_MS: u32 = 3000;
 
 #[derive(Clone, Copy)]
@@ -87,6 +92,8 @@ impl<I: Io> Runtime<I> {
         self.sweep_expect(0x39, high)?;
         let antenna = self.io.antenna(range.antenna_high());
         self.io_result(antenna)?;
+        self.write(0x43, SCAN_BANDWIDTH)?;
+        self.sweep_expect(0x43, SCAN_BANDWIDTH)?;
         self.write(0x13, 0x03be)?;
         self.sweep_expect(0x13, 0x03be)?;
         let checked = self.io.verify_control();
@@ -102,7 +109,7 @@ impl<I: Io> Runtime<I> {
         Ok(())
     }
 
-    /// A synchronous bounded six-write retune, with checked control/frequency
+    /// A synchronous bounded retune with checked control/frequency
     /// writes and fresh A33. Does not wait for settling or claim PLL lock.
     /// Only the next sequential bin is accepted; sample it before another tune.
     pub fn sweep_tune(&mut self, index: usize, now: u32) -> Result<(), Fault<I::Error>> {
@@ -122,7 +129,7 @@ impl<I: Io> Runtime<I> {
             .map_err(|e| self.fail(Error::Sweep(e)))?;
         let checked = self.io.verify_control();
         self.io_result(checked)?;
-        self.sweep_gate_word()?;
+        let gate_word = self.sweep_gate_word()?;
         self.sweep_expect(0x36, 0x007f)?;
         for operation in tune.operations() {
             match operation {
@@ -132,12 +139,22 @@ impl<I: Io> Runtime<I> {
                     keep_mask,
                     value,
                 } => {
-                    let fresh = self.sweep_gate_word()?;
-                    self.write(0x33, (fresh & keep_mask) | value)?;
+                    // Same qualified RX path for every bin. Keep unrelated
+                    // GPIO bits and avoid rewriting a route already selected.
+                    let desired = (gate_word & keep_mask) | value;
+                    if desired != gate_word {
+                        let fresh = self.sweep_gate_word()?;
+                        self.write(0x33, (fresh & keep_mask) | value)?;
+                    }
                 }
                 _ => return Err(self.fail(Error::State)),
             }
         }
+        // Start the RSSI integration after every frequency/route write.
+        // Toggle only bit zero, keeping PA and AF gates in receive state.
+        // The immediately preceding RX control write already had a readback.
+        self.write(0x30, SWEEP_RX & !1)?;
+        self.write(0x30, SWEEP_RX)?;
         // `now` precedes synchronous I/O. It is a timeout anchor only, never
         // treated as proof that writes completed by that instant.
         self.sweep_session = Some(Session {
@@ -153,7 +170,7 @@ impl<I: Io> Runtime<I> {
 
     /// First call after tune must carry a fresh clock sample. It only anchors
     /// settling AFTER the synchronous I/O and returns None without reading67.
-    /// Later calls read once after10ms; repeated reads cannot reuse that sample.
+    /// Later calls read once after SETTLE_MS; repeated reads cannot reuse that sample.
     /// Root's single foreground scheduler supplies fresh times, never catch-up
     /// events with an earlier timestamp. Clock/timeout/I/O errors clean up RF.
     pub fn sweep_read_rssi(&mut self, now: u32) -> Result<Option<Sample>, Fault<I::Error>> {

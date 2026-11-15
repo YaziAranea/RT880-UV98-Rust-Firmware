@@ -1,0 +1,84 @@
+{
+  "schema": 1,
+  "kind": "diagnostic_application_build_export",
+  "elf_sha256": "c3354a2c488adccdd60dd7f857eb85e805c50b81dbe51dd1c94777afce3f92ec",
+  "bin_sha256": "97e3d98257cacef6d64917d4b355719e1649b8570e8df8e9c9527edd39c7307d",
+  "bin_bytes": 251904,
+  "application_base": "0x08002800",
+  "application_end_exclusive": "0x08040000",
+  "file_backed_load_bytes": 251400,
+  "gap_and_tail_fill_byte": "0xFF",
+  "gap_and_tail_fill_bytes": 504,
+  "copied_segments": [
+    {
+      "physical_address": "0x08002800",
+      "bytes": 436
+    },
+    {
+      "physical_address": "0x08002AC0",
+      "bytes": 232440
+    },
+    {
+      "physical_address": "0x0803B6B8",
+      "bytes": 18524
+    }
+  ],
+  "static_ram_high_water": "0x2000021C",
+  "initial_msp": "0x200099C8",
+  "bytes_above_static_ram": 38828,
+  "stack_margin_boundary": "initial_msp",
+  "minimum_space_above_static_ram": 16384,
+  "maximum_runtime_stack_measured": false,
+  "bootloader_prefix_included": false,
+  "external_nor_included": false,
+  "hardware_qualified": false,
+  "device_accessed": false,
+  "flash_performed": false,
+  "layout": {
+    "layout_profile": "diagnostic-0.1.8",
+    "entry": "0x08002AC1",
+    "initial_msp": "0x200099C8",
+    "reset_vector": "0x08002AC1",
+    "vector_address": "0x08002800",
+    "vector_bytes": 436,
+    "elf_flags": "0x05000200",
+    "load_segments": [
+      {
+        "index": 0,
+        "file_offset": 276,
+        "virtual_address": "0x08002800",
+        "physical_address": "0x08002800",
+        "file_bytes": 436,
+        "memory_bytes": 436,
+        "flags": 4
+      },
+      {
+        "index": 1,
+        "file_offset": 712,
+        "virtual_address": "0x08002AC0",
+        "physical_address": "0x08002AC0",
+        "file_bytes": 232440,
+        "memory_bytes": 232440,
+        "flags": 5
+      },
+      {
+        "index": 2,
+        "file_offset": 233152,
+        "virtual_address": "0x0803B6B8",
+        "physical_address": "0x0803B6B8",
+        "file_bytes": 18524,
+        "memory_bytes": 18524,
+        "flags": 4
+      },
+      {
+        "index": 3,
+        "file_offset": 251680,
+        "virtual_address": "0x20000000",
+        "physical_address": "0x20000000",
+        "file_bytes": 0,
+        "memory_bytes": 540,
+        "flags": 6
+      }
+    ]
+  }
+}

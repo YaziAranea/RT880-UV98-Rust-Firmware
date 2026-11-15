@@ -9,6 +9,7 @@ pub enum Sample {
     Released,
     Key(Key),
     Invalid,
+    UncertainMatrix,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,6 +45,9 @@ pub struct InputTracker {
     last_ms: Option<u32>,
     release_since: Option<u32>,
     press: Option<Press>,
+    aux16_ptt: bool,
+    fast_matrix: bool,
+    uncertain_since: Option<u32>,
 }
 
 impl InputTracker {
@@ -54,6 +58,34 @@ impl InputTracker {
             last_ms: None,
             release_since: None,
             press: None,
+            aux16_ptt: true,
+            fast_matrix: false,
+            uncertain_since: None,
+        }
+    }
+
+    pub fn set_aux16_ptt(&mut self, mapped: bool) {
+        self.aux16_ptt = mapped;
+    }
+
+    pub fn enable_fast_matrix(&mut self) {
+        self.fast_matrix = true;
+    }
+
+    fn key_debounce(&self, key: Key, release: bool) -> u32 {
+        if self.fast_matrix && is_matrix(key) {
+            if release {
+                8
+            } else {
+                12
+            }
+        } else if self.fast_matrix
+            && matches!(key, Key::Aux16 | Key::Aux17 | Key::Aux18)
+            && side_event(key, true, self.aux16_ptt).is_none()
+        {
+            12
+        } else {
+            self.timing.debounce_ms()
         }
     }
 
@@ -79,14 +111,30 @@ impl InputTracker {
             return Err(ClockError);
         }
         self.last_ms = Some(now_ms);
+        if sample == Sample::UncertainMatrix {
+            let since = *self.uncertain_since.get_or_insert(now_ms);
+            // A transition between the forward and reverse matrix scans is
+            // normal during a press or release. Never defer a PTT release.
+            if self.fast_matrix
+                && self.press.is_none_or(|press| is_matrix(press.key))
+                && now_ms.wrapping_sub(since) < 8
+            {
+                return Ok(None);
+            }
+        } else {
+            self.uncertain_since = None;
+        }
         match sample {
-            Sample::Invalid => Ok(self.invalidate()),
+            Sample::Invalid | Sample::UncertainMatrix => Ok(self.invalidate()),
             Sample::Released => {
                 let Some(since) = self.release_since else {
                     self.release_since = Some(now_ms);
                     return Ok(None);
                 };
-                if now_ms.wrapping_sub(since) < self.timing.debounce_ms() {
+                let debounce = self.press.map_or(self.timing.debounce_ms(), |press| {
+                    self.key_debounce(press.key, true)
+                });
+                if now_ms.wrapping_sub(since) < debounce {
                     return Ok(None);
                 }
                 self.state = InputState::Ready;
@@ -94,7 +142,7 @@ impl InputTracker {
                 Ok(finished.and_then(|press| {
                     if !press.accepted {
                         None
-                    } else if let Some(event) = side_event(press.key, false) {
+                    } else if let Some(event) = side_event(press.key, false, self.aux16_ptt) {
                         Some(event)
                     } else if delayed_short(press.key) && !press.held {
                         Some(InputEvent::Short(press.key))
@@ -104,7 +152,7 @@ impl InputTracker {
                 }))
             }
             Sample::Key(key) => {
-                self.release_since = None;
+                let released_at = self.release_since.take();
                 if self.state != InputState::Ready {
                     return Ok(None);
                 }
@@ -119,10 +167,25 @@ impl InputTracker {
                     return Ok(None);
                 };
                 if press.key != key {
+                    if self.fast_matrix
+                        && is_matrix(press.key)
+                        && is_matrix(key)
+                        && released_at.is_some_and(|since| now_ms.wrapping_sub(since) >= 4)
+                    {
+                        self.press = Some(Press {
+                            key,
+                            since: now_ms,
+                            accepted: false,
+                            held: false,
+                            repeat_at: now_ms,
+                        });
+                        return Ok((press.accepted && delayed_short(press.key) && !press.held)
+                            .then_some(InputEvent::Short(press.key)));
+                    }
                     return Ok(self.invalidate());
                 }
                 if !press.accepted {
-                    if now_ms.wrapping_sub(press.since) < self.timing.debounce_ms() {
+                    if now_ms.wrapping_sub(press.since) < self.key_debounce(key, false) {
                         return Ok(None);
                     }
                     press.accepted = true;
@@ -130,7 +193,7 @@ impl InputTracker {
                     press.since = now_ms;
                     press.repeat_at = now_ms;
                     self.press = Some(press);
-                    return Ok(if let Some(event) = side_event(key, true) {
+                    return Ok(if let Some(event) = side_event(key, true, self.aux16_ptt) {
                         Some(event)
                     } else if delayed_short(key) {
                         None
@@ -161,7 +224,7 @@ impl InputTracker {
         let release = self
             .press
             .filter(|press| press.accepted)
-            .and_then(|press| side_event(press.key, false));
+            .and_then(|press| side_event(press.key, false, self.aux16_ptt));
         self.press = None;
         self.release_since = None;
         self.state = InputState::Unstable;
@@ -169,10 +232,36 @@ impl InputTracker {
     }
 }
 
-const fn side_event(key: Key, down: bool) -> Option<InputEvent> {
+/// Confirm an ADC-only key before letting it participate in UI chord logic.
+/// The RF PTT guard must continue to use the unfiltered physical sample.
+#[derive(Default)]
+pub struct AuxFilter {
+    candidate: Option<Key>,
+    stable: Option<Key>,
+    since: u32,
+}
+
+impl AuxFilter {
+    pub fn sample(&mut self, now: u32, key: Option<Key>) -> Option<Key> {
+        if key != self.candidate {
+            self.candidate = key;
+            self.since = now;
+        }
+        if now.wrapping_sub(self.since) >= 10 {
+            self.stable = key;
+        }
+        self.stable
+    }
+}
+
+const fn is_matrix(key: Key) -> bool {
+    !matches!(key, Key::Ptt | Key::Aux16 | Key::Aux17 | Key::Aux18)
+}
+
+const fn side_event(key: Key, down: bool, aux16_ptt: bool) -> Option<InputEvent> {
     match key {
         Key::Ptt => Some(InputEvent::Ptt(down)),
-        Key::Aux16 => Some(InputEvent::PttB(down)),
+        Key::Aux16 if aux16_ptt => Some(InputEvent::PttB(down)),
         _ => None,
     }
 }
@@ -421,5 +510,62 @@ mod tests {
             input.sample(3530, Sample::Released),
             Ok(Some(InputEvent::PttB(false)))
         );
+    }
+}
+
+#[cfg(test)]
+mod fast_input_tests {
+    use super::*;
+
+    #[test]
+    fn rapid_digits_survive_short_press_and_release_gaps() {
+        let mut input = InputTracker::new(Timing::new(30, 600).unwrap());
+        input.enable_fast_matrix();
+        input.sample(0, Sample::Released).unwrap();
+        input.sample(30, Sample::Released).unwrap();
+        for (start, key) in [(40, Key::Digit1), (68, Key::Digit2), (96, Key::Digit6)] {
+            assert_eq!(input.sample(start, Sample::Key(key)).unwrap(), None);
+            assert_eq!(input.sample(start + 12, Sample::Key(key)).unwrap(), None);
+            assert_eq!(input.sample(start + 15, Sample::Released).unwrap(), None);
+            assert_eq!(
+                input.sample(start + 23, Sample::Released).unwrap(),
+                Some(InputEvent::Short(key))
+            );
+        }
+    }
+
+    #[test]
+    fn matrix_transition_and_quick_next_digit_preserve_both_short_events() {
+        let mut input = InputTracker::new(Timing::new(30, 600).unwrap());
+        input.enable_fast_matrix();
+        input.sample(0, Sample::Released).unwrap();
+        input.sample(30, Sample::Released).unwrap();
+        let first = Sample::Key(Key::Digit1);
+        let second = Sample::Key(Key::Digit2);
+        input.sample(40, first).unwrap();
+        input.sample(52, first).unwrap();
+        input.sample(54, Sample::UncertainMatrix).unwrap();
+        input.sample(55, Sample::Released).unwrap();
+        assert_eq!(
+            input.sample(60, second).unwrap(),
+            Some(InputEvent::Short(Key::Digit1))
+        );
+        input.sample(72, second).unwrap();
+        input.sample(76, Sample::Released).unwrap();
+        assert_eq!(
+            input.sample(84, Sample::Released).unwrap(),
+            Some(InputEvent::Short(Key::Digit2))
+        );
+    }
+
+    #[test]
+    fn adc_glitch_does_not_enter_ui_chord_detection() {
+        let mut filter = AuxFilter::default();
+        assert_eq!(filter.sample(40, Some(Key::Aux17)), None);
+        assert_eq!(filter.sample(45, None), None);
+        assert_eq!(filter.sample(50, Some(Key::Aux17)), None);
+        assert_eq!(filter.sample(70, Some(Key::Aux17)), Some(Key::Aux17));
+        assert_eq!(filter.sample(71, None), Some(Key::Aux17));
+        assert_eq!(filter.sample(81, None), None);
     }
 }

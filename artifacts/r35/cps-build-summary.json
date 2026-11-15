@@ -1,0 +1,19 @@
+{
+  "status": "passed",
+  "started_at": "2026-11-15T18:00:10.5399187Z",
+  "finished_at": "2026-11-15T18:02:40.8521758Z",
+  "host": "x86_64-pc-windows-gnullvm",
+  "rustc": [
+    "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "binary: rustc",
+    "commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67",
+    "commit-date: 2026-10-13",
+    "host: x86_64-pc-windows-gnullvm",
+    "release: 1.99.1",
+    "LLVM version: 23.1.1"
+  ],
+  "device_accessed": false,
+  "app_sha256": "ee2a768359e145f3f4657b16f8588e9a2962b78a23c3fee11877c83687605d05",
+  "app_bytes": 5573632,
+  "ui_validation": "separate manual/Computer Use check required"
+}

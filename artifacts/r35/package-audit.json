@@ -1,0 +1,10 @@
+{
+  "status": "passed",
+  "calibration_fixture_not_embedded": true,
+  "private_files_excluded_from_source": true,
+  "preserved_baseline_sha256": "f4a805910c6a918799db7e968ca392535f8a58d1982c7f1c475e6842be8ed5df",
+  "r35_sha256": "97e3d98257cacef6d64917d4b355719e1649b8570e8df8e9c9527edd39c7307d",
+  "no_source_files_missing": true,
+  "native_cps_default_matches": true,
+  "device_accessed": false
+}

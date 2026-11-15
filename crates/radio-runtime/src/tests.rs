@@ -159,6 +159,164 @@ fn cold_rx_tx_release_round_trip() {
     pump(&mut r, &mut now, false);
     assert_eq!(r.state(), State::Receiving);
 }
+
+#[test]
+fn signaling_access_requires_live_tx_and_cannot_change_rf_registers() {
+    let (mut r, mut now) = ready();
+    assert!(r.signaling_write(0x70, 0).is_err());
+    assert_eq!(r.state(), State::Receiving);
+    r.transmit(&cal(), tx(), now, true).unwrap();
+    pump(&mut r, &mut now, true);
+    let rf = [
+        r.io.words[0x30],
+        r.io.words[0x33],
+        r.io.words[0x36],
+        r.io.words[0x38],
+        r.io.words[0x39],
+    ];
+    r.signaling_write(0x71, 10324).unwrap();
+    assert_eq!(r.signaling_read(0x71), Ok(10324));
+    assert_eq!(
+        rf,
+        [
+            r.io.words[0x30],
+            r.io.words[0x33],
+            r.io.words[0x36],
+            r.io.words[0x38],
+            r.io.words[0x39]
+        ]
+    );
+    r.signaling_microphone(false).unwrap();
+    assert_eq!(r.io.words[0x30], rf[0] & !2);
+    r.signaling_microphone(true).unwrap();
+    assert_eq!(r.io.words[0x30], rf[0]);
+    let fault = r.signaling_write(0x36, 0xffff).unwrap_err();
+    assert!(fault.cleanup_attempted);
+    assert_off(&r);
+}
+
+#[test]
+fn signaling_failed_readback_unkeys_instead_of_continuing_tones() {
+    let (mut r, mut now) = ready();
+    r.transmit(&cal(), tx(), now, true).unwrap();
+    pump(&mut r, &mut now, true);
+    r.io.mismatch = Some(0x70);
+    assert!(matches!(
+        r.signaling_write(0x70, 0x9c00).unwrap_err().reason,
+        Error::Readback { register: 0x70, .. }
+    ));
+    assert_eq!(r.state(), State::Failed);
+    assert_off(&r);
+}
+
+#[test]
+fn interrupted_signaling_does_not_leave_tone2_in_receive() {
+    for exit in 0..3 {
+        let (mut r, mut now) = ready();
+        r.transmit(&cal(), tx(), now, true).unwrap();
+        pump(&mut r, &mut now, true);
+        let baseline50 = r.io.words[0x50];
+        r.signaling_microphone(false).unwrap();
+        r.signaling_write(0x70, 0xd3d3).unwrap();
+        r.signaling_write(0x50, baseline50 | 0x8000).unwrap();
+        match exit {
+            0 => r.stop().unwrap(),
+            1 => {
+                assert!(r.tick(now + TX_TIMEOUT_MS + 1, true).unwrap().tx_timed_out);
+            }
+            _ => {
+                assert!(r.tick(now - 1, true).is_err());
+            }
+        }
+        assert_off(&r);
+        assert_eq!(r.io.words[0x70] & 0x8080, 0);
+        assert_eq!(r.io.words[0x50], baseline50 & !0x8000);
+        if exit == 0 {
+            r.receive(&cal(), rx(), now + 1).unwrap();
+            now += 1;
+            pump(&mut r, &mut now, false);
+            assert_eq!(r.state(), State::Receiving);
+            assert_eq!(r.io.words[0x70] & 0x8080, 0);
+        }
+    }
+}
+
+#[test]
+fn modulation_cleanup_failure_still_attempts_each_independent_off_request() {
+    for offset in [8, 9] {
+        let (mut r, mut now) = ready();
+        r.transmit(&cal(), tx(), now, true).unwrap();
+        pump(&mut r, &mut now, true);
+        let before50 = r.io.words[0x50];
+        let before70 = r.io.words[0x70];
+        r.signaling_write(0x70, 0xd3d3).unwrap();
+        r.signaling_write(0x50, before50 | 0x8000).unwrap();
+        let event_start = r.io.events.len();
+        r.io.fail_after = Some(r.io.calls + offset);
+        let fault = r.stop().unwrap_err();
+        assert_eq!(fault.cleanup_failures, 0x80);
+        let events = &r.io.events[event_start..];
+        assert_eq!(&events[..7], &OFF_REQUESTS);
+        assert_eq!(
+            &events[7..],
+            &[
+                Event::Write(0x70, before70 & !0x8080),
+                Event::Write(0x50, before50 & !0x8000)
+            ]
+        );
+        assert_off(&r);
+    }
+}
+
+#[test]
+fn cb_vhf_uhf_and_800_path_follow_each_frequency_without_stale_relay_cache() {
+    let (mut r, mut now) = ready();
+    for (frequency, mask, relay) in [
+        (2_713_500, 0x0001, true),
+        (14_550_000, 0x0010, false),
+        (85_000_000, 0x0002, true),
+        (43_350_000, 0x0020, false),
+        (2_713_500, 0x0001, true),
+    ] {
+        let start = r.io.events.len();
+        r.receive(
+            &cal(),
+            RxRequest {
+                frequency_10hz: frequency,
+                ..rx()
+            },
+            now,
+        )
+        .unwrap();
+        pump(&mut r, &mut now, false);
+        assert_eq!(r.state(), State::Receiving);
+        assert_eq!(r.io.words[0x33] & 0x003f, mask);
+        assert_eq!(r.io.words[0x36], 0x007f);
+        assert!(!r.io.hf);
+        assert_eq!(
+            r.io.events[start..]
+                .iter()
+                .filter_map(|event| match event {
+                    Event::Antenna(high) => Some(*high),
+                    _ => None,
+                })
+                .last(),
+            Some(relay)
+        );
+    }
+    // The stock factory table has no 800.000 MHz entry. Never retain the
+    // previous 27 MHz plan while pretending the gap was tuned successfully.
+    assert!(r
+        .receive(
+            &cal(),
+            RxRequest {
+                frequency_10hz: 80_000_000,
+                ..rx()
+            },
+            now
+        )
+        .is_err());
+}
 #[test]
 fn ptt_release_cancels_every_prefix_without_later_enable() {
     for prefix in 0..100 {
@@ -358,36 +516,46 @@ fn scope_pass(r: &mut Runtime<Mock>, scope: &mut scope::Scope, now: &mut u32) ->
 fn scope_actual_samples_two_sweeps_and_full_original_receive_restore() {
     let (mut r, mut now) = ready();
     let mut scope = scope::Scope::new();
+    let original_filter = r.io.words[0x43];
     scope.start(&r, &cal(), rx(), 1250, now).unwrap();
-    r.io.words[0x67] = 173;
-    for _ in 0..1200 {
-        scope_pass(&mut r, &mut scope, &mut now);
-        if scope.plot().sweep >= 2 && scope.plot().fresh(80) {
-            break;
+    for pass in 1..=2 {
+        r.io.words[0x67] = 163 + pass as u16 * 10;
+        let previous = *scope.completed_plot();
+        for _ in 0..1200 {
+            scope_pass(&mut r, &mut scope, &mut now);
+            if scope.completed_plot().sweep == pass {
+                break;
+            }
+            assert_eq!(
+                *scope.completed_plot(),
+                previous,
+                "partial sweep leaked to UI"
+            );
         }
-    }
-    assert_eq!(scope.plot().sweep, 2);
-    for index in 0..81 {
-        assert!(scope.plot().valid(index));
-        assert_eq!(scope.plot().latest[index], 173);
-        assert_eq!(scope.plot().peaks[index], 173);
+        let frame = scope.completed_plot();
+        assert_eq!(frame.sweep, pass);
+        for index in 0..81 {
+            assert!(frame.fresh(index));
+            assert_eq!(frame.latest[index], 163 + pass as u16 * 10);
+            assert_eq!(frame.peaks[index], 163 + pass as u16 * 10);
+        }
     }
     assert_eq!(r.state(), State::Sweeping);
     assert!(r.io.muted);
     scope.event(now, uv98_spectrum::compact::Event::Stop);
     let mut restored = false;
     for _ in 0..200 {
-        if let scope::Completion::Restored {
-            selected_frequency, ..
-        } = scope_pass(&mut r, &mut scope, &mut now)
+        if let scope::Completion::Restored { request, .. } =
+            scope_pass(&mut r, &mut scope, &mut now)
         {
-            assert_eq!(selected_frequency, None);
+            assert_eq!(request, rx());
             restored = true;
             break;
         }
     }
     assert!(restored && !scope.active());
     assert_eq!(r.state(), State::Receiving);
+    assert_eq!(r.io.words[0x43], original_filter);
     let expected = sequence::sweep::QualifiedRange::new(
         &cal(),
         rx().frequency_10hz,
@@ -403,6 +571,68 @@ fn scope_actual_samples_two_sweeps_and_full_original_receive_restore() {
 }
 
 #[test]
+fn scope_holds_a_peak_without_retuning_and_resumes_past_the_same_carrier() {
+    let (mut radio, mut now) = ready();
+    let mut scope = scope::Scope::new();
+    scope.start(&radio, &cal(), rx(), 1_250, now).unwrap();
+    scope.set_trigger(Some(24), true);
+    let range = scope.window().unwrap().range();
+    let peak = range.frequency_10hz(24).unwrap();
+    let peak_words = sequence::sweep::QualifiedRange::new(&cal(), peak, peak, peak, 1_250)
+        .unwrap()
+        .origin_words();
+
+    for sweep in 1..=4 {
+        if sweep == 3 {
+            scope.set_trigger(Some(24), false);
+        }
+        for _ in 0..1200 {
+            radio.io.words[0x67] = if (radio.io.words[0x38], radio.io.words[0x39]) == peak_words {
+                220
+            } else {
+                163
+            };
+            scope_pass(&mut radio, &mut scope, &mut now);
+            if scope.completed_plot().sweep == sweep {
+                break;
+            }
+        }
+        assert_eq!(scope.completed_plot().sweep, sweep);
+        assert!(scope.completed_plot().elapsed_ms > 0);
+        assert_eq!(scope.completed_plot().latest[24], 220);
+        if sweep == 1 {
+            assert_eq!(scope.completed_plot().held_bin, Some(24));
+            radio.io.events.clear();
+            for _ in 0..50 {
+                scope_pass(&mut radio, &mut scope, &mut now);
+            }
+            assert!(
+                radio.io.events.is_empty(),
+                "holding must not advance the sweep"
+            );
+            scope.resume();
+        } else {
+            assert_eq!(scope.completed_plot().held_bin, None);
+            if sweep >= 3 {
+                assert_eq!(scope.completed_plot().trigger_bin, Some(24));
+            }
+        }
+    }
+
+    scope.event(now, uv98_spectrum::compact::Event::Stop);
+    for _ in 0..200 {
+        if let scope::Completion::Restored { request, .. } =
+            scope_pass(&mut radio, &mut scope, &mut now)
+        {
+            assert_eq!(request, rx());
+            assert_eq!(radio.state(), State::Receiving);
+            return;
+        }
+    }
+    panic!("original RX was not restored");
+}
+
+#[test]
 fn scope_ptt_cancels_every_initial_prefix_and_requires_release_for_restart() {
     for prefix in 0..100 {
         let (mut r, mut now) = ready();
@@ -414,13 +644,10 @@ fn scope_ptt_cancels_every_initial_prefix_and_requires_release_for_restart() {
         scope.event(now, uv98_spectrum::compact::Event::Ptt(true));
         let mut restored = false;
         for _ in 0..200 {
-            if let scope::Completion::Restored {
-                selected_frequency,
-                reason,
-                ..
-            } = scope_pass(&mut r, &mut scope, &mut now)
+            if let scope::Completion::Restored { request, reason } =
+                scope_pass(&mut r, &mut scope, &mut now)
             {
-                assert_eq!(selected_frequency, None);
+                assert_eq!(request, rx());
                 assert_eq!(reason, uv98_spectrum::compact::StopReason::Ptt);
                 restored = true;
                 break;
@@ -439,6 +666,305 @@ fn scope_ptt_cancels_every_initial_prefix_and_requires_release_for_restart() {
         scope.event(now, uv98_spectrum::compact::Event::Ptt(false));
         scope.start(&r, &cal(), rx(), 1250, now).unwrap();
     }
+}
+
+#[test]
+fn scope_exit_reports_the_exact_original_request_not_just_a_frequency() {
+    let (mut r, mut now) = ready();
+    let mut original = rx();
+    original.frequency_10hz = 43_297_500;
+    original.width = sequence::Width::Narrow;
+    original.tone = 0x2013;
+    original.tone_mode = 1;
+    original.option_nibble = 1;
+    original.level = 3;
+    r.receive(&cal(), original, now).unwrap();
+    pump(&mut r, &mut now, false);
+    assert_eq!(r.state(), State::Receiving);
+    let mut scope = scope::Scope::new();
+    scope.start(&r, &cal(), original, 1250, now).unwrap();
+    for _ in 0..150 {
+        scope_pass(&mut r, &mut scope, &mut now);
+        if scope.plot().valid(2) {
+            break;
+        }
+    }
+    let mut completion = None;
+    scope.event(now, uv98_spectrum::compact::Event::Stop);
+    for _ in 0..200 {
+        let result = scope_pass(&mut r, &mut scope, &mut now);
+        if matches!(result, scope::Completion::Restored { .. }) {
+            completion = Some(result);
+            break;
+        }
+    }
+    assert_eq!(
+        completion,
+        Some(scope::Completion::Restored {
+            request: original,
+            reason: uv98_spectrum::compact::StopReason::Exit,
+        })
+    );
+    assert!(!scope.active());
+    assert_eq!(r.state(), State::Receiving);
+    // The reported request describes what the runtime acknowledged, so caching
+    // it is safe only when ordinary policy still wants these exact fields.
+    assert!(policy::restored_current(Some(policy_profile(original)), original).is_some());
+    let mut changed = original;
+    changed.tone = 0;
+    assert!(policy::restored_current(Some(policy_profile(original)), changed).is_none());
+}
+
+fn policy_profile(receive: RxRequest) -> policy::Profile {
+    policy::Profile {
+        receive: Some(receive),
+        transmit: None,
+        audio: Audio {
+            modulation: receive.modulation,
+            gain: 1,
+            dac: 1,
+            squelch: receive.level,
+            monitor: false,
+            tone_required: receive.tone != 0,
+        },
+        frequency: receive.frequency_10hz,
+        route: 4,
+        power: 0,
+    }
+}
+
+#[test]
+fn scope_explicit_window_is_validated_before_any_receiver_work() {
+    use uv98_spectrum::{Window, WindowError};
+    let (r, now) = ready();
+    let mut scope = scope::Scope::new();
+    let original = rx();
+    assert_eq!(
+        scope.start_window(
+            &r,
+            &cal(),
+            original,
+            Window::centered(original.frequency_10hz + 250_000, 1_000_000, 12_500).unwrap(),
+            now
+        ),
+        Err(scope::StartError::CenterMismatch)
+    );
+    assert_eq!(
+        Window::centered(original.frequency_10hz, 20_000, 12_500),
+        Err(WindowError::TooNarrow)
+    );
+    assert_eq!(
+        Window::centered(original.frequency_10hz + 2_000_000, 4_000_000, 2_500),
+        Err(WindowError::TooWide)
+    );
+    let window = Window::centered(original.frequency_10hz, 500_000, 12_500).unwrap();
+    scope
+        .start_window(&r, &cal(), original, window, now)
+        .unwrap();
+    assert_eq!(scope.window(), Some(window));
+    assert_eq!(scope.range().unwrap().len(), 41);
+    assert_eq!(
+        scope.range().unwrap().frequency_10hz(20),
+        Some(original.frequency_10hz)
+    );
+}
+
+#[test]
+fn codex_scope_identical_window_restart_invalidates_previous_publication() {
+    use crate::spectrum_flow::{bind_bin, PublishedWindow, SelectionError};
+    use uv98_spectrum::Window;
+
+    let (mut radio, mut now) = ready();
+    let mut scope = scope::Scope::new();
+    let window = Window::centered(rx().frequency_10hz, 100_000, 1250).unwrap();
+    scope
+        .start_window(&radio, &cal(), rx(), window, now)
+        .unwrap();
+    for _ in 0..200 {
+        scope_pass(&mut radio, &mut scope, &mut now);
+        if scope.plot().valid(0) {
+            break;
+        }
+    }
+    assert!(scope.plot().valid(0));
+    let published = PublishedWindow {
+        generation: scope.generation(),
+        start_10hz: window.start_10hz(),
+        step_10hz: window.step_10hz(),
+        len: window.len() as u8,
+    };
+    scope.event(now, uv98_spectrum::compact::Event::Stop);
+    let mut restored = false;
+    for _ in 0..200 {
+        if matches!(
+            scope_pass(&mut radio, &mut scope, &mut now),
+            scope::Completion::Restored { .. }
+        ) {
+            restored = true;
+            break;
+        }
+    }
+    assert!(restored);
+    scope.discard();
+    scope
+        .start_window(&radio, &cal(), rx(), window, now)
+        .unwrap();
+    assert_ne!(scope.generation(), published.generation);
+    assert_eq!(
+        bind_bin(Some(published), scope.window(), scope.generation(), 0),
+        Err(SelectionError::StaleWindow),
+        "same frequencies do not make the previous session's measurement current"
+    );
+    assert!(!scope.plot().valid(0));
+}
+
+#[test]
+fn codex_scope_refused_start_preserves_current_window_identity_and_receiver() {
+    use uv98_spectrum::Window;
+
+    let (radio, now) = ready();
+    let mut scope = scope::Scope::new();
+    let window = Window::centered(rx().frequency_10hz, 100_000, 1250).unwrap();
+    let wrong_center = Window::centered(rx().frequency_10hz + 1250, 100_000, 1250).unwrap();
+    let events = radio.io.events.len();
+    assert_eq!(
+        scope.start_window(&radio, &cal(), rx(), wrong_center, now),
+        Err(scope::StartError::CenterMismatch)
+    );
+    assert_eq!(scope.generation(), 0);
+    assert_eq!(scope.window(), None);
+    scope
+        .start_window(&radio, &cal(), rx(), window, now)
+        .unwrap();
+    let generation = scope.generation();
+    assert_eq!(
+        scope.start_window(&radio, &cal(), rx(), wrong_center, now),
+        Err(scope::StartError::Busy)
+    );
+    assert_eq!(scope.generation(), generation);
+    assert_eq!(scope.window(), Some(window));
+    assert_eq!(radio.io.events.len(), events);
+    assert_eq!(radio.state(), State::Receiving);
+}
+
+#[test]
+fn delayed_accept_cannot_complete_a_newer_intent_or_bin() {
+    use crate::spectrum_flow::{self, Action, Intent};
+    let (mut r, mut now) = ready();
+    let mut scope = scope::Scope::new();
+    scope.start(&r, &cal(), rx(), 1250, now).unwrap();
+    for _ in 0..150 {
+        scope_pass(&mut r, &mut scope, &mut now);
+        if scope.plot().valid(2) && scope.plot().valid(5) {
+            break;
+        }
+    }
+    assert!(scope.plot().valid(2) && scope.plot().valid(5));
+    assert!(scope.can_accept_bin_action());
+    scope.event(now, uv98_spectrum::compact::Event::Accept { index: 2 });
+    assert!(
+        !scope.can_accept_bin_action(),
+        "an accept during Restoring must be refused by the coordinator"
+    );
+    assert!(!scope.can_restart());
+    // A newer UI intent for bin 5 arrives before the restore ACK for bin 2.
+    scope.event(now, uv98_spectrum::compact::Event::Accept { index: 5 });
+    let mut reason = None;
+    for _ in 0..200 {
+        if let scope::Completion::Restored { reason: r, .. } =
+            scope_pass(&mut r, &mut scope, &mut now)
+        {
+            reason = Some(r);
+            break;
+        }
+    }
+    let reason = reason.expect("old restore completes");
+    assert_eq!(
+        reason,
+        uv98_spectrum::compact::StopReason::Accepted { index: 2 }
+    );
+    assert_eq!(
+        spectrum_flow::completion(Some(Intent::Listen(5)), reason),
+        Action::Finish,
+        "new bin must not be completed by the old restore"
+    );
+    assert_eq!(
+        spectrum_flow::completion(Some(Intent::AcceptVfo(5)), reason),
+        Action::Finish
+    );
+    assert_eq!(
+        spectrum_flow::completion(Some(Intent::Listen(2)), reason),
+        Action::BeginListen,
+        "only the confirmed bin may complete"
+    );
+}
+
+#[test]
+fn scope_refuses_window_crossing_route_before_touching_receiver() {
+    use uv98_spectrum::Window;
+    let (r, now) = ready();
+    let mut scope = scope::Scope::new();
+    let mut outside = rx();
+    outside.frequency_10hz = 66_000_000;
+    let window = Window::centered(66_000_000, 200_000, 2_500).unwrap();
+    assert!(matches!(
+        scope.start_window(&r, &cal(), outside, window, now),
+        Err(scope::StartError::Qualification(_))
+    ));
+    assert!(!scope.active());
+    assert_eq!(scope.range(), None);
+}
+
+#[test]
+fn scope_temporary_listen_returns_exact_original_then_discard_removes_stale_window() {
+    let (mut r, mut now) = ready();
+    let mut scope = scope::Scope::new();
+    scope.start(&r, &cal(), rx(), 1250, now).unwrap();
+    assert!(!scope.begin_listen(now), "sweep is not restored yet");
+    for _ in 0..150 {
+        scope_pass(&mut r, &mut scope, &mut now);
+        if scope.plot().valid(3) {
+            break;
+        }
+    }
+    scope.event(now, uv98_spectrum::compact::Event::Accept { index: 3 });
+    let mut selected = None;
+    for _ in 0..200 {
+        if let scope::Completion::Restored { request, .. } =
+            scope_pass(&mut r, &mut scope, &mut now)
+        {
+            selected = Some(request);
+            break;
+        }
+    }
+    let selected = selected.expect("selected RX restored");
+    assert_eq!(
+        selected.frequency_10hz,
+        scope.range().unwrap().frequency_10hz(3).unwrap()
+    );
+    assert!(scope.begin_listen(now));
+    assert!(scope.listening() && scope.active());
+    assert!(!scope.listen_expired(now));
+    assert!(!scope.listen_expired(now + 14_999));
+    assert!(scope.listen_expired(now + 15_000));
+
+    assert_eq!(scope.end_listen(&mut r, &cal(), now).unwrap(), None);
+    assert!(scope.listen_restoring());
+    pump(&mut r, &mut now, false);
+    assert_eq!(
+        scope.end_listen(&mut r, &cal(), now).unwrap(),
+        Some(rx()),
+        "listen must return the exact original receive plan"
+    );
+    assert!(!scope.active());
+    assert_eq!(r.state(), State::Receiving);
+
+    // A refused new window must not resurrect this finished session's data.
+    scope.discard();
+    assert_eq!(scope.range(), None);
+    assert_eq!(scope.window(), None);
+    assert!(!scope.plot().valid(0));
+    assert!(!scope.active());
 }
 
 #[test]
@@ -462,11 +988,16 @@ fn scope_accept_completes_only_after_full_receive_on_selected_frequency() {
     assert_eq!(r.state(), State::Configuring);
     let mut selected = None;
     for _ in 0..200 {
-        if let scope::Completion::Restored {
-            selected_frequency, ..
-        } = scope_pass(&mut r, &mut scope, &mut now)
+        if let scope::Completion::Restored { request, .. } =
+            scope_pass(&mut r, &mut scope, &mut now)
         {
-            selected = selected_frequency;
+            selected = Some(request.frequency_10hz);
+            assert_eq!(request.width, sequence::Width::Wide);
+            assert_eq!(
+                (request.tone, request.tone_mode, request.option_nibble),
+                (0, 0, 0)
+            );
+            assert_eq!(request.modulation, rx().modulation);
             break;
         }
     }
@@ -853,8 +1384,7 @@ fn scope_cancel_accepted_restore(cancel: uv98_spectrum::compact::Event) {
     assert_eq!(
         completion,
         Some(scope::Completion::Restored {
-            selected_frequency: None,
-            modulation: rx().modulation,
+            request: rx(),
             reason: expected_reason,
         })
     );
@@ -865,7 +1395,7 @@ fn scope_cancel_accepted_restore(cancel: uv98_spectrum::compact::Event) {
     assert!(!radio.io.events.iter().any(|event| match event {
         Event::Write(0x33, word) => word & 0x0c != 0,
         Event::Write(0x36, word) => *word != 0x007f,
-        Event::Write(0x30, word) => ![0, 0x0200, 0xbff1].contains(word),
+        Event::Write(0x30, word) => ![0, 0x0200, 0xbff0, 0xbff1].contains(word),
         Event::Hf(hf, band50) => *hf || *band50,
         Event::Mute(false) | Event::Indicators(_, true) => true,
         _ => false,
@@ -880,4 +1410,49 @@ fn scope_short_ptt_cancels_in_flight_acceptance_even_after_release() {
 #[test]
 fn scope_exit_cancels_in_flight_acceptance_and_restores_original_frequency() {
     scope_cancel_accepted_restore(uv98_spectrum::compact::Event::Stop);
+}
+
+#[test]
+fn am_hang_bridges_short_carrier_dips_and_expires() {
+    let (mut r, now) = ready();
+    let mut a = audio();
+    a.modulation = Modulation::Am;
+    a.monitor = false;
+    r.io.words[0x0c] = 2;
+    assert!(r.observe(a, 0).unwrap().audio_open);
+    r.io.words[0x0c] = 0;
+    r.tick(now + 119, false).unwrap();
+    assert!(r.observe(a, 0).unwrap().audio_open);
+    r.tick(now + 120, false).unwrap();
+    assert!(!r.observe(a, 0).unwrap().audio_open);
+}
+
+#[test]
+fn panned_spectrum_measures_new_center_but_exit_restores_original_receiver() {
+    let (mut radio, mut now) = ready();
+    let original = rx();
+    let center = original.frequency_10hz + 50_000;
+    let window = uv98_spectrum::Window::centered(center, 12_500, 1250).unwrap();
+    let mut scope = scope::Scope::new();
+    scope
+        .start_panned_window(&radio, &cal(), original, window, now)
+        .unwrap();
+    for _ in 0..240 {
+        scope_pass(&mut radio, &mut scope, &mut now);
+        if scope.completed_plot().valid(10) {
+            break;
+        }
+    }
+    assert!(scope.completed_plot().valid(10));
+    assert_eq!(scope.window().unwrap().center_10hz(), center);
+    scope.event(now, uv98_spectrum::compact::Event::Stop);
+    for _ in 0..240 {
+        if let scope::Completion::Restored { request, .. } =
+            scope_pass(&mut radio, &mut scope, &mut now)
+        {
+            assert_eq!(request, original);
+            return;
+        }
+    }
+    panic!("original receiver was not restored");
 }

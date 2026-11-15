@@ -1,0 +1,13 @@
+[package]
+name = "uv98-signaling"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Bounded radio signaling: DTMF, selective calling and APRS/AX.25"
+
+[features]
+default = []
+hardware = ["dep:uv98-board-pins"]
+
+[dependencies]
+uv98-board-pins = { path = "../board-pins", optional = true }

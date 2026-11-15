@@ -300,10 +300,10 @@ fn output_present(io: &mut impl RegisterIo, port: u32, mask: u16, high: u16) -> 
         && io.read32(port + ODRVR) & two_bit_fields(mask, 3) == two_bit_fields(mask, 2)
 }
 
-/// Terminal, identity-gated RF-A shutdown REQUESTS, never electrical RF proof.
+/// Terminal, identity-gated RF shutdown REQUESTS, never electrical RF proof.
 /// Caller has abandoned all GPIO/RF owners and will not resume normal work.
 /// This post-RAM helper mirrors the separate stackless exception path. It
-/// neither reads RF registers nor applies calibration/tuning or starts RF-B.
+/// neither reads RF registers nor applies calibration or tuning.
 pub fn terminal_radio_off_requests(io: &mut impl TerminalRfTiming) -> Result<(), Error> {
     io.mask_interrupts();
     identify(io)?;
@@ -319,44 +319,57 @@ pub fn terminal_radio_off_requests(io: &mut impl TerminalRfTiming) -> Result<(),
     // Physical MCU gates/mutes first. Their verified output state is required
     // before touching RF-A serial pins or clocking a register request.
     assert_low_requests(io)?;
-    for (port, mask) in [(GPIOA, 1u16 << 8), (GPIOF, 1 << 6), (GPIOC, 1 << 9)] {
+    let primary = terminal_chip_off(io, (GPIOA, 1 << 8), (GPIOF, 1 << 6), (GPIOC, 1 << 9));
+    let secondary = terminal_chip_off(io, (GPIOC, 1 << 7), (GPIOC, 1 << 8), (GPIOC, 1 << 6));
+    primary.and(secondary)?;
+    if !low_requests_present(io) {
+        return Err(Error::LowRequestReadback);
+    }
+    Ok(())
+}
+
+fn terminal_chip_off(
+    io: &mut impl TerminalRfTiming,
+    (cs, cs_mask): (u32, u16),
+    (clock, clock_mask): (u32, u16),
+    (data, data_mask): (u32, u16),
+) -> Result<(), Error> {
+    for (port, mask) in [(cs, cs_mask), (clock, clock_mask), (data, data_mask)] {
         let lock = io.read32(port + LOCK);
         if lock & (1 << 16) != 0 && lock & u32::from(mask) != 0 {
             return Err(Error::PinLocked { port, mask });
         }
     }
-    // Deselect before changing SCK/DATA ownership; preserve every other pin.
-    output(io, GPIOA, 0, 1 << 8, false)?;
-    output(io, GPIOF, 1 << 6, 0, false)?;
-    output(io, GPIOC, 1 << 9, 0, false)?;
+    output(io, cs, 0, cs_mask, false)?;
+    output(io, clock, clock_mask, 0, false)?;
+    output(io, data, data_mask, 0, false)?;
     io.barrier();
-    if !output_present(io, GPIOA, 1 << 8, 1 << 8)
-        || !output_present(io, GPIOF, 1 << 6, 0)
-        || !output_present(io, GPIOC, 1 << 9, 0)
+    if !output_present(io, cs, cs_mask, cs_mask)
+        || !output_present(io, clock, clock_mask, 0)
+        || !output_present(io, data, data_mask, 0)
     {
         return Err(Error::LowRequestReadback);
     }
     for frame in [0x330000u32, 0x36007f, 0x300000, 0x371d00] {
-        io.write32(GPIOF + CLR, 1 << 6);
-        io.write32(GPIOA + CLR, 1 << 8);
+        io.write32(clock + CLR, u32::from(clock_mask));
+        io.write32(cs + CLR, u32::from(cs_mask));
         for shift in (0..24).rev() {
-            io.write32(GPIOF + CLR, 1 << 6);
+            io.write32(clock + CLR, u32::from(clock_mask));
             io.write32(
-                GPIOC + if frame & (1 << shift) != 0 { SCR } else { CLR },
-                1 << 9,
+                data + if frame & (1 << shift) != 0 { SCR } else { CLR },
+                u32::from(data_mask),
             );
             io.terminal_rf_phase_delay();
-            io.write32(GPIOF + SCR, 1 << 6);
+            io.write32(clock + SCR, u32::from(clock_mask));
             io.terminal_rf_phase_delay();
         }
-        io.write32(GPIOA + SCR, 1 << 8);
+        io.write32(cs + SCR, u32::from(cs_mask));
         io.terminal_rf_phase_delay();
     }
     io.barrier();
-    if !output_present(io, GPIOA, 1 << 8, 1 << 8)
-        || !output_present(io, GPIOF, 1 << 6, 1 << 6)
-        || !output_present(io, GPIOC, 1 << 9, 0)
-        || !low_requests_present(io)
+    if !output_present(io, cs, cs_mask, cs_mask)
+        || !output_present(io, clock, clock_mask, clock_mask)
+        || !output_present(io, data, data_mask, 0)
     {
         return Err(Error::LowRequestReadback);
     }

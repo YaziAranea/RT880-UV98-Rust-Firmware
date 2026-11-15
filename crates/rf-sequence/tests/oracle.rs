@@ -569,3 +569,90 @@ fn tone_status_1024_stock_cases_and_pending_irq_policy() {
     assert!(sequence::tone_matches(0xffff, 0));
     assert!(!sequence::tone_matches(0xffff, 0xffff));
 }
+
+#[test]
+fn relay_prepares_both_bands_without_enabling_either_pa() {
+    let bytes = include_bytes!("../../calibration/tests/fixtures/uv98-plus-stock-1.16.bin");
+    let cal = Calibration::parse(bytes).unwrap();
+    for (frequency, route, low_code) in [(14_550_000, 3, 20), (43_350_000, 4, 23)] {
+        let relay = sequence::relay_transmit(
+            &cal,
+            TxRequest {
+                frequency_10hz: frequency,
+                width: Width::Wide,
+                tone: 0x31ec,
+                tone_mode: 3,
+                option_nibble: 0,
+                power: 1,
+                mic_gain: 16,
+            },
+        )
+        .unwrap();
+        assert_eq!(relay.route, route);
+        assert_eq!(
+            relay.power,
+            uv98_stock_model::rf::power_register_04f0c(low_code)
+        );
+        let [reg38, reg39] = sequence::secondary_frequency(&cal, frequency).unwrap();
+        let writes = run(relay.setup.operations());
+        assert!(writes.contains(&event("write", "A", 0x38, reg38)));
+        assert!(writes.contains(&event("write", "A", 0x39, reg39)));
+        assert_eq!(
+            writes
+                .iter()
+                .filter(|e| e.kind == "write" && e.register == 0x33)
+                .map(|e| e.value)
+                .collect::<Vec<_>>(),
+            [0]
+        );
+        assert_eq!(
+            writes
+                .iter()
+                .filter(|e| e.kind == "write" && e.register == 0x36)
+                .map(|e| e.value)
+                .collect::<Vec<_>>(),
+            [0x007f]
+        );
+        assert!(relay.setup.operations().iter().all(|step| matches!(
+            step,
+            Step::WriteA { .. } | Step::UpdateA { .. } | Step::DelayMs(_)
+        )));
+    }
+}
+
+#[test]
+fn second_receiver_probe_keeps_all_transmit_controls_off() {
+    let bytes = include_bytes!("../../calibration/tests/fixtures/uv98-plus-stock-1.16.bin");
+    let calibration = Calibration::parse(bytes).unwrap();
+    let plan = sequence::secondary_receive(
+        &calibration,
+        RxRequest {
+            frequency_10hz: 43_350_000,
+            width: Width::Narrow,
+            level: 3,
+            tone: 0x1000 | 885,
+            tone_mode: 0,
+            option_nibble: 0,
+            squelch_delay: 0,
+            modulation: Modulation::Fm,
+        },
+    )
+    .unwrap();
+    let writes = run(plan.operations());
+    for (register, allowed) in [
+        (0x30, &[0x0200, 0xbff1][..]),
+        (0x33, &[0][..]),
+        (0x36, &[0x007f][..]),
+    ] {
+        let observed = writes
+            .iter()
+            .filter(|event| event.kind == "write" && event.register == register)
+            .map(|event| event.value)
+            .collect::<Vec<_>>();
+        assert_eq!(observed, allowed);
+    }
+    assert!(plan
+        .operations()
+        .iter()
+        .all(|step| matches!(step, Step::WriteA { .. } | Step::DelayMs(_))));
+}

@@ -14,7 +14,8 @@ use uv98_handheld_ui::{
     controller::{self, Change, Controller, LightMode, Mode, Request, Screen, Slot, View},
     input::{InputEvent, InputTracker, Sample},
     render::{
-        self, ChannelView, Model, PeerView, RadioView, SpectrumState, SpectrumView, ZoneView,
+        self, ChannelView, Model, PeerView, RadioView, SpectrumError, SpectrumState, SpectrumView,
+        ZoneView,
     },
 };
 use uv98_keys::{Key, Timing};
@@ -37,6 +38,7 @@ pub enum InputSample {
         aux: Option<Key>,
     },
     Unstable,
+    MatrixTransition,
 }
 impl From<uv98_diag_app::InputSample> for InputSample {
     fn from(value: uv98_diag_app::InputSample) -> Self {
@@ -67,7 +69,12 @@ pub struct RadioConfig {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SpectrumSnapshot {
     pub state: SpectrumState,
+    /// Monotonic scope window identity; a restart creates a new id even when
+    /// start/step/len happen to match the old grid.
+    pub window_id: u32,
     pub start_10hz: u32,
+    /// Exact bin at the middle of the published window, not an approximation.
+    pub center_10hz: u32,
     pub step_10hz: u32,
     pub len: u8,
     pub plot: uv98_spectrum::compact::Plot,
@@ -76,10 +83,13 @@ impl SpectrumSnapshot {
     pub fn view(&self) -> SpectrumView<'_> {
         SpectrumView {
             state: self.state,
+            window_id: self.window_id,
             start_10hz: self.start_10hz,
+            center_10hz: self.center_10hz,
             step_10hz: self.step_10hz,
             len: self.len,
             plot: &self.plot,
+            waterfall: None,
         }
     }
 }
@@ -134,10 +144,7 @@ pub struct RenderProgress {
 // Only the 20-row radio/PTT banner is eligible for priority. Ordinary page
 // work receives a batch after at most eight priority rows, even under repeated
 // state changes. Telemetry never enters this queue.
-const PRIORITY_BANNER_START: u16 = 28;
-const PRIORITY_BANNER_END: u16 = 48;
 const PRIORITY_BURST_ROWS: u16 = 8;
-const PRIORITY_BANNER_MASK: u32 = (1 << (PRIORITY_BANNER_END - PRIORITY_BANNER_START)) - 1;
 
 #[derive(Clone, Copy, Default)]
 struct PendingRows([u32; 10]);
@@ -244,7 +251,13 @@ pub struct App<N, L, D> {
     radio: RadioView,
     last_radio: RadioView,
     spectrum: Option<SpectrumSnapshot>,
+    waterfall: render::Waterfall,
+    shortwave_scope: render::ShortwaveScope,
     last_spectrum: Option<SpectrumSnapshot>,
+    /// Physical lower side-key input identification, independent of its
+    /// editable assignment. False until the board traces a real source.
+    lower_side_mapped: bool,
+    spectrum_error: SpectrumError,
 }
 impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
     pub fn new(nor: N, lcd: L, delay: D, timing: Timing, expected_sha256: [u8; 32]) -> Self {
@@ -290,7 +303,11 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             radio: RadioView::OFF,
             last_radio: RadioView::OFF,
             spectrum: None,
+            waterfall: render::Waterfall::new(),
+            shortwave_scope: render::ShortwaveScope::new(),
             last_spectrum: None,
+            lower_side_mapped: false,
+            spectrum_error: SpectrumError::None,
         }
     }
     pub fn status(&self) -> Status {
@@ -317,6 +334,29 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         }
         self.snapshot().map(|snapshot| snapshot.channel)
     }
+
+    pub fn peer_radio_selection(&self) -> (controller::View, Option<Channel<'_>>) {
+        let mut view = self.status.view;
+        view.active_slot = if view.active_slot == Slot::A {
+            Slot::B
+        } else {
+            Slot::A
+        };
+        let context = self.controller.context(view.active_slot);
+        view.mode = context.mode;
+        view.channel = context.channel;
+        view.vfo_10hz = context.vfo_10hz;
+        view.shift_index = context.shift_index;
+        view.tx_tone_index = context.tx_tone_index;
+        view.reverse = context.reverse;
+        let record = self.peer_record.as_ref().filter(|record| {
+            context.mode == Mode::Channel && context.channel == Some(record.index as u16)
+        });
+        (
+            view,
+            record.and_then(|record| Channel::parse(&record.raw).ok()),
+        )
+    }
     pub fn radio_config(&self) -> Option<RadioConfig> {
         if self.status.state == State::Ready {
             self.config
@@ -336,14 +376,134 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
     }
     /// False means an older immutable spectrum snapshot is still being drawn.
     /// The caller keeps its newest live data and retries; no partial replacement.
+    pub fn set_shortwave_status(
+        &mut self,
+        status: controller::ShortwaveStatus,
+    ) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.view.shortwave_status != status {
+            self.controller.set_shortwave_status(status);
+            self.status.view = self.controller.view();
+            self.redraw_ready()?;
+        }
+        Ok(())
+    }
+
+    pub fn set_gps_status(
+        &mut self,
+        status: controller::GpsStatus,
+    ) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.view.gps_status == status {
+            return Ok(());
+        }
+        self.controller.set_gps_status(status);
+        self.status.view = self.controller.view();
+        if self.status.view.screen == Screen::Gps {
+            self.redraw_ready()?;
+        }
+        Ok(())
+    }
+    pub fn set_aprs_identity(&mut self, call: [u8; 6], ssid: u8) {
+        self.controller.set_aprs_identity(call, ssid);
+        self.status.view = self.controller.view();
+    }
+
+    pub fn set_aprs_status(
+        &mut self,
+        status: controller::AprsStatus,
+    ) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.view.aprs_status == status {
+            return Ok(());
+        }
+        self.controller.set_aprs_status(status);
+        self.status.view = self.controller.view();
+        if self.status.view.screen == Screen::Aprs {
+            self.redraw_ready()?;
+        }
+        Ok(())
+    }
+    pub fn shortwave_scope_sample(
+        &mut self,
+        first_hz: u32,
+        step_hz: u32,
+        bin: u8,
+        rssi: u8,
+        snr: u8,
+        complete: bool,
+    ) -> Result<(), Error<N::Error, L::Error>> {
+        if self.shortwave_scope.first_hz != first_hz || self.shortwave_scope.step_hz != step_hz {
+            self.shortwave_scope.reset(first_hz, step_hz);
+        }
+        self.shortwave_scope.sample(bin, rssi, snr, complete);
+        if self.status.view.screen == Screen::Shortwave && self.status.view.shortwave_scope {
+            self.pending_rows.mark(55, 240);
+        }
+        Ok(())
+    }
+    /// Read only the documented CFG range for auxiliary feature initialization.
+    pub fn read_auxiliary_config(&mut self, offset: u16, bytes: &mut [u8]) -> bool {
+        if usize::from(offset) + bytes.len() > 4096 {
+            return false;
+        }
+        uv98_nor_read::read(&mut self.nor, CONFIG_ADDRESS + u32::from(offset), bytes).is_ok()
+    }
+
+    pub fn set_watch_rx(&mut self, slot: Option<Slot>) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.view.watch_rx != slot {
+            self.controller.set_watch_rx(slot);
+            self.redraw_ready()?;
+        }
+        Ok(())
+    }
+
+    pub fn set_crossband_probe(
+        &mut self,
+        status: controller::CrossbandProbe,
+    ) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.view.crossband_probe != status {
+            self.controller.set_crossband_probe(status);
+            self.redraw_ready()?;
+        }
+        Ok(())
+    }
+
+    pub fn continue_shortwave_scan(
+        &mut self,
+        rssi: u8,
+        snr: u8,
+    ) -> Result<bool, Error<N::Error, L::Error>> {
+        let before = self.controller.view();
+        let next = self.controller.continue_shortwave_scan(rssi, snr);
+        if self.controller.view() != before {
+            self.redraw_ready()?;
+        }
+        Ok(next)
+    }
+
+    /// Stock SSB payload in external NOR. This path has no write opcode.
+    pub fn read_shortwave_patch(&mut self, offset: u16, output: &mut [u8]) -> bool {
+        const PATCH_BYTES: usize = 0x7bb * 8;
+        if usize::from(offset) + output.len() > PATCH_BYTES {
+            return false;
+        }
+        uv98_nor_read::read(&mut self.nor, 0x126000 + u32::from(offset), output).is_ok()
+    }
+
     pub fn set_spectrum(
         &mut self,
         snapshot: SpectrumSnapshot,
     ) -> Result<bool, Error<N::Error, L::Error>> {
+        self.set_spectrum_with_cursor(snapshot, None)
+    }
+
+    pub fn set_spectrum_with_cursor(
+        &mut self,
+        snapshot: SpectrumSnapshot,
+        cursor: Option<u8>,
+    ) -> Result<bool, Error<N::Error, L::Error>> {
         if self.status.state != State::Ready {
             return Err(Error::State);
         }
-        if self.spectrum == Some(snapshot) {
+        if self.spectrum == Some(snapshot) && cursor.is_none() {
             return Ok(true);
         }
         if self.status.view.screen == Screen::Spectrum
@@ -352,14 +512,162 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         {
             return Ok(false);
         }
+        if snapshot.len > 0 {
+            let new_len = snapshot.len;
+            let old_cursor = self.status.view.spectrum_cursor;
+            self.controller.clamp_spectrum_cursor(new_len - 1);
+            let new_last = snapshot
+                .start_10hz
+                .saturating_add(snapshot.step_10hz.saturating_mul(u32::from(new_len - 1)));
+            let previous = self.spectrum;
+            let window_changed = previous.is_some_and(|old| {
+                old.start_10hz != snapshot.start_10hz
+                    || old.step_10hz != snapshot.step_10hz
+                    || old.len != snapshot.len
+            });
+            if let (Some(old), true) = (previous, window_changed) {
+                if old.len > 0 {
+                    let cursor = old_cursor.min(old.len - 1);
+                    let frequency = old
+                        .start_10hz
+                        .saturating_add(old.step_10hz.saturating_mul(u32::from(cursor)));
+                    let index = if frequency < snapshot.start_10hz {
+                        0
+                    } else if frequency > new_last {
+                        new_len - 1
+                    } else {
+                        let delta = frequency - snapshot.start_10hz;
+                        ((delta.saturating_add(snapshot.step_10hz / 2)) / snapshot.step_10hz)
+                            .min(u32::from(new_len - 1)) as u8
+                    };
+                    self.controller.place_spectrum_cursor(index);
+                }
+            } else if previous.is_none() {
+                self.controller.place_spectrum_cursor((new_len - 1) / 2);
+            }
+        }
+        let previous = self.spectrum.as_ref();
+        let geometry_changed = previous.is_none_or(|old| {
+            old.start_10hz != snapshot.start_10hz
+                || old.step_10hz != snapshot.step_10hz
+                || old.len != snapshot.len
+        });
+        let new_window =
+            geometry_changed || previous.is_some_and(|old| old.window_id != snapshot.window_id);
+        if geometry_changed {
+            self.waterfall = render::Waterfall::new();
+        }
+        if snapshot.plot.sweep != 0
+            && (new_window || previous.is_some_and(|old| old.plot.sweep != snapshot.plot.sweep))
+        {
+            self.waterfall.push(&snapshot.plot, snapshot.len);
+        }
+        if let Some(bin) = snapshot.plot.held_bin {
+            if new_window || previous.is_some_and(|old| old.plot.held_bin != Some(bin)) {
+                self.controller.place_spectrum_cursor(bin);
+            }
+        }
+        if let Some(cursor) = cursor {
+            self.controller
+                .place_spectrum_cursor(cursor.min(snapshot.len.saturating_sub(1)));
+        }
+        self.status.view = self.controller.view();
         self.spectrum = Some(snapshot);
+        if self.spectrum_error.is_failure() {
+            self.last_rendered = None;
+        }
+        self.spectrum_error = SpectrumError::None;
         self.redraw_ready()?;
         Ok(true)
+    }
+    /// Refuse a start/restart and keep the spectrum page usable: overlay,
+    /// window controls and the exact reason stay visible without a snapshot.
+    pub fn reject_spectrum_start(
+        &mut self,
+        reason: SpectrumError,
+    ) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.state != State::Ready {
+            return Err(Error::State);
+        }
+        self.controller.reject_spectrum_start();
+        self.spectrum_error = reason;
+        // The refusal label is external model state, not a View field.
+        self.last_rendered = None;
+        self.redraw_ready()
+    }
+    /// Runtime owns temporary listening; the UI only needs its EXIT contract.
+    pub fn set_spectrum_listening(
+        &mut self,
+        listening: bool,
+    ) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.state != State::Ready {
+            return Err(Error::State);
+        }
+        if self.controller.set_spectrum_listening(listening) {
+            self.redraw_ready()?;
+        }
+        Ok(())
+    }
+    /// Main callback after the exact restore ACK: bind the displayed bin to the
+    /// RF-confirmed bin before claiming that audio is being monitored.
+    pub fn begin_spectrum_peak_listen(
+        &mut self,
+        bin: u8,
+    ) -> Result<bool, Error<N::Error, L::Error>> {
+        if self.controller.begin_peak_listen(bin) {
+            self.redraw_ready()?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    pub fn confirm_spectrum_listen(&mut self, bin: u8) -> Result<bool, Error<N::Error, L::Error>> {
+        if self.status.state != State::Ready {
+            return Err(Error::State);
+        }
+        // Coordinator calls can change slots/pages outside the keyboard path.
+        // A late restore callback on that new page is cancellation, never an
+        // audio authorization, even if an older pending bin still matches.
+        if self.status.view.screen != Screen::Spectrum {
+            self.cancel_spectrum_pending()?;
+            return Ok(false);
+        }
+        let accepted = self.controller.confirm_spectrum_listen(bin);
+        if accepted {
+            self.redraw_ready()?;
+        }
+        Ok(accepted)
+    }
+    /// Cancel a pending Listen before its restore ACK without changing RF.
+    pub fn cancel_spectrum_pending(&mut self) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.state != State::Ready {
+            return Err(Error::State);
+        }
+        if self.controller.cancel_spectrum_pending() {
+            self.redraw_ready()?;
+        }
+        Ok(())
+    }
+    /// Keep an existing snapshot but show why a new action was refused.
+    pub fn note_spectrum_error(
+        &mut self,
+        reason: SpectrumError,
+    ) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.state != State::Ready {
+            return Err(Error::State);
+        }
+        if self.spectrum_error != reason {
+            self.spectrum_error = reason;
+            self.last_rendered = None;
+            self.redraw_ready()?;
+        }
+        Ok(())
     }
     pub fn clear_spectrum(&mut self) -> Result<(), Error<N::Error, L::Error>> {
         if self.status.state != State::Ready {
             return Err(Error::State);
         }
+        self.controller.cancel_spectrum_pending();
         self.spectrum = None;
         self.redraw_ready()
     }
@@ -395,6 +703,24 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         }
         self.radio = radio;
         self.redraw_ready()
+    }
+
+    /// Physical identification of the lower side key, separate from its
+    /// assigned action. Callers pass true only after a traced input works.
+    pub fn enable_fast_matrix_input(&mut self) {
+        self.input.enable_fast_matrix();
+    }
+
+    pub fn set_lower_side_mapped(&mut self, mapped: bool) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.state != State::Ready {
+            return Err(Error::State);
+        }
+        self.input.set_aux16_ptt(mapped);
+        if self.lower_side_mapped != mapped {
+            self.lower_side_mapped = mapped;
+            self.redraw_ready()?;
+        }
+        Ok(())
     }
 
     /// Confirm runtime acceptance of global RAM lighting policy; no storage IO.
@@ -563,10 +889,11 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
                 ptt_pressed,
                 ..
             } => Some((matrix, ptt_pressed)),
-            InputSample::Unstable => None,
+            InputSample::Unstable | InputSample::MatrixTransition => None,
         };
         let normalized = match sample {
             InputSample::Unstable => Sample::Invalid,
+            InputSample::MatrixTransition => Sample::UncertainMatrix,
             InputSample::Stable {
                 matrix,
                 ptt_pressed,
@@ -617,6 +944,24 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             self.status.last_pressed = Some(key);
             self.status.presses = self.status.presses.saturating_add(1);
         }
+        let view = self.controller.view();
+        if event == InputEvent::Short(Key::Digit0)
+            && view.screen == Screen::Spectrum
+            && !view.spectrum_menu
+            && !view.spectrum_listening
+            && view.spectrum_pending_listen.is_none()
+        {
+            if let Some((index, _)) = self
+                .spectrum
+                .as_ref()
+                .filter(|snapshot| snapshot.plot.held_bin.is_none())
+                .and_then(|snapshot| snapshot.plot.strongest())
+            {
+                if self.controller.place_spectrum_cursor(index) {
+                    self.redraw_ready()?;
+                }
+            }
+        }
         let change = self.controller.handle(event, &self.bitmap);
         self.apply_change(change, pressed)
     }
@@ -630,6 +975,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         if change.request == Some(Request::StartSpectrum) {
             // A newly requested grid cannot display a previous session's bins.
             self.spectrum = None;
+            self.waterfall = render::Waterfall::new();
         }
         if change.zone_changed || change.slot_changed {
             self.load_current_zone()?;
@@ -708,9 +1054,10 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         // makes the fairness batch useful even if it would otherwise land on
         // the same repeatedly invalidated banner. The normal cursor is not
         // advanced by priority work.
+        let (banner_start, banner_end) = render::radio_banner_rows(self.status.view.screen);
         let mut ordinary = self.pending_rows;
-        for row in PRIORITY_BANNER_START..PRIORITY_BANNER_END {
-            if self.priority_banner & (1 << (row - PRIORITY_BANNER_START)) != 0 {
+        for row in banner_start..banner_end {
+            if self.priority_banner & (1 << (row - banner_start)) != 0 {
                 ordinary.clear(row, row + 1);
             }
         }
@@ -718,7 +1065,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         let priority = self.priority_banner != 0
             && (normal_start.is_none() || self.priority_run < PRIORITY_BURST_ROWS);
         let (start, limit) = if priority {
-            let start = PRIORITY_BANNER_START + self.priority_banner.trailing_zeros() as u16;
+            let start = banner_start + self.priority_banner.trailing_zeros() as u16;
             let limit = if normal_start.is_some() {
                 max_rows.min(PRIORITY_BURST_ROWS - self.priority_run)
             } else {
@@ -737,8 +1084,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         let mut end = start + 1;
         while end - start < limit
             && if priority {
-                end < PRIORITY_BANNER_END
-                    && self.priority_banner & (1 << (end - PRIORITY_BANNER_START)) != 0
+                end < banner_end && self.priority_banner & (1 << (end - banner_start)) != 0
             } else {
                 ordinary.has(end)
             }
@@ -748,8 +1094,8 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         self.status.state = State::Failed;
         self.paint_rows(start, end)?;
         self.pending_rows.clear(start, end);
-        for row in start.max(PRIORITY_BANNER_START)..end.min(PRIORITY_BANNER_END) {
-            self.priority_banner &= !(1 << (row - PRIORITY_BANNER_START));
+        for row in start.max(banner_start)..end.min(banner_end) {
+            self.priority_banner &= !(1 << (row - banner_start));
         }
         if priority {
             self.priority_run = self.priority_run.saturating_add(end - start);
@@ -1103,7 +1449,13 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
                 .map(|zone| &self.zone_names[zone as usize][..]),
             zones: &zone_views[..self.zone_window_len],
             peer: Some(peer),
-            spectrum: self.spectrum.as_ref().map(SpectrumSnapshot::view),
+            spectrum: self.spectrum.as_ref().map(|snapshot| SpectrumView {
+                waterfall: Some(&self.waterfall),
+                ..snapshot.view()
+            }),
+            lower_side_mapped: self.lower_side_mapped,
+            spectrum_error: self.spectrum_error,
+            shortwave_scope: Some(&self.shortwave_scope),
         };
         let damage = render::dirty_ranges(&model, self.last_rendered)
             .map_err(|e| Error::Render(render::RenderError::Model(e)))?;
@@ -1131,14 +1483,20 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
                 self.pending_rows.mark(start, end);
             }
         }
+        if self
+            .last_rendered
+            .is_some_and(|old| old.screen != self.status.view.screen)
+        {
+            self.priority_banner = 0;
+        }
         if self.last_radio.state != self.radio.state
             || self
                 .last_rendered
                 .is_some_and(|old| old.ptt_down != self.status.view.ptt_down)
         {
-            self.pending_rows
-                .mark(PRIORITY_BANNER_START, PRIORITY_BANNER_END);
-            self.priority_banner = PRIORITY_BANNER_MASK;
+            let (start, end) = render::radio_banner_rows(self.status.view.screen);
+            self.pending_rows.mark(start, end);
+            self.priority_banner = (1 << (end - start)) - 1;
         }
         self.last_rendered = Some(self.status.view);
         self.last_radio = self.radio;
@@ -1190,7 +1548,13 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
                 .map(|zone| &self.zone_names[zone as usize][..]),
             zones: &zone_views[..self.zone_window_len],
             peer: Some(peer),
-            spectrum: self.spectrum.as_ref().map(SpectrumSnapshot::view),
+            spectrum: self.spectrum.as_ref().map(|snapshot| SpectrumView {
+                waterfall: Some(&self.waterfall),
+                ..snapshot.view()
+            }),
+            lower_side_mapped: self.lower_side_mapped,
+            spectrum_error: self.spectrum_error,
+            shortwave_scope: Some(&self.shortwave_scope),
         };
         render::render_rows(&mut self.display, &model, start, end).map_err(Error::Render)
     }

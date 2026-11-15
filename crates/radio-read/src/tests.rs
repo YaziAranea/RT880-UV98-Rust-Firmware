@@ -270,7 +270,7 @@ fn separate_plans_never_add_unrequested_calibration_or_time() {
 
 #[test]
 fn exhaustive_block_allowlist_and_checksum_reject_other_commands() {
-    let expected = ReadPlan::CpsAndCalibration.blocks();
+    let expected = 0..4096;
     for block in 0..=u16::MAX {
         let packet = ReadPacket::block(block);
         assert_eq!(
@@ -563,13 +563,13 @@ fn pure_parser_rejects_short_long_frames_and_disallowed_blocks() {
             })
         );
     }
-    for block in [4, 7, 12, 15, 64, 111, 240, 855, 860, 4095, u16::MAX] {
+    for block in [4096, 4097, u16::MAX] {
         assert_eq!(
             validate_frame(block, &frame(block)),
             Err(ReadError::InvalidBlock(block))
         );
     }
-    assert_eq!(validate_frame(859, &frame(859)).unwrap(), payload(859));
+    assert_eq!(validate_frame(4095, &frame(4095)).unwrap(), payload(4095));
 }
 
 #[test]
@@ -662,4 +662,21 @@ fn cancellation_between_passes_prevents_second_open() {
     assert_eq!(failure.error, ReadError::Cancelled);
     assert_eq!(opens, 1);
     assert!(failure.passes[0].complete && failure.passes[0].end_sent);
+}
+
+#[test]
+fn stock_storage_plan_reads_and_compares_all_4096_blocks() {
+    let (result, _) = run([Damage::None; 2], ReadPlan::FullStorage, fast_timing());
+    let snapshot = result.unwrap();
+    let storage = snapshot.section(Region::Storage).unwrap();
+    assert_eq!(storage.len(), 4 * 1024 * 1024);
+    assert_eq!(&storage[4095 * BLOCK_SIZE..], payload(4095));
+    assert_eq!(
+        snapshot.section(Region::Calibration).unwrap(),
+        &storage[..4096]
+    );
+    assert!(snapshot
+        .passes()
+        .iter()
+        .all(|p| p.complete && p.frames.len() == 4096));
 }

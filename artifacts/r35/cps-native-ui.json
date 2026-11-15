@@ -1,0 +1,16 @@
+{
+  "status": "passed",
+  "scope": "Native Windows CPS UI, no device access",
+  "version": "0.5.0",
+  "aprs_form_loaded": true,
+  "comment_change_applied_bytes": 12,
+  "undo_returned_changed_bytes": 0,
+  "backup_controls_visible": true,
+  "firmware_controls_visible": true,
+  "original_file_unchanged": true,
+  "device_accessed": false,
+  "flash_performed": false,
+  "packaged_default_image_selected": true,
+  "packaged_default_sha256": "97e3d98257cacef6d64917d4b355719e1649b8570e8df8e9c9527edd39c7307d",
+  "packaged_preview_mode_disabled_com_and_flash": true
+}

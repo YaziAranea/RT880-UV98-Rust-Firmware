@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$OutputDirectory = '',
     [string]$NorBackup = '../../outputs/uv98-backup-2026-11-08/storage-read-01/storage-address-space.bin',
     [switch]$UpperExoTxTrial,
@@ -55,7 +55,7 @@ try {
     }
     $runner = if (Get-Command rtk -ErrorAction SilentlyContinue) { 'rtk' } else { 'cargo' }
     [string[]]$prefix = if ($runner -eq 'rtk') { @('cargo') } else { @() }
-    $packages = @('uv98-spectrum', 'uv98-gps-nmea', 'uv98-radio-runtime', 'uv98-rf-sequence', 'uv98-sidekeys-at32', 'uv98-handheld-ui', 'uv98-handheld-app', 'uv98-handheld-image-sim', 'uv98-boot-log', 'uv98-diag-startup', 'uv98-diag-quiesce', 'uv98-diag-app',
+    $packages = @('uv98-signaling', 'uv98-gps-at32', 'uv98-spectrum', 'uv98-gps-nmea', 'uv98-radio-runtime', 'uv98-rf-sequence', 'uv98-sidekeys-at32', 'uv98-handheld-ui', 'uv98-handheld-app', 'uv98-handheld-image-sim', 'uv98-boot-log', 'uv98-diag-startup', 'uv98-diag-quiesce', 'uv98-diag-app',
         'uv98-board-pins', 'uv98-rf-at32', 'uv98-diagnostic', 'uv98-display',
         'uv98-keys', 'uv98-keyscan-at32', 'uv98-rf-bus', 'uv98-nor-read',
         'uv98-board-at32', 'uv98-lcd-at32', 'uv98-clock-profile', 'uv98-board-diagnostic',
@@ -71,8 +71,11 @@ try {
     }
     Invoke-Checked 'python' @('-m', 'unittest', 'discover', '-s', 'research/recovery', '-p', 'test_image_preflight.py', '-q')
     Invoke-Checked 'python' @('-m', 'unittest', 'discover', '-s', $captureTools, '-p', 'test_capture_boot_log.py', '-v')
-    [string[]]$firmwareFeatures = if ($ChannelTx) { @('channel-tx') } elseif ($UpperExoTxTrial) { @('upper-exo-tx-trial') } else { @() }
-    [string[]]$featureArgs = if ($firmwareFeatures.Count) { @('--features', $firmwareFeatures[0]) } else { @() }
+    [string[]]$firmwareFeatures = @()
+    [string[]]$featureArgs = @()
+    if ($ChannelTx) { $firmwareFeatures = @('channel-tx') }
+    if ($UpperExoTxTrial) { $firmwareFeatures = @('upper-exo-tx-trial') }
+    if ($firmwareFeatures.Count) { $featureArgs = @('--features', $firmwareFeatures[0]) }
     Invoke-Checked $runner ($prefix + @('build', '--locked', '--offline', '--release', '--target', 'thumbv7em-none-eabi', '-p', 'uv98-diag-firmware') + $featureArgs)
     $imageDirectory = Join-Path $destination 'image'
     Invoke-Checked 'python' @('tools/export_diagnostic_image.py', 'target/thumbv7em-none-eabi/release/uv98-diag-firmware', $imageDirectory)

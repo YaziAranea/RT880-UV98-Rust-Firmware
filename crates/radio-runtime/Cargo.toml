@@ -8,6 +8,7 @@ publish = false
 hardware = ["dep:at32f4xx-pac", "dep:uv98-board-pins", "dep:uv98-diag-quiesce"]
 
 [dependencies]
+sha2 = { version = "=0.10.9", default-features = false }
 uv98-spectrum = { path = "../spectrum" }
 uv98-calibration = { path = "../calibration" }
 uv98-rf-sequence = { path = "../rf-sequence" }

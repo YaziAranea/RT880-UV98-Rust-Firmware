@@ -46,6 +46,7 @@ fn region_name(region: Region) -> &'static str {
         Region::Channels => "channels",
         Region::Fm => "fm",
         Region::Zones => "zones",
+        Region::Storage => "storage-address-space",
     }
 }
 fn save_passes(directory: &Path, passes: &[PassCapture]) -> Result<Vec<Value>, String> {
@@ -87,11 +88,19 @@ fn save_success(directory: &Path, port: &str, snapshot: &ReadSnapshot) -> Result
         sections.push(json!({"file":filename,"first_block":section.first_block,
             "bytes":section.bytes.len(),"sha256":sha256(&section.bytes)}));
     }
+    if snapshot.plan() == ReadPlan::FullStorage {
+        let bytes = snapshot
+            .section(Region::Calibration)
+            .ok_or("Нет калибровок в снимке")?;
+        write_new(&directory.join("calibration.bin"), bytes)?;
+        sections.push(json!({"file":"calibration.bin","first_block":0,
+            "bytes":bytes.len(),"sha256":sha256(bytes)}));
+    }
     write_json(
         &directory.join("manifest.json"),
         &json!({
             "schema":1,"status":"verified_two_reads","app_version":env!("CARGO_PKG_VERSION"),"port":port,
-            "finished_unix_ms":now_millis(),"plan":"cps_and_calibration",
+            "finished_unix_ms":now_millis(),"plan":snapshot.plan().label(),
             "two_reads_byte_identical":true,"sections":sections,"passes":passes,
             "time_section":"not_read_by_stock_cps; retained from a separately selected base file only",
             "mcu_flash_read":false,"bootloader_read":false,"full_radio_backup":false,
@@ -208,7 +217,7 @@ impl RadioPane {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
     }
-    fn start(&mut self, ctx: &egui::Context) -> Result<(), String> {
+    fn start(&mut self, ctx: &egui::Context, plan: ReadPlan) -> Result<(), String> {
         if self.busy() {
             return Err("Чтение уже выполняется".into());
         }
@@ -222,7 +231,7 @@ impl RadioPane {
             &directory.join("started.json"),
             &json!({"schema":1,"status":"incomplete",
             "port":self.port,"started_unix_ms":now_millis(),"app_version":env!("CARGO_PKG_VERSION"),
-            "plan":"cps_and_calibration","full_radio_backup":false}),
+            "plan":plan.label(),"full_radio_backup":false}),
         )?;
         let (tx, rx) = mpsc::channel();
         let cancel = CancelToken::default();
@@ -233,15 +242,11 @@ impl RadioPane {
         thread::Builder::new()
             .name("uv98-read-only".into())
             .spawn(move || {
-                let result = uv98_radio_read::read_windows(
-                    &port,
-                    ReadPlan::CpsAndCalibration,
-                    &worker_cancel,
-                    |progress| {
+                let result =
+                    uv98_radio_read::read_windows(&port, plan, &worker_cancel, |progress| {
                         let _ = tx.send(Event::Progress(progress));
                         repaint.request_repaint();
-                    },
-                );
+                    });
                 let finished = match result {
                     Ok(snapshot) => save_success(&output, &port, &snapshot)
                         .map(|()| snapshot)
@@ -274,9 +279,9 @@ impl RadioPane {
     }
     pub fn ui(&mut self, ui: &mut egui::Ui, can_apply: bool) -> Option<ReadSnapshot> {
         let mut apply = None;
-        ui.heading("Чтение радиостанции");
-        ui.label("Настройки, каналы, зоны, FM и заводские калибровки — два прохода с побайтовой сверкой.");
-        ui.label("Рация включена в обычном режиме. Закройте другие CPS и Radio Tuning Software.");
+        ui.heading("Резервные копии UV98");
+        ui.label("Для чтения подключите рацию со стоком в обычном режиме и закройте другие CPS.");
+        ui.label("Выберите COM и папку. Каждый снимок читается дважды и сверяется побайтово.");
         ui.add_space(12.0);
         ui.add_enabled_ui(!self.busy(), |ui| {
             ui.horizontal(|ui| {
@@ -322,16 +327,43 @@ impl RadioPane {
                 );
             });
             ui.add_space(8.0);
-            if ui
-                .add_enabled(
-                    self.directory.is_some(),
-                    egui::Button::new("Считать и проверить дважды"),
-                )
-                .clicked()
-            {
-                if let Err(e) = self.start(ui.ctx()) {
-                    self.message = e;
-                    self.error = true;
+            for (label, plan) in [
+                ("Считать калибровки (4 КиБ)", ReadPlan::Calibration),
+                ("Считать память настроек (4 МиБ)", ReadPlan::FullStorage),
+                ("Считать каналы, настройки и калибровки", ReadPlan::CpsAndCalibration),
+            ] {
+                if ui.button(label).clicked() {
+                    if self.directory.is_none() {
+                        self.directory = rfd::FileDialog::new()
+                            .set_title("Куда сохранить резервную копию UV98")
+                            .pick_folder();
+                    }
+                    if self.directory.is_some() {
+                        if let Err(error) = self.start(ui.ctx(), plan) {
+                            self.message = error;
+                            self.error = true;
+                        }
+                    }
+                }
+            }
+            ui.separator();
+            ui.label("Прошивка MCU и загрузчик находятся вне памяти настроек. Известный протокол штатной CPS не содержит команды их чтения. Сохраняемый ниже заводской BIN — файл восстановления из комплекта, а не дамп вашей рации.");
+            ui.label("Для отката можно сохранить заводской образ 1.16 из комплекта.");
+            if ui.button("Сохранить заводской BIN 1.16…").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_file_name("RT-880_Upgrade_V1_16_250915.bin")
+                    .save_file()
+                {
+                    match crate::firmware::export_stock(&path) {
+                        Ok(()) => {
+                            self.message = format!("Заводской образ сохранён в {}", path.display());
+                            self.error = false;
+                        }
+                        Err(error) => {
+                            self.message = error;
+                            self.error = true;
+                        }
+                    }
                 }
             }
         });
@@ -384,7 +416,7 @@ impl RadioPane {
             ui.label("Секция Time не читается штатным CPS: её байты останутся из открытого файла. Калибровки хранятся отдельно.");
             if ui
                 .add_enabled(
-                    can_apply,
+                    can_apply && snapshot.plan() != ReadPlan::Calibration,
                     egui::Button::new("Применить считанное к открытому файлу"),
                 )
                 .clicked()
@@ -396,7 +428,6 @@ impl RadioPane {
             }
         }
         ui.add_space(18.0);
-        ui.label("Запись в станцию и прошивка отключены. Снимок не содержит внутреннюю Flash MCU и загрузчик.");
         apply
     }
 }

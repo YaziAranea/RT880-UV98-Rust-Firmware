@@ -14,7 +14,7 @@ use uv98_handheld_ui::controller::{
     ScanState, Screen, Setting, ShortcutAction, SideAction, Slot,
 };
 use uv98_handheld_ui::render::{
-    Modulation, RadioRoute, RadioState, RadioView, SpectrumState, HEIGHT, WIDTH,
+    Modulation, RadioRoute, RadioState, RadioView, SpectrumError, SpectrumState, HEIGHT, WIDTH,
 };
 use uv98_keys::{Key, Timing};
 use uv98_nor_read::Bus;
@@ -100,7 +100,12 @@ impl Panel {
         encoder.set_depth(png::BitDepth::Eight);
         let mut writer = encoder.write_header()?;
         let mut rgb = Vec::with_capacity(self.pixels.len() * 3);
-        for &v in &self.pixels {
+        for &word in &self.pixels {
+            let v = if self.madctl.is_some_and(|mode| mode & 0x08 != 0) {
+                ((word & 31) << 11) | (word & 0x07e0) | (word >> 11)
+            } else {
+                word
+            };
             rgb.extend_from_slice(&[
                 ((v >> 11) as u32 * 255 / 31) as u8,
                 (((v >> 5) & 63) as u32 * 255 / 63) as u8,
@@ -299,6 +304,14 @@ fn tap_request(app: &mut SimApp, now: &mut u32, key: Key) -> Option<Request> {
     let mut cancelled_temporary = false;
     // Capture requests on press AND release. In particular MENU confirms only
     // on its debounced release; a helper must not silently discard that event.
+    let view = app.status().view;
+    let soft_exit = (view.screen == Screen::Spectrum
+        && (view.spectrum_menu || view.spectrum_listening))
+        || (view.screen == Screen::Shortwave
+            && (view.shortwave_scope
+                || view.shortwave_scan
+                || view.shortwave_entry.is_some()
+                || view.shortwave_band_draft.is_some()));
     for (bits, down) in [
         (0, false),
         (0, false),
@@ -316,7 +329,7 @@ fn tap_request(app: &mut SimApp, now: &mut u32, key: Key) -> Option<Request> {
             );
         }
     }
-    if key == Key::Exit {
+    if key == Key::Exit && !soft_exit {
         assert!(
             cancelled_temporary,
             "EXIT did not cancel temporary operations"
@@ -772,19 +785,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Screen::ChannelDetails,
             "08-channel-details.png",
         ),
-        (
-            MenuItem::Calibration,
-            Screen::Calibration,
-            "09-calibration.png",
-        ),
-        (MenuItem::Help, Screen::Help, "10-help.png"),
         (MenuItem::About, Screen::About, "11-about.png"),
     ] {
         menu(&mut app, &mut now, index);
         assert_eq!(app.status().view.screen, expected);
         frames.push(capture(&mut app, &panel, output, name, milliseconds.get())?);
     }
-    menu(&mut app, &mut now, MenuItem::Keys);
+    home(&mut app, &mut now);
+    hold(&mut app, &mut now, Key::Digit8);
     assert_eq!(app.status().view.screen, Screen::Keys);
     tap(&mut app, &mut now, Key::Digit1);
     assert_eq!(app.status().view.screen, Screen::Keys);
@@ -1085,6 +1093,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let simulated_rx = RadioView {
         state: RadioState::Receiving,
         rssi: Some(245),
+        meter_floor: 0,
         squelch_open: true,
         monitor: false,
         power: Some(0),
@@ -1197,7 +1206,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(upper.request, Some(Request::ToggleMonitor));
     assert!(!upper.ptt_tx_requested);
     release(&mut app, &mut now);
-    menu(&mut app, &mut now, MenuItem::Keys);
+    home(&mut app, &mut now);
+    hold(&mut app, &mut now, Key::Digit8);
+    assert_eq!(app.status().view.screen, Screen::Keys);
     release(&mut app, &mut now);
     side_sample(&mut app, &mut now, true);
     let lower = side_sample(&mut app, &mut now, true);
@@ -1613,10 +1624,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "52-SIMULATED-spectrum-no-data.png",
         milliseconds.get(),
     )?);
+    // No snapshot: the overlay must still be usable, and a refused window must
+    // show its reason without resurrecting any old plot.
+    assert_eq!(tap_request(&mut app, &mut now, Key::Menu), None);
+    assert!(app.status().view.spectrum_menu);
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "52a-SIMULATED-spectrum-no-data-overlay.png",
+        milliseconds.get(),
+    )?);
+    tap(&mut app, &mut now, Key::Exit);
+    app.reject_spectrum_start(SpectrumError::Window).unwrap();
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "52b-SIMULATED-spectrum-rejected-window.png",
+        milliseconds.get(),
+    )?);
+    assert!(app.spectrum_view().is_none());
+    // Dismiss the refusal notice before measuring cursor-only redraw below.
+    tap(&mut app, &mut now, Key::Menu);
+    tap(&mut app, &mut now, Key::Exit);
+    drain(&mut app);
     use uv98_spectrum::compact::{
         Action as SweepAction, Config as SweepConfig, Engine as SweepEngine, Event as SweepEvent,
-        State as SweepState,
     };
+    for _ in 0..4 {
+        tap(&mut app, &mut now, Key::Digit2); // synthetic 81-point grid
+    }
+    drain(&mut app);
     let mut spectrum = SweepEngine::new();
     let range = uv98_spectrum::Range::new(43_247_500, 43_347_500, 1250).unwrap();
     let config = SweepConfig::new(
@@ -1654,7 +1693,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|&p| p.abs_diff(index))
             .min()
             .unwrap();
-        let raw = (35 + index * 13 % 19 + 420usize.saturating_sub(distance * 80)) as u16;
+        let raw = (120 + index * 13 % 4 + 12usize.saturating_sub(distance * 3)) as u16;
         action = spectrum
             .handle(now, SweepEvent::Sample { ticket, raw })
             .expect("synthetic RSSI ACK");
@@ -1662,7 +1701,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert!(matches!(action, SweepAction::SweepComplete { sweep: 1 }));
     let mut snapshot = SpectrumSnapshot {
         state: SpectrumState::Sweeping,
+        window_id: 1,
         start_10hz: range.start_10hz(),
+        center_10hz: range.frequency_10hz(range.len() / 2).unwrap(),
         step_10hz: range.step_10hz(),
         len: range.len() as u8,
         plot: *spectrum.plot(),
@@ -1682,6 +1723,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &panel,
         output,
         "53-SIMULATED-spectrum-full-sweep.png",
+        milliseconds.get(),
+    )?);
+    let mut history = snapshot;
+    for pass in 2..=16u16 {
+        history.plot.sweep = pass.into();
+        history.plot.display_floor = Some(112);
+        history.plot.elapsed_ms = 496;
+        for (bin, level) in history.plot.latest.iter_mut().enumerate() {
+            let spread = [15usize, 42, 66]
+                .into_iter()
+                .zip([32usize, 53, 41])
+                .map(|(peak, height)| height.saturating_sub(bin.abs_diff(peak) * 10))
+                .max()
+                .unwrap();
+            let modulation = (bin * 17 + usize::from(pass) * 31) % 6;
+            *level = (120 + spread + modulation) as u16;
+        }
+        assert!(app.set_spectrum(history).unwrap());
+        drain(&mut app);
+    }
+    history.plot.held_bin = Some(42);
+    assert!(app.set_spectrum(history).unwrap());
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "53a-SIMULATED-waterfall-and-peak.png",
         milliseconds.get(),
     )?);
     action = spectrum
@@ -1738,42 +1806,107 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         milliseconds.get(),
     )?);
     let old_frequency = app.status().view.vfo_10hz;
+    // MENU now opens a context menu; the first item listens to the cursor bin.
+    assert_eq!(tap_request(&mut app, &mut now, Key::Menu), None);
+    assert!(app.status().view.spectrum_menu);
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "56-SIMULATED-spectrum-menu.png",
+        milliseconds.get(),
+    )?);
     assert_eq!(
         tap_request(&mut app, &mut now, Key::Menu),
-        Some(Request::AcceptSpectrum { bin: cursor })
+        Some(Request::ListenSpectrum { bin: cursor })
     );
-    assert_eq!(app.status().view.screen, Screen::Spectrum);
+    assert_eq!(
+        app.status().view.spectrum_pending_listen,
+        Some(cursor),
+        "pending Listen must freeze the submitted bin"
+    );
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "56a-SIMULATED-spectrum-listen-pending.png",
+        milliseconds.get(),
+    )?);
+    assert_eq!(tap_request(&mut app, &mut now, Key::Down), None);
+    assert_eq!(
+        app.status().view.spectrum_cursor,
+        cursor,
+        "pending restore must not move the RF bin"
+    );
+    // Real confirmation callback used by main after the exact restore ACK.
+    app.confirm_spectrum_listen(cursor).unwrap();
     assert_eq!(app.status().view.vfo_10hz, old_frequency);
-    let Some(SweepAction::Restore {
-        ticket,
-        frequency_10hz,
-        ..
-    }) = spectrum.handle(now, SweepEvent::Accept { index: cursor })
-    else {
-        panic!()
-    };
-    snapshot.state = SpectrumState::Restoring;
+    assert_eq!(app.status().view.mode, Mode::Channel);
+    // Temporary listen keeps the graph and the original MR context; it does not
+    // accept the bin into VFO.
+    snapshot.state = SpectrumState::Listening;
+    drain(&mut app);
     assert!(app.set_spectrum(snapshot).unwrap());
     frames.push(capture(
         &mut app,
         &panel,
         output,
-        "56-SIMULATED-spectrum-restoring.png",
+        "57-SIMULATED-spectrum-listening.png",
         milliseconds.get(),
     )?);
-    spectrum.handle(now + 1, SweepEvent::Restored(ticket));
-    assert!(matches!(spectrum.state(), SweepState::Restored(_)));
-    app.accept_spectrum_frequency(frequency_10hz)
-        .expect("only after synthetic full RX restore ACK");
-    app.clear_spectrum().unwrap();
-    assert_eq!(app.status().view.screen, Screen::Home);
-    assert_eq!(app.status().view.mode, Mode::Vfo);
-    assert_eq!(app.status().view.vfo_10hz, frequency_10hz);
+    // Overlay must still say audio is on and must not stop Listen.
+    assert_eq!(tap_request(&mut app, &mut now, Key::Menu), None);
+    assert!(app.status().view.spectrum_menu);
+    assert!(app.status().view.spectrum_listening);
     frames.push(capture(
         &mut app,
         &panel,
         output,
-        "57-SIMULATED-spectrum-frequency-accepted.png",
+        "57a-SIMULATED-spectrum-listening-overlay.png",
+        milliseconds.get(),
+    )?);
+    assert_eq!(tap_request(&mut app, &mut now, Key::Exit), None);
+    assert!(!app.status().view.spectrum_menu);
+    assert!(app.status().view.spectrum_listening);
+    assert_eq!(
+        tap_request(&mut app, &mut now, Key::Exit),
+        Some(Request::StopListenSpectrum)
+    );
+    // The UI stops claiming audio before the original RX restore finishes.
+    app.set_spectrum_listening(false).unwrap();
+    snapshot.state = SpectrumState::Restoring;
+    drain(&mut app);
+    assert!(app.set_spectrum(snapshot).unwrap());
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "58-SIMULATED-spectrum-listen-restoring.png",
+        milliseconds.get(),
+    )?);
+    snapshot.state = SpectrumState::Sweeping;
+    drain(&mut app);
+    assert!(app.set_spectrum(snapshot).unwrap());
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "59-SIMULATED-spectrum-return.png",
+        milliseconds.get(),
+    )?);
+    assert_eq!(app.status().view.screen, Screen::Spectrum);
+    assert_eq!(app.status().view.mode, Mode::Channel);
+    assert_eq!(app.status().view.vfo_10hz, old_frequency);
+    assert_eq!(
+        tap_request(&mut app, &mut now, Key::Exit),
+        Some(Request::StopSpectrum)
+    );
+    assert_eq!(app.status().view.screen, Screen::Home);
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "60-SIMULATED-spectrum-exit-home.png",
         milliseconds.get(),
     )?);
     menu(&mut app, &mut now, MenuItem::Spectrum);
@@ -1786,8 +1919,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "bins":81,"synthetic_rssi_only":true,"scale":"raw0..511",
         "cursor_pixel_bytes":cursor_words*2,"snapshot_replacement_blocked_during_pending_frame":true,
         "unknown_data_has_no_synthetic_noise":true,"current_vs_previous_sweep_distinguished":true,
+        "listen_is_temporary_and_preserves_mr":true,
         "menu_commit_waits_for_full_receive_restore_ack":true,"ptt_stops_spectrum_without_tx":true,
-        "frequency_after_restore_10hz":frequency_10hz,"physical_rf_operations":false}));
+        "physical_rf_operations":false}));
     home(&mut app, &mut now);
     let before_long_zero = app.status().view.vfo_10hz;
     assert_eq!(
@@ -1804,7 +1938,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &mut app,
         &panel,
         output,
-        "58-SIMULATED-long-zero-spectrum-request.png",
+        "61-SIMULATED-long-zero-spectrum-request.png",
         milliseconds.get(),
     )?);
     menu(&mut app, &mut now, MenuItem::Shortcuts);
@@ -1842,6 +1976,382 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "all_ten_digits_assignable":true,"long_zero_no_numeric_entry":true,
         "long_zero_requests_backend_without_fabricated_measurements":true,
         "labels_use_digit0_not_binding10":true}));
+
+    // Meter design proof uses explicit fake backend reports only. Both cards
+    // remain visible, but only the selected context receives a live reading.
+    home(&mut app, &mut now);
+    for (slot, state, rssi, power, name) in [
+        (
+            Slot::A,
+            RadioState::Receiving,
+            Some(245),
+            Some(0),
+            "68-SIMULATED-meter-rx-a.png",
+        ),
+        (
+            Slot::B,
+            RadioState::Receiving,
+            Some(490),
+            Some(2),
+            "69-SIMULATED-meter-rx-b.png",
+        ),
+        (
+            Slot::B,
+            RadioState::Transmitting,
+            None,
+            Some(2),
+            "70-SIMULATED-meter-tx-b-setting.png",
+        ),
+        (
+            Slot::A,
+            RadioState::Receiving,
+            None,
+            None,
+            "71-SIMULATED-meter-no-sample.png",
+        ),
+    ] {
+        app.select_slot(slot).expect("synthetic meter context");
+        app.set_radio_view(RadioView {
+            state,
+            rssi,
+            power,
+            squelch_open: state == RadioState::Receiving && rssi.is_some(),
+            ..simulated_rx
+        })
+        .expect("synthetic meter metadata");
+        frames.push(capture(&mut app, &panel, output, name, milliseconds.get())?);
+    }
+    performance.push(
+        serde_json::json!({"action":"ruled 10+2 meters in both VFO cards",
+        "segments":12,"colors":["red","yellow","blue","green"],
+        "rx_scale":"REL: A67 above learned noise floor, not calibrated S-units or dBm",
+        "tx_scale":"SET: confirmed L/M/H selection, not watts/SWR/microphone level",
+        "inactive_context":"empty bar, no duplicated RSSI",
+        "full_size_frequency_preserved":true,"physical_meter_calibration_verified":false}),
+    );
+    app.set_radio_view(RadioView::OFF)
+        .expect("clear synthetic meter metadata");
+    // Match the layout case from the owner's photo. Metadata is simulated.
+    app.select_slot(Slot::B).unwrap();
+    if app.status().view.mode != Mode::Channel {
+        tap(&mut app, &mut now, Key::Star);
+    }
+    digits(&mut app, &mut now, "1");
+    tap(&mut app, &mut now, Key::Menu);
+    app.select_slot(Slot::A).unwrap();
+    if app.status().view.mode != Mode::Vfo {
+        tap(&mut app, &mut now, Key::Star);
+    }
+    digits(&mut app, &mut now, "126400");
+    tap(&mut app, &mut now, Key::Menu);
+    assert_eq!(app.status().view.vfo_10hz, 12_640_000);
+    app.set_radio_view(RadioView {
+        modulation: Modulation::Am,
+        route: Some(RadioRoute::Vhf),
+        rssi: Some(134),
+        meter_floor: 130,
+        squelch_open: false,
+        ..simulated_rx
+    })
+    .unwrap();
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "72-SIMULATED-clean-airband-home.png",
+        milliseconds.get(),
+    )?);
+    menu(&mut app, &mut now, MenuItem::Shortwave);
+    assert_eq!(app.status().view.screen, Screen::Shortwave);
+    for key in [Key::Digit9, Key::Digit5, Key::Digit5, Key::Digit0] {
+        tap(&mut app, &mut now, key);
+    }
+    tap(&mut app, &mut now, Key::Menu);
+    assert_eq!(app.status().view.shortwave_khz, 9550);
+    app.set_shortwave_status(uv98_handheld_ui::controller::ShortwaveStatus::Listening {
+        part: 0x20,
+        rssi: 41,
+        snr: 17,
+    })
+    .unwrap();
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "73-SIMULATED-shortwave-am.png",
+        milliseconds.get(),
+    )?);
+    hold_request(&mut app, &mut now, Key::Digit0);
+    assert!(app.status().view.shortwave_scope);
+    for age in 0..16u8 {
+        for bin in 0..32u8 {
+            let peak = if bin == 16 {
+                32
+            } else if bin.abs_diff(16) <= 2 {
+                16
+            } else {
+                0
+            };
+            app.shortwave_scope_sample(
+                9_470_000,
+                5_000,
+                bin,
+                12 + (bin + age) % 7 + peak,
+                8,
+                bin == 31,
+            )
+            .unwrap();
+        }
+    }
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "81-SIMULATED-hf-waterfall.png",
+        milliseconds.get(),
+    )?);
+    tap(&mut app, &mut now, Key::Exit);
+    assert_eq!(app.status().view.screen, Screen::Shortwave);
+    assert!(!app.status().view.shortwave_scope);
+    hold_request(&mut app, &mut now, Key::Hash);
+    tap(&mut app, &mut now, Key::Down);
+    tap(&mut app, &mut now, Key::Menu);
+    assert_eq!(app.status().view.shortwave_khz, 1900);
+    hold_request(&mut app, &mut now, Key::Hash);
+    tap(&mut app, &mut now, Key::Down);
+    tap(&mut app, &mut now, Key::Down);
+    tap(&mut app, &mut now, Key::Menu);
+    assert_eq!(app.status().view.shortwave_khz, 7100);
+    tap(&mut app, &mut now, Key::Star);
+    assert_eq!(
+        app.status().view.shortwave_mode,
+        uv98_handheld_ui::controller::ShortwaveMode::Lsb
+    );
+    app.set_shortwave_status(uv98_handheld_ui::controller::ShortwaveStatus::Patching(64))
+        .unwrap();
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "74-SIMULATED-shortwave-patch.png",
+        milliseconds.get(),
+    )?);
+    tap(&mut app, &mut now, Key::Up);
+    assert_eq!(app.status().view.shortwave_khz, 7100);
+    assert_eq!(app.status().view.shortwave_fraction_hz, 100);
+    tap(&mut app, &mut now, Key::Hash);
+    assert_eq!(app.status().view.shortwave_khz, 7101);
+    assert_eq!(app.status().view.shortwave_step_hz(true), 1000);
+    for khz in 7102..=7105 {
+        assert!(app.continue_shortwave_scan(12, 2).unwrap());
+        assert_eq!(app.status().view.shortwave_khz, khz);
+        assert_eq!(app.status().view.shortwave_fraction_hz, 100);
+    }
+    assert!(!app.continue_shortwave_scan(42, 16).unwrap());
+    assert!(!app.status().view.shortwave_scan);
+    assert_eq!(app.status().view.shortwave_step_hz(false), 100);
+    tap(&mut app, &mut now, Key::Star);
+    tap(&mut app, &mut now, Key::Star);
+    assert_eq!(
+        app.status().view.shortwave_mode,
+        uv98_handheld_ui::controller::ShortwaveMode::Cw
+    );
+    assert_eq!(app.status().view.shortwave_bfo, -500);
+    app.set_shortwave_status(uv98_handheld_ui::controller::ShortwaveStatus::Listening {
+        part: 0x20,
+        rssi: 42,
+        snr: 16,
+    })
+    .unwrap();
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "75-SIMULATED-shortwave-cw.png",
+        milliseconds.get(),
+    )?);
+    app.set_shortwave_status(uv98_handheld_ui::controller::ShortwaveStatus::Fault(0x26))
+        .unwrap();
+    assert_eq!(
+        tap_request(&mut app, &mut now, Key::Menu),
+        Some(Request::RetryShortwave)
+    );
+    hold_request(&mut app, &mut now, Key::Hash);
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "76-SIMULATED-tuner-bands.png",
+        milliseconds.get(),
+    )?);
+    for _ in 0..6 {
+        tap(&mut app, &mut now, Key::Down);
+    }
+    tap(&mut app, &mut now, Key::Menu);
+    assert_eq!(app.status().view.shortwave_khz, 98100);
+    assert_eq!(
+        app.status().view.shortwave_mode,
+        uv98_handheld_ui::controller::ShortwaveMode::Fm
+    );
+    hold_request(&mut app, &mut now, Key::Digit4);
+    tap(&mut app, &mut now, Key::Up);
+    assert_eq!(app.status().view.shortwave_khz, 98150);
+    app.set_shortwave_status(uv98_handheld_ui::controller::ShortwaveStatus::Listening {
+        part: 0x20,
+        rssi: 52,
+        snr: 26,
+    })
+    .unwrap();
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "77-SIMULATED-tuner-fm.png",
+        milliseconds.get(),
+    )?);
+    tap(&mut app, &mut now, Key::Exit);
+    assert_eq!(app.status().view.screen, Screen::Home);
+    menu(&mut app, &mut now, MenuItem::Shortcuts);
+    tap(&mut app, &mut now, Key::Digit1);
+    assert_eq!(app.status().view.screen, Screen::ShortcutAction);
+    for _ in 0..uv98_handheld_ui::controller::SHORTCUT_ACTIONS.len() {
+        let action = uv98_handheld_ui::controller::SHORTCUT_ACTIONS
+            [app.status().view.binding_action_index as usize];
+        if action == ShortcutAction::Crossband {
+            break;
+        }
+        tap(&mut app, &mut now, Key::Down);
+    }
+    tap(&mut app, &mut now, Key::Menu);
+    assert_eq!(app.status().view.bindings[0], ShortcutAction::Crossband);
+    home(&mut app, &mut now);
+    hold_request(&mut app, &mut now, Key::Digit1);
+    assert_eq!(app.status().view.screen, Screen::Crossband);
+    let crossband_slot = app.status().view.active_slot;
+    hold_request(&mut app, &mut now, Key::Star);
+    assert_eq!(app.status().view.active_slot, crossband_slot);
+    app.set_crossband_probe(uv98_handheld_ui::controller::CrossbandProbe::Ready {
+        a_rx: 14_550_000,
+        b_rx: 43_350_000,
+        traffic: Some((Slot::B, 43_350_000, 14_550_000)),
+        live: true,
+    })
+    .unwrap();
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "78-SIMULATED-crossband.png",
+        milliseconds.get(),
+    )?);
+    tap(&mut app, &mut now, Key::Digit1);
+    assert_eq!(app.status().view.screen, Screen::Crossband);
+    hold_request(&mut app, &mut now, Key::Digit1);
+    assert_eq!(app.status().view.screen, Screen::Home);
+    hold_request(&mut app, &mut now, Key::Digit1);
+    assert_eq!(app.status().view.screen, Screen::Crossband);
+    tap(&mut app, &mut now, Key::Exit);
+    assert_eq!(app.status().view.screen, Screen::Home);
+    menu(&mut app, &mut now, MenuItem::Shortcuts);
+    tap(&mut app, &mut now, Key::Digit2);
+    assert_eq!(app.status().view.screen, Screen::ShortcutAction);
+    for _ in 0..uv98_handheld_ui::controller::SHORTCUT_ACTIONS.len() {
+        if uv98_handheld_ui::controller::SHORTCUT_ACTIONS
+            [app.status().view.binding_action_index as usize]
+            == ShortcutAction::DualWatch
+        {
+            break;
+        }
+        tap(&mut app, &mut now, Key::Down);
+    }
+    tap(&mut app, &mut now, Key::Menu);
+    assert_eq!(app.status().view.bindings[1], ShortcutAction::DualWatch);
+    home(&mut app, &mut now);
+    let selected = app.status().view.active_slot;
+    hold_request(&mut app, &mut now, Key::Digit2);
+    assert!(app.status().view.dual_watch);
+    app.set_watch_rx(Some(selected.other())).unwrap();
+    app.set_radio_view(RadioView {
+        state: RadioState::Receiving,
+        squelch_open: true,
+        rssi: Some(150),
+        ..RadioView::OFF
+    })
+    .unwrap();
+    assert_eq!(app.status().view.active_slot, selected);
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "79-SIMULATED-dual-watch.png",
+        milliseconds.get(),
+    )?);
+    hold_request(&mut app, &mut now, Key::Digit2);
+    assert!(!app.status().view.dual_watch);
+    assert_eq!(app.status().view.watch_rx, None);
+    hold_request(&mut app, &mut now, Key::Digit1);
+    assert_eq!(app.status().view.screen, Screen::Crossband);
+    app.set_crossband_probe(uv98_handheld_ui::controller::CrossbandProbe::Measuring {
+        a_rx: 14_550_000,
+        b_rx: 43_350_000,
+        rssi: 153,
+        status: 0x0402,
+        tone_match: Some(true),
+    })
+    .unwrap();
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "80-SIMULATED-rx-b.png",
+        milliseconds.get(),
+    )?);
+    tap(&mut app, &mut now, Key::Exit);
+    menu(&mut app, &mut now, MenuItem::GpsEnable);
+    tap(&mut app, &mut now, Key::Down);
+    tap(&mut app, &mut now, Key::Menu);
+    menu(&mut app, &mut now, MenuItem::Gps);
+    app.set_gps_status(uv98_handheld_ui::controller::GpsStatus {
+        valid: true,
+        latitude_e7: 490_583_333,
+        longitude_e7: -720_291_667,
+        satellites: 11,
+        age_seconds: 1,
+    })
+    .unwrap();
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "82-SIMULATED-gps.png",
+        milliseconds.get(),
+    )?);
+    menu(&mut app, &mut now, MenuItem::Aprs);
+    app.set_aprs_status(uv98_handheld_ui::controller::AprsStatus::Ready)
+        .unwrap();
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "83-SIMULATED-aprs.png",
+        milliseconds.get(),
+    )?);
+    assert_eq!(
+        tap_request(&mut app, &mut now, Key::Menu),
+        Some(Request::SendAprs)
+    );
+    menu(&mut app, &mut now, MenuItem::TxId);
+    digits(&mut app, &mut now, "01234");
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "84-SIMULATED-selectv-id.png",
+        milliseconds.get(),
+    )?);
+    tap(&mut app, &mut now, Key::Menu);
+    assert_eq!(app.status().view.tx_id, Some(1234));
+    home(&mut app, &mut now);
     let (memory, _display) = app.into_parts();
     assert!(!memory.selected, "NOR CS left selected");
     assert!(memory.reads.iter().any(|&(a, n)| a == 0 && n == 4096));
@@ -1943,7 +2453,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "queued frames drain in slices of at most four rows", "actual fixture zones filter channels without writes",
             "A/B contexts preserve independent channel/frequency selections", "long-digit assignment emits action without numeric entry",
             "scan requested and running remain distinct until explicit synthetic acknowledgement",
-            "scan-stop PTT cannot transmit until release and new press", "explicitly simulated RF metadata renders RX/TX, paired TX frequency, AM/HF and raw RSSI",
+            "scan-stop PTT cannot transmit until release and new press", "explicitly simulated RF metadata renders RX/TX, paired TX frequency, AM/FM badges and relative RSSI",
             "upper side assignment and normalized lower Aux16 input exercise distinct actions",
             "seven nested setting editors keep draft separate from current state and commit only on MENU",
             "setting EXIT cancels without RF request; SetPower/SetMonitor/SetModulation wait for explicit synthetic acknowledgement",

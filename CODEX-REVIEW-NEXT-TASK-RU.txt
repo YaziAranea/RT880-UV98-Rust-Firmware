@@ -1,0 +1,78 @@
+DeepSeek: следующий этап UV98, после независимого ревью r6b
+Дата 2026-11-10. Это подготовленное задание; доставка в чат пока не подтверждена.
+
+Рабочая папка:
+C:/Users/User/Documents/deepseek-harness/default-workspace/uv98-rust
+База: outputs/UV98-r6b-20261110-1, BIN SHA256
+bfdad0cb0dfe8b2aadd6c11d21b62082a541991c4821719dbe9c9dc1901a98be.
+Сначала прочитай AGENTS.md и FEATURES-NEXT-RU.txt. Затем отчёт ревью:
+C:/Users/User/Documents/Codex/2026-11-08/https-github-com-morluto-rea-https/outputs/DeepSeek-review-2026-11-10/REVIEW-RU.txt
+Рядом лежат regression-reproduction.log и r6b-regression-tests.patch.
+
+Владелец на работе. До отдельного возвращения к живым тестам: никаких COM,
+прошивки, RF/PTT/APRS или опроса станции. Не меняй stock/NOR/calibration/codeplug,
+не перезаписывай старые релизы. Работа только с кодом, mocks, host/ELF и simulator.
+Сохрани действующую channel-tx policy и обычный TOT; не возвращай debug EXO-гейты.
+Не публикуй ZIP с private fixture и не меняй видимость GitHub. Не трогай другие проекты.
+
+ЦЕЛЬ A — закрыть четыре подтверждённых дефекта r6b
+
+1. DS-01: Spectrum -> MENU -> EXIT закрывает overlay и продолжает sweep.
+   Устрани конфликт cancel_temporary / Event::Stop между UI и main.
+   Не исправляй простым удалением отмены для всех EXIT: EXIT графика, длинный EXIT,
+   PTT во время restore/restart обязаны отменять временный сеанс корректно.
+2. DS-02: Step draft не коммитится по PTT/select_slot; rollback не переносится
+   между A/B. Проверь как прямой select_slot, так и реальный route верхняя PTT=B.
+   MENU — commit, EXIT/смена режима/блокировка/выход в другой контекст — согласованная
+   отмена. Никаких висящих step_before после завершения редактирования.
+3. DS-03: rejected RestartSpectrum не публикует старые range/plot после очистки.
+   Проверь границы calband/route/offset и failed restore; не выдавай устаревшие данные
+   за новое окно. Успешный restore сохраняет полный RxRequest, без двойного retune.
+4. DS-04: меню Spectrum рисуется и работает при spectrum=None, до первой точки и
+   после отказа. Показать конкретную причину отказа; дать изменить окно и выйти.
+
+Первые две регрессии уже воспроизведены root в отдельной копии: исходный suite
+450 passed/1 ignored, два новых теста FAIL. Добавь их в свои исходники, затем
+интеграционные тесты UI/App -> runtime events. Не ослабляй смысл assertions.
+Сейчас isolated controller-тесты не проверяют управляющий код main — закрой этот
+пробел небольшим тестируемым coordinator/policy либо полноценным host harness.
+Нужны тесты всех четырёх дефектов, включая ошибки и порядок событий.
+
+ЦЕЛЬ B — закончить обещанный пользовательский сценарий спектра
+
+Home -> Spectrum -> временное Listen -> тот же Spectrum -> EXIT -> исходный A/B.
+Вход из MR и VFO, из A и B. Сохраняются канал/зона/частота/шаг/reverse, полный
+RX-план modulation/width/tone/options; cursor/window сохраняются при возврате.
+СЛУШАТЬ КУРСОР не должно незаметно заменять MR на VFO. Если нужен отдельный
+«Принять в VFO» — это явная отдельная команда, после успешного применения RF.
+Сделай небольшую явную state machine, bounded timeout/cancel и обработку отказов.
+PTT во время обзора/временного прослушивания останавливает временный режим;
+передача возможна лишь после корректного возврата, отпускания и нового края.
+Покрой interrupted restore/restart/listen и смену активного контекста.
+
+Уточни контракт span/step: сейчас span = step * intervals. Либо обеспечь отдельные
+физические значения с явным отказом неподдерживаемой сетки, либо честно переименуй
+управление и документацию. Никогда не уменьшай диапазон или сдвигай выбранную
+частоту молча. Курсор при смене окна сохраняет частоту, если она в новом окне;
+иначе явно ограничивается ближайшей допустимой точкой. PAN — после этих основ,
+если не увеличивает риск/объём незавершённых изменений.
+
+ВЫХОД И ПРОВЕРКА
+- Новые immutable outputs для r6c; явная версия кандидата на экране/About.
+- Полный сохранённый Rust log, счётчик результатов; fmt, relevant host regressions,
+  ARM build/layout, startup/decode checks, Python pipeline по build script.
+- Укажи fixed stack main из фактического ELF и wrapper; runtime maximum не измерен.
+  r6b main14560 + wrapper8; 39360 layout — не свободный runtime stack.
+- PNG: sweep; overlay; no-data overlay; rejected window; listen; return; A/B MR/VFO.
+  Не выдавай PNG за отзывчивость на железе. Измерение input/render/sweep/restore
+  оставить в вечернем checklist, раздельно.
+- Проверь source/archive SHA, preserved inputs, device_accessed=false,
+  flash_performed=false. Приватную fixture исключи из пакета для GitHub; локальный
+  пакет, если она нужна, пометь явно и не публикуй.
+- Обнови FEATURES-NEXT-RU, handoff и live checklist: DS-01..DS-04, статус Listen,
+  известные ограничения. Не закрывай AM/HF/GPS/APRS/DSP/PTT-B только по сборке.
+- Верни: изменённые файлы, решённые дефекты, точные результаты тестов, SHA BIN/ELF,
+  путь к отчёту и оставшиеся вопросы. Закончить можно офлайн; рацию не трогать.
+
+Если возникает неизвестное аппаратное соединение — зафиксируй его отдельно;
+не придумывай GPIO/регистры и не блокируй независимые host-исправления.

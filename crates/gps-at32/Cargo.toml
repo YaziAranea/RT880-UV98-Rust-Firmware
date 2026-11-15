@@ -1,0 +1,14 @@
+[package]
+name = "uv98-gps-at32"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Receive-only USART2 GPS with bounded interrupt buffering"
+
+[features]
+default = []
+hardware = ["dep:uv98-board-pins"]
+
+[dependencies]
+uv98-gps-nmea = { path = "../gps-nmea" }
+uv98-board-pins = { path = "../board-pins", optional = true }

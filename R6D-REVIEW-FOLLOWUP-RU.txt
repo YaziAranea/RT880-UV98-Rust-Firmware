@@ -1,0 +1,49 @@
+Codex review r6d — остаток DS-06, исправить отдельным кандидатом r6e.
+
+Проверено 2026-11-10: 473 PASS/1 ignored/0 failed в полном rust-host.log,
+14 команд verification.json exit 0; 66 PNG; BIN/ELF/ZIP SHA совпадают с отчётом.
+Независимый тест same-slot Step теперь PASS. Основные DS-05/DS-07 исправления
+соответствуют заявленным. Новые возможности в этот этап не добавлять.
+
+НОВЫЙ ВОСПРОИЗВЕДЁННЫЙ ОСТАТОК DS-06
+Из source.zip r6d (SHA c5973135c03004429872a19cb878fb8eb697b5592c629d789d2ffcde37339cf6)
+создана отдельная копия и добавлен regression:
+codex_pending_listen_keeps_confirmed_rf_bin_visible.
+Listen(bin40) -> DOWN до RF ACK -> текущий callback set_spectrum_listening(true).
+Результат FAILED: left41/right40. Слушается40, отображается и замораживается41.
+Root прогон: 1 PASS (прошлый Step) / 1 FAILED (новый Listen), exit101.
+Patch/log рядом с этим файлом: r6d-pending-listen-regression.patch и .log.
+
+Причина: freeze действует лишь после BeginListen. Пока Scope завершает RX-план,
+обычный input работает и двигает cursor. main затем устанавливает listening=true
+без восстановления подтверждённого bin. render продолжает брать частоту курсора.
+
+ЗАДАЧА
+1. Воспроизвести до изменения production. Исправить переход целиком:
+   запрос -> pending restore -> подтверждённые bin/frequency -> Listen.
+   Либо явно заморозить pending selection, либо атомарно закрепить подтверждённый
+   bin/frequency при BeginListen. Реальный callback из main должен использовать
+   ровно тот путь, который проверяют App/UI+Scope тесты. При смене API regression
+   перенести на новый production callback, а не удерживать устаревшую сигнатуру.
+2. Проверить стрелки и repeat между запросом/ACK; MENU/overlay; второй Listen/
+   Accept при pending; EXIT/PTT/fault до ACK. Позднее завершение отменённого
+   действия не включает Listen, не переписывает VFO и не запускает TX.
+   После входа displayed frequency == подтверждённый RxRequest.frequency_10hz;
+   индикатор аудио truthful. До ACK не показывать состоявшееся прослушивание.
+   После EXIT прежний полный RX-план восстанавливается, sweep возобновляется
+   только по существующему контракту; release/new-edge guard не ослаблять.
+3. Тесты должны выполнять новый реальный переход, не вручную выставлять
+   listening=true до ввода (так пропущена ошибка r6d). Сохранить все старые
+   DS regressions. Добавить кадр pending Listen и проверку confirmed после стрелок.
+4. После targeted PASS — один полный итоговый прогон, отдельный r6e каталог,
+   BIN/ELF/source ZIP и SHA, журнал и короткий R6E-REPORT-RU.md. Исходные r6d
+   артефакты не перезаписывать. Итоговые исходники должны совпасть с source.zip.
+5. Уточнить документы: r6d не прошёл независимую приёмку DS-06. В PROGRESS
+   раздел Open questions всё ещё содержит закрытые кодом утверждения про
+   unmapped sidekey / saved-effective power; заменить актуальными статусами,
+   отдельно сохранив отсутствие live-проверки. Не терять остальные требования.
+
+Никаких COM/радио/прошивки/RF. Калибровки/NOR/codeplug неизменны; fixture не
+публиковать. B asleep; DRX-01, AM, PAN, GPS/APRS/DSP не входят в эту поправку.
+После итогового отчёта остановиться. Если тест выявит другую связанную гонку,
+исправить и доказать тем же переходом, не маскировать новое состояние флагом.

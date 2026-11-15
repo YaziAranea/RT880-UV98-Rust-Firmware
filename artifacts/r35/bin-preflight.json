@@ -1,0 +1,43 @@
+{
+  "kind": "application_image_structural_preflight",
+  "schema_version": 1,
+  "source_format": "bin",
+  "source_sha256": "97e3d98257cacef6d64917d4b355719e1649b8570e8df8e9c9527edd39c7307d",
+  "checks_passed": true,
+  "hardware_qualified": false,
+  "recovery_verified": false,
+  "safe_to_flash_assessment": "not assessed; structural evidence only",
+  "profile": "related RT880 application at 0x08002800; 256 KiB flash / 48 KiB RAM",
+  "bin_load_base_is_assumed": true,
+  "application_start": "0x08002800",
+  "application_end_exclusive": "0x08040000",
+  "application_window_bytes": 251904,
+  "covered_bytes": 251904,
+  "address_span_bytes": 251904,
+  "source_covers_full_application_window": true,
+  "span_is_1024_byte_aligned": true,
+  "blocks_covering_span": 246,
+  "initial_sp": "0x200099C8",
+  "reset_vector": "0x08002AC1",
+  "start_linear_address": null,
+  "start_linear_equals_reset_vector": null,
+  "hex_record_count": 0,
+  "segments": [
+    {
+      "address": "0x08002800",
+      "bytes": 251904,
+      "sha256": "97e3d98257cacef6d64917d4b355719e1649b8570e8df8e9c9527edd39c7307d"
+    }
+  ],
+  "missing_intervals": [],
+  "missing_bytes": 0,
+  "padding_applied": false,
+  "image_output_created": false,
+  "limitations": [
+    "No exact UV98 hardware or bootloader identification is inferred from shape/hash.",
+    "No erase extent, write mapping, final ACK, or recovery path is verified.",
+    "No image is truncated, repaired, relocated, filled, or written by this tool.",
+    "Intel HEX start-linear metadata is not evidence of actual loader handoff.",
+    "Passing vector checks does not validate code, peripherals, clocks, or RF behavior."
+  ]
+}

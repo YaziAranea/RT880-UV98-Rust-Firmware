@@ -194,6 +194,16 @@ impl<R: Registers> Engine<R> {
     pub(crate) fn mute(&mut self, muted: bool) -> Result<(), ControlError> {
         self.set_level(6, !muted)
     }
+    pub(crate) fn shortwave_power(&mut self, enabled: bool) -> Result<(), ControlError> {
+        self.check(PINS[4], self.levels[4])?;
+        self.set_level(4, enabled)
+    }
+
+    pub(crate) fn relay_audio(&mut self, enabled: bool) -> Result<(), ControlError> {
+        self.check(PINS[3], self.levels[3])?;
+        self.set_level(3, enabled)
+    }
+
     pub(crate) fn backlights(&mut self, display: bool, keys: bool) -> Result<(), ControlError> {
         // Atomic per-pin writes cannot modify PTT, UART, LEDs or any RF gate.
         // Validate GPIO ownership even when a requested level is unchanged.
@@ -371,6 +381,28 @@ mod tests {
                 before[port][Register::Lock as usize / 4]
             );
         }
+    }
+
+    #[test]
+    fn shortwave_switches_only_tuner_supply_and_speaker_gate() {
+        let mock = Mock::new();
+        let mut engine = Engine::initialize(mock.clone()).unwrap();
+        mock.0.borrow_mut().events.clear();
+        engine.shortwave_power(true).unwrap();
+        engine.mute(false).unwrap();
+        engine.verify().unwrap();
+        engine.mute(true).unwrap();
+        engine.shortwave_power(false).unwrap();
+        engine.verify().unwrap();
+        assert_eq!(
+            mock.0.borrow().events,
+            [
+                Event::Set(Port::C, 1 << 5),
+                Event::Set(Port::F, 1 << 8),
+                Event::Clear(Port::F, 1 << 8),
+                Event::Clear(Port::C, 1 << 5),
+            ]
+        );
     }
 
     #[test]

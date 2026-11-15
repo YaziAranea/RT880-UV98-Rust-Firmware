@@ -107,7 +107,10 @@ def validate_source(text, manifest, profile):
     features = manifest.get("features", {})
     expected = {"default": [], TRIAL_FEATURE: [], CHANNEL_TX_FEATURE: []}
     legacy = {"default": [], TRIAL_FEATURE: []}
-    if features != expected and not (not dual and features in ({"default": []}, legacy)):
+    # A disabled diagnostics-only feature is allowed; TX/default aliases remain
+    # exact, and validate_inputs still checks the actual selected build features.
+    diagnostic = {**expected, "verbose-faults": []}
+    if features not in (expected, diagnostic) and not (not dual and features in ({"default": []}, legacy)):
         raise ValueError("Firmware feature declarations must be exact, empty, and RX by default")
     if expression == old_gate and TRIAL_FEATURE not in features:
         raise ValueError("Trial feature declaration is missing")
@@ -204,7 +207,7 @@ def validate_inputs(folder, root, profile="rx"):
             "hardware_qualified": False, "live_test_performed": False}
 
 
-def package(folder, root=ROOT, profile="rx"):
+def package(folder, root=ROOT, profile="rx", exclude_private_fixture=False):
     folder, root = folder.resolve(), root.resolve()
     runtime = validate_inputs(folder, root, profile)
     source_files = [p for name in ("crates", "apps", "firmware", "firmware-diagnostic", "firmware-uart-probe",
@@ -213,6 +216,9 @@ def package(folder, root=ROOT, profile="rx"):
                     if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"]
     source_files += [p for p in root.iterdir() if p.is_file() and
                      (p.suffix in (".toml", ".lock", ".ps1", ".txt") or p.name in (".gitignore", "AGENTS.md"))]
+    private_fixture = (root / "crates/calibration/tests/fixtures/uv98-plus-stock-1.16.bin").resolve()
+    if exclude_private_fixture:
+        source_files = [p for p in source_files if p.resolve() != private_fixture]
     capture_names = ("capture_boot_log.py", "test_capture_boot_log.py", "verify_boot_log_emulation.py", "BOOT-LOG-CAPTURE-RU.txt")
     capture_source = root / "tools/boot-log"
     if not capture_source.is_dir():
@@ -240,6 +246,7 @@ def package(folder, root=ROOT, profile="rx"):
                 "device_accessed": False, "flash_performed": False, "hardware_qualified": False,
                 "runtime": runtime,
                 "full_calibration_block_embedded_in_bin": False,
+                "private_calibration_fixture_included": not exclude_private_fixture,
                 "source_files": len(set(source_files)) + sum(capture_source / name not in source_files for name in capture_names),
                 "files": [{"path": p.relative_to(folder).as_posix(), "bytes": p.stat().st_size,
                            "sha256": digest(p)} for p in sorted(folder.rglob("*")) if p.is_file()]}
@@ -269,8 +276,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("build_directory", type=Path)
     parser.add_argument("--profile", choices=tuple(PROFILES), default="rx")
+    parser.add_argument("--exclude-private-fixture", action="store_true",
+                        help="omit the personal calibration fixture from source.zip and mark the manifest")
     args = parser.parse_args()
-    print(json.dumps(package(args.build_directory, profile=args.profile), indent=2))
+    print(json.dumps(package(args.build_directory, profile=args.profile,
+                             exclude_private_fixture=args.exclude_private_fixture), indent=2))
 
 
 if __name__ == "__main__":

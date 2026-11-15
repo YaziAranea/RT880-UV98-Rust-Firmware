@@ -7,14 +7,20 @@
 use uv98_calibration::Calibration;
 use uv98_rf_sequence::{self as sequence, Modulation, Plan, RxRequest, Step, TxRequest};
 
+pub mod capabilities;
+pub mod crossband;
 pub mod lighting;
 pub mod policy;
 pub mod ptt;
 pub mod scan;
 pub mod scope;
+pub mod shortwave;
+pub mod shortwave_scope;
+pub mod spectrum_flow;
 pub mod sweep;
 pub mod tx_policy;
 pub mod tx_trial;
+pub mod watch;
 
 pub const CONFIG_TIMEOUT_MS: u32 = 3000;
 pub const RECEIVE_SETTLE_MS: u32 = 10;
@@ -125,9 +131,12 @@ pub struct Runtime<I: Io> {
     audio_open: bool,
     am_agc: sequence::am_agc::State,
     am_gain_word: Option<u16>,
+    am_gain_at: Option<u32>,
+    am_carrier_at: Option<u32>,
     sweep_session: Option<sweep::Session>,
     indicator_state: Option<(bool, bool)>,
     backlight_state: Option<(bool, bool)>,
+    signaling_baseline: Option<(u16, u16)>,
 }
 
 impl<I: Io> Runtime<I> {
@@ -147,9 +156,12 @@ impl<I: Io> Runtime<I> {
             audio_open: false,
             am_agc: sequence::am_agc::State::new(),
             am_gain_word: None,
+            am_gain_at: None,
+            am_carrier_at: None,
             sweep_session: None,
             indicator_state: None,
             backlight_state: None,
+            signaling_baseline: None,
         }
     }
     pub fn state(&self) -> State {
@@ -252,8 +264,23 @@ impl<I: Io> Runtime<I> {
         } else {
             self.indicator_state = Some((false, false));
         }
+        if let Some((reg50, reg70)) = self.signaling_baseline.take() {
+            // PA/gates/DSP are already requested off. A release, TOT or fault
+            // may bypass the foreground tone-session restore; never carry an
+            // enabled Tone2 into RX (the stock option helper preserves it).
+            // Keep gain/filter bits but clear both generator enables and mute.
+            // Bit7 groups these two independent modulation cleanup writes.
+            if self.io.write(0x70, reg70 & !0x8080).is_err() {
+                errors |= 1 << 7;
+            }
+            if self.io.write(0x50, reg50 & !0x8000).is_err() {
+                errors |= 1 << 7;
+            }
+        }
         self.audio_open = false;
         self.am_gain_word = None;
+        self.am_gain_at = None;
+        self.am_carrier_at = None;
         self.sweep_session = None;
         self.plan = None;
         self.wait = None;
@@ -305,6 +332,57 @@ impl<I: Io> Runtime<I> {
             }
         }
         Ok(())
+    }
+
+    /// Restricted tone-generator access during an already-authorized TX.
+    /// This cannot tune RF, select a route, alter power or start transmission.
+    /// The caller restores saved audio registers before normal TX shutdown.
+    pub fn signaling_read(&mut self, register: u8) -> Result<u16, Fault<I::Error>> {
+        if self.state != State::Transmitting
+            || !matches!(register, 0x47 | 0x50 | 0x70 | 0x71 | 0x72)
+        {
+            return Err(self.reject(Error::State));
+        }
+        let checked = self.io.verify_control();
+        self.io_result(checked)?;
+        self.read(register)
+    }
+
+    pub fn signaling_write(&mut self, register: u8, value: u16) -> Result<(), Fault<I::Error>> {
+        if self.state != State::Transmitting
+            || !matches!(register, 0x47 | 0x50 | 0x70 | 0x71 | 0x72)
+        {
+            return Err(self.reject(Error::State));
+        }
+        let checked = self.io.verify_control();
+        self.io_result(checked)?;
+        if self.signaling_baseline.is_none() {
+            let reg50 = self.read(0x50)?;
+            let reg70 = self.read(0x70)?;
+            self.signaling_baseline = Some((reg50, reg70));
+        }
+        self.write(register, value)?;
+        let observed = self.read(register)?;
+        if observed != value {
+            return Err(self.fail(Error::Readback {
+                register,
+                expected: value,
+                observed,
+            }));
+        }
+        Ok(())
+    }
+
+    /// REG30 bit 1 controls the microphone ADC. Keep RF/TX enable bits intact
+    /// while replacing speech with a tone, then restore normal speech input.
+    pub fn signaling_microphone(&mut self, enabled: bool) -> Result<(), Fault<I::Error>> {
+        if self.state != State::Transmitting {
+            return Err(self.reject(Error::State));
+        }
+        let checked = self.io.verify_control();
+        self.io_result(checked)?;
+        let word = self.read(0x30)?;
+        self.write(0x30, (word & !2) | if enabled { 2 } else { 0 })
     }
     fn gates(&mut self, route: u8) -> Result<(), Fault<I::Error>> {
         let result = self.io.hf_gates(false, false);
@@ -366,6 +444,8 @@ impl<I: Io> Runtime<I> {
             sequence::receive(calibration, request).map_err(|e| self.reject(Error::Request(e)))?;
         self.am_agc = sequence::am_agc::State::new();
         self.am_gain_word = None;
+        self.am_gain_at = None;
+        self.am_carrier_at = None;
         self.start(plan, Target::Receive, now)
     }
     /// A fresh PTT edge, channel permission and calibration identity must be
@@ -548,6 +628,13 @@ impl<I: Io> Runtime<I> {
             status,
         )?;
         if audio.modulation == Modulation::Am && result.audio_open {
+            // Count elapsed time during the hold even if LCD or NOR work
+            // delayed this sample. Still issue at most one gain update.
+            if let (Some(now), Some(previous)) = (self.last_now, self.am_gain_at) {
+                let skipped = now.wrapping_sub(previous).saturating_sub(1).min(250) as u8;
+                self.am_agc.hold = self.am_agc.hold.saturating_sub(skipped);
+            }
+            self.am_gain_at = self.last_now;
             let update = self
                 .am_agc
                 .sample(result.rssi)
@@ -579,7 +666,21 @@ impl<I: Io> Runtime<I> {
         }
         let rssi = self.read(0x67)? & 0x01ff;
         let squelch_open = audio.squelch == 0 || status & 2 != 0;
+        // AM envelope dips can briefly close the noise gate between
+        // syllables. Extend only a real carrier on a tone-free AM channel.
+        let am_hang = if audio.modulation == Modulation::Am && !audio.tone_required {
+            if squelch_open {
+                self.am_carrier_at = self.last_now;
+            }
+            self.last_now
+                .zip(self.am_carrier_at)
+                .is_some_and(|(now, seen)| now.wrapping_sub(seen) < 120)
+        } else {
+            self.am_carrier_at = None;
+            false
+        };
         let open = audio.monitor
+            || am_hang
             || (squelch_open && (!audio.tone_required || tone_detected == Some(true)));
         if open != self.audio_open {
             let result = self.io.mute(true);

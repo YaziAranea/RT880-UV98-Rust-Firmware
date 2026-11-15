@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/gps-nmea", "crates/sidekeys-at32", "crates/rf-sequence", "crates/radio-runtime", "crates/handheld-ui", "crates/handheld-app", "apps/handheld-image-sim", "crates/calibration", "crates/calibration-edit", "crates/band-plan", "crates/rf-bus", "crates/receive", "crates/rf-at32", "crates/stock-model", "crates/codeplug", "crates/cps-core", "crates/radio-read", "crates/nor-read", "crates/board-at32", "crates/display", "crates/keys", "crates/diagnostic", "crates/board-pins", "crates/clock-profile", "crates/lcd-at32", "crates/board-policy", "crates/board-diagnostic", "crates/keyscan-at32", "crates/ui-core", "crates/spectrum", "crates/radio-ui", "apps/cps", "apps/diag-sim", "apps/radio-sim", "firmware", "firmware-diagnostic", "firmware-uart-probe", "crates/boot-log", "crates/diag-startup", "crates/diag-quiesce", "crates/diag-app", "apps/diag-image-sim"]
+members = ["crates/signaling", "crates/gps-at32", "crates/gps-nmea", "crates/sidekeys-at32", "crates/rf-sequence", "crates/radio-runtime", "crates/handheld-ui", "crates/handheld-app", "apps/handheld-image-sim", "crates/calibration", "crates/calibration-edit", "crates/band-plan", "crates/rf-bus", "crates/receive", "crates/rf-at32", "crates/stock-model", "crates/codeplug", "crates/cps-core", "crates/radio-read", "crates/nor-read", "crates/board-at32", "crates/display", "crates/keys", "crates/diagnostic", "crates/board-pins", "crates/clock-profile", "crates/lcd-at32", "crates/board-policy", "crates/board-diagnostic", "crates/keyscan-at32", "crates/ui-core", "crates/spectrum", "crates/radio-ui", "apps/cps", "apps/diag-sim", "apps/radio-sim", "firmware", "firmware-diagnostic", "firmware-uart-probe", "crates/boot-log", "crates/diag-startup", "crates/diag-quiesce", "crates/diag-app", "apps/diag-image-sim"]
 default-members = ["crates/calibration", "crates/calibration-edit", "crates/band-plan", "crates/rf-bus", "crates/receive", "crates/rf-at32", "crates/stock-model", "crates/codeplug", "crates/cps-core", "crates/radio-read", "crates/nor-read", "crates/board-at32", "crates/display", "crates/keys", "crates/diagnostic", "crates/board-pins", "crates/clock-profile", "crates/lcd-at32", "crates/board-policy", "crates/board-diagnostic", "crates/keyscan-at32", "crates/ui-core", "crates/spectrum", "crates/radio-ui"]
 resolver = "2"
 
@@ -7,7 +7,7 @@ resolver = "2"
 codegen-units = 1
 debug = 2
 lto = true
-opt-level = "s"
+opt-level = "z"
 panic = "abort"
 
 [profile.dev]
@@ -22,7 +22,7 @@ strip = "symbols"
 # Row rendering is CPU-bound on the 48 MHz MCU; preserve size-oriented defaults
 # for the other packages and verify image/stack limits in the build pipeline.
 [profile.release.package.uv98-handheld-ui]
-opt-level = 3
+opt-level = 2
 
 [profile.release.package.uv98-display]
 opt-level = 3

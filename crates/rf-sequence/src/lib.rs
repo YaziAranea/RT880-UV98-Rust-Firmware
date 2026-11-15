@@ -3,7 +3,7 @@
 //! Immutable requests from hash-pinned RT880 1.16 Thumb, not hardware proof.
 //! The extra mute/gate-off prefixes are new policy. Every RMW needs a fresh read.
 //! Executors must enforce ownership, PTT, deadlines, fault shutdown and settling.
-//! Chip B is not enabled. No storage writes, allocation, MMIO or transport.
+//! A relay setup describes chip B without enabling its PA. No storage writes, allocation, MMIO or transport.
 
 use uv98_band_plan::{select_routes, SelectorMode};
 use uv98_calibration::{Calibration, Filter, Table};
@@ -481,4 +481,138 @@ pub fn transmit(calibration: &Calibration<'_>, request: TxRequest) -> Result<Pla
     plan.push(Step::TxGates(route));
     plan.write(0x36, rf::power_register_04f0c(u32::from(power)));
     Ok(plan)
+}
+
+/// B frequency words while the chip remains asleep. No PLL or PA enable.
+pub fn secondary_frequency(
+    calibration: &Calibration<'_>,
+    frequency_10hz: u32,
+) -> Result<[u16; 2], Error> {
+    let plan = uv98_receive::FrequencyPlan::new(calibration, uv98_receive::Chip::B, frequency_10hz)
+        .map_err(Error::Receive)?;
+    let words = plan.frequency_words();
+    Ok([words.reg38, words.reg39])
+}
+
+/// Prepare the secondary RF chip for a diagnostic receive measurement.
+pub fn secondary_receive(calibration: &Calibration<'_>, request: RxRequest) -> Result<Plan, Error> {
+    if !matches!(request.frequency_10hz, 13_600_000..=17_400_000 | 40_000_000..=48_000_000) {
+        return Err(Error::UnsupportedFrequency(request.frequency_10hz));
+    }
+    let [reg38, reg39] = secondary_frequency(calibration, request.frequency_10hz)?;
+    let primary = receive(calibration, request)?;
+    let mut plan = Plan::new();
+    plan.write(0x00, 0x8000);
+    plan.push(Step::DelayMs(10));
+    plan.write(0x00, 0);
+    plan.write(0x37, 0x1d0f);
+    plan.write(0x33, 0);
+    plan.write(0x36, 0x007f);
+    plan.write(0x47, 0x6040);
+    gain(&mut plan);
+    plan.write(0x38, reg38);
+    plan.write(0x39, reg39);
+    // Reuse the validated bandwidth, squelch and tone settings. Do not
+    // copy primary antenna, speaker, GPIO or PA operations.
+    for &step in primary.operations() {
+        if matches!(
+            step,
+            Step::WriteA {
+                register: 0x07 | 0x08 | 0x43 | 0x4d | 0x4e | 0x4f | 0x51 | 0x78,
+                ..
+            }
+        ) {
+            plan.push(step);
+        }
+    }
+    plan.write(0x37, 0x1f0f);
+    plan.push(Step::DelayMs(10));
+    plan.write(0x30, 0x0200);
+    plan.write(0x30, 0xbff1);
+    Ok(plan)
+}
+
+/// Prepared B transmit path. External V/U gating and B33/B36 enable are
+/// deliberately separate so the owner can stop both PA paths on any error.
+pub struct RelayTransmit {
+    pub setup: Plan,
+    pub route: u8,
+    pub power: u16,
+}
+
+pub fn relay_transmit(
+    calibration: &Calibration<'_>,
+    request: TxRequest,
+) -> Result<RelayTransmit, Error> {
+    let route = match request.frequency_10hz {
+        13_600_000..=17_400_000 => 3,
+        40_000_000..=48_000_000 => 4,
+        value => return Err(Error::UnsupportedFrequency(value)),
+    };
+    let freq = uv98_receive::FrequencyPlan::new(
+        calibration,
+        uv98_receive::Chip::B,
+        request.frequency_10hz,
+    )
+    .map_err(Error::Receive)?;
+    let selection = freq.selection();
+    let band = calibration
+        .band(selection.band_index())
+        .map_err(|_| Error::CalibrationPoint)?;
+    let low = band
+        .point_raw(Table::PowerLow, selection.table_index())
+        .filter(|value| (1..=63).contains(value))
+        .ok_or(Error::CalibrationPoint)?;
+    let mut setup = Plan::new();
+    setup.write(0x00, 0x8000);
+    setup.push(Step::DelayMs(10));
+    setup.write(0x00, 0);
+    setup.write(0x37, 0x1d0f);
+    gain(&mut setup);
+    for (reg, value) in [
+        (0x33, 0),
+        (0x34, 0),
+        (0x35, 0),
+        (0x36, 0x007f),
+        (0x1e, 0x4c58),
+        (0x1f, 0xa656),
+        (0x3e, 0xa037),
+        (0x26, 0x13a0),
+        (0x47, 0x6140),
+        (0x28, 0x6b38),
+        (0x29, 0xab40),
+        (0x38, freq.frequency_words().reg38),
+        (0x39, freq.frequency_words().reg39),
+    ] {
+        setup.write(reg, value);
+    }
+    setup.update(0x31, 0xfff7, 0);
+    option(&mut setup, 0);
+    setup.filter(
+        FilterField::Tx3k,
+        calibration.general().filter_raw(Filter::Tx3k),
+    );
+    setup.filter(
+        FilterField::Tx300,
+        calibration.general().filter_raw(Filter::Tx300),
+    );
+    setup.append(&tone(request.tone, request.tone_mode)?);
+    setup.write(0x7d, rf::mic_register_04e90(u32::from(request.mic_gain)));
+    setup.write(
+        0x40,
+        rf::deviation_at_040a8(
+            u8::from(request.width == Width::Narrow),
+            band.wide().tx_deviation_raw(),
+            band.narrow().tx_deviation_raw(),
+        ),
+    );
+    setup.push(Step::DelayMs(10));
+    setup.write(0x52, 0x028f);
+    setup.write(0x30, 0x0200);
+    setup.write(0x30, 0xc1fe);
+    Ok(RelayTransmit {
+        setup,
+        route,
+        power: rf::power_register_04f0c(u32::from(low)),
+    })
 }

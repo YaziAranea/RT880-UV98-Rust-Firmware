@@ -9,6 +9,9 @@
 //! fabricated by time passing. See research/scanner/spec.txt.
 
 pub mod compact;
+pub mod window;
+
+pub use window::{Window, WindowError};
 
 /// Software/display capacity, not a supported RF bandwidth or frequency range.
 pub const MAX_BINS: usize = 240;

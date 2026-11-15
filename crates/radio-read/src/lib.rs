@@ -1,7 +1,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
-//! Bounded stock-protocol reading, not a firmware flasher or full-radio backup.
+//! Bounded stock-protocol reading of 4 MiB; MCU Flash and bootloader are outside its scope.
 //!
-//! The only transmitted packets are CONNECT, 0x52 READ for the fixed regions,
+//! The only transmitted packets are CONNECT, 0x52 READ for blocks 0..4095,
 //! and END after an acknowledged session. END may commit preexisting dirty
 //! state inside stock firmware: an allowlisted transcript is not proof of zero
 //! physical writes. No write/erase/test-mode/bootloader packet is implemented.
@@ -34,12 +34,13 @@ pub enum Region {
     Channels,
     Fm,
     Zones,
+    Storage,
 }
 
 impl Region {
     pub const fn first_block(self) -> u16 {
         match self {
-            Self::Calibration => 0,
+            Self::Calibration | Self::Storage => 0,
             Self::Cfg => 8,
             Self::Channels => 16,
             Self::Fm => 856,
@@ -51,6 +52,7 @@ impl Region {
             Self::Calibration | Self::Cfg | Self::Fm => 4,
             Self::Channels => 48,
             Self::Zones => 128,
+            Self::Storage => 4096,
         }
     }
 }
@@ -60,6 +62,7 @@ pub enum ReadPlan {
     Calibration,
     Cps,
     CpsAndCalibration,
+    FullStorage,
 }
 
 impl ReadPlan {
@@ -69,6 +72,15 @@ impl ReadPlan {
             Self::Calibration => &[Calibration],
             Self::Cps => &[Cfg, Channels, Zones, Fm],
             Self::CpsAndCalibration => &[Calibration, Cfg, Channels, Zones, Fm],
+            Self::FullStorage => &[Storage],
+        }
+    }
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Calibration => "calibration",
+            Self::Cps => "cps",
+            Self::CpsAndCalibration => "cps_and_calibration",
+            Self::FullStorage => "stock_protocol_4_mib",
         }
     }
     pub fn block_count(self) -> usize {
@@ -188,6 +200,16 @@ impl ReadSnapshot {
             .iter()
             .find(|section| section.region == region)
             .map(|section| section.bytes.as_slice())
+            .or_else(|| {
+                if region == Region::Storage {
+                    return None;
+                }
+                let storage = self.sections.iter().find(|s| s.region == Region::Storage)?;
+                let start = usize::from(region.first_block()) * BLOCK_SIZE;
+                storage
+                    .bytes
+                    .get(start..start + region.block_count() * BLOCK_SIZE)
+            })
     }
     pub fn passes(&self) -> &[PassCapture] {
         &self.passes
@@ -331,7 +353,7 @@ pub trait Transport {
 }
 
 fn allowed_block(block: u16) -> bool {
-    matches!(block, 0..=3 | 8..=11 | 16..=63 | 112..=239 | 856..=859)
+    block < 4096
 }
 
 pub fn is_allowed_packet(packet: &[u8]) -> bool {

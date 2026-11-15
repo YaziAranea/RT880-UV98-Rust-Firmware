@@ -121,6 +121,50 @@ impl<A: RegisterIo> RadioIo<A> {
         Self { primary, control }
     }
 }
+
+impl<A: RegisterIo> crate::Runtime<RadioIo<A>> {
+    /// Preserve the active RX path on A while routing its audio to B.
+    pub fn relay_route(&mut self, route: Option<u8>) -> Result<(), crate::Fault<Error<A::Error>>> {
+        if let Some(route) = route {
+            if self.state() != crate::State::Receiving || !matches!(route, 3 | 4) {
+                return Err(self.reject(crate::Error::State));
+            }
+            self.gates(route)?;
+            let result = self
+                .io
+                .control
+                .engine
+                .relay_audio(true)
+                .map_err(Error::Control);
+            self.io_result(result)
+        } else {
+            self.gates(0)?;
+            let result = self
+                .io
+                .control
+                .engine
+                .relay_audio(false)
+                .map_err(Error::Control);
+            self.io_result(result)
+        }
+    }
+
+    /// PC5 and PF8 stay with the existing shared GPIO owner.
+    pub fn shortwave_power(&mut self, enabled: bool) -> Result<(), ControlError> {
+        if enabled && self.state() != crate::State::Off {
+            return Err(ControlError::Configuration);
+        }
+        self.io.control.engine.shortwave_power(enabled)
+    }
+
+    pub fn shortwave_audio(&mut self, enabled: bool) -> Result<(), ControlError> {
+        if enabled && self.state() != crate::State::Off {
+            return Err(ControlError::Configuration);
+        }
+        self.io.control.mute(!enabled)
+    }
+}
+
 impl<A: RegisterIo> super::Io for RadioIo<A> {
     type Error = Error<A::Error>;
     fn read(&mut self, r: u8) -> Result<u16, Self::Error> {

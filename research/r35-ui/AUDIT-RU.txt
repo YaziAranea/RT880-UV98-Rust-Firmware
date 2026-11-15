@@ -1,0 +1,64 @@
+R35 UI audit / interfaces — 2026-11-15
+
+Actual defects corrected
+- CTCSS setting page used setting_options(TxTone).len()==0 in validate(),
+  rejecting all51 valid tone selections. Validation now uses choice_count().
+- About reported0.1.8-r27 while header showedR33. Both now identifyR35.
+- Long EXIT on new GPS/APRS/ID pages goes Home; short EXIT cancels/back.
+- HF AM long1/2 processing does not swallow SSB BFO1/2/3 controls.
+
+Frequency font
+Chakra Petch SemiBold, Cadson Demak, SIL OFL1.1. Source and hashes are in
+crates/handheld-ui/fonts/README.txt. Both physicalLCD and simulator use the
+same4368-byte 2bpp subset, all digits26x48. No runtime rasterizer or new heap.
+Technical square corners replace Rajdhani. Small labels retain5x7 Cyrillic.
+Astryx reviewed: https://github.com/meta/astryx . React19/StyleX cannot run
+on this MCU; no dependency imported. Applied consistent rows, contrast,
+typographic hierarchy. No claims of transplanting Astryx components.
+
+HF screen (SCANNING -> HF / RADIO)
+Long0 toggles measured32-bin RSSI sweep +16-row waterfall. Not FFT, audio
+is interrupted during the sweep; EXIT restores selected tuning. Reopen HF
+starts listening. Changing band cancels scope. Arrows move selected tuning.
+Long1 AM filter6/3/1kHz; long2 AM soft mute. SSB retains long1/3 BFO adjust,
+long2 BFO reset. Bottom side key remains tuning-step selector.
+Ring belongs to App and is borrowed by Model, not copied into each View.
+Only a fully measured row enters history; grid reset discards old samples.
+
+Menu / volatile settings
+MODE -> BAND PRESET: VHF145.500 FM / UHF433.500 FM /
+CB27.135 AM step10kHz / 800-band850.000 FM step25kHz. This selects a
+frequency, not an independent forced relay bit. Root RF routing owns relay.
+GPS/APRS: GPS power, baud, status, manual APRS. Callsign and active TX
+frequency displayed on beacon page; unsupported modem distinct from nofix.
+SYSTEM / TX: held-TX keypadDTMF enabled, end-TX Off/ZVEI1/CCIR, five-digit ID.
+The button diagnostic item was removed from System. Diagnostic screen remains
+available via assignable shortcut Keys (default long8), not a separate menu item.
+No ID by default. ID editor accepts exactly5 digits; #clears; MENU saves;
+EXIT cancels. Numeric5-tone does not pretend to transmit arbitrary names.
+
+Root integration contract
+render::Model.shortwave_scope: Option<&render::ShortwaveScope>
+ShortwaveScope::new(), reset(first_hz,step_hz), sample(bin,rssi,snr,complete)
+Controller::set_gps_status(GpsStatus), set_aprs_status(AprsStatus),
+set_aprs_identity([u8;6],ssid). Root qualifies modem/radio/GPS before TX.
+Request::SendAprs only explicitMENU (Ready/Sent/Failed permits retry).
+View: gps_enabled/gps_baud, dtmf_enabled, tx_tail, tx_id:Option<u32>,
+shortwave_scope/shortwave_filter/shortwave_soft_mute. RAM-only settings.
+
+Verification
+Added focused CTCSS+GPS final-page rendering and HF history reset tests.
+Simulator added81 HFwaterfall,82 GPS,83 APRS,84 ID; synthetic data clearly
+markedSIMULATED. Root owns Cargo/build and real output verification.
+No radio access or hardware reception/transmission claims by this agent.
+
+ROM audit: parent selects the final build optimization profile. Shared text/rectangle/digit/row primitives
+marked inline(never) to avoid duplication inside the giant per-row renderer.
+No algorithm/row-budget/pixel geometry change; actual size measured by root.
+
+Simulator follow-up2026-11-16: reproduced exit-1073740791 as Rust assertion
+"EXIT did not cancel temporary operations" immediately after81. The simulator
+helper omitted HF local EXIT: scope/scan/entry/band can close while remaining
+in HF reception. Helper now recognizes those cases; existing after81 checks
+still require Shortwave screen and scopeoff. This was a host expectation defect,
+not evidence of an MCU crash. Root rebuilds/reruns the corrected executable.

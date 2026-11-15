@@ -1,9 +1,9 @@
 [package]
 name = "uv98-cps"
-version = "0.3.1"
+version = "0.5.0"
 edition = "2021"
 publish = false
-description = "UV98/RT880 CPS editor with bounded read-only serial snapshots"
+description = "UV98/RT880 CPS editor, calibration snapshots and verified firmware packages"
 
 [dependencies]
 uv98-calibration = { path = "../../crates/calibration" }
@@ -14,5 +14,9 @@ encoding_rs = "=0.8.42"
 uv98-codeplug = { path = "../../crates/codeplug" }
 uv98-cps-core = { path = "../../crates/cps-core" }
 uv98-radio-read = { path = "../../crates/radio-read" }
+uv98-signaling = { path = "../../crates/signaling" }
 sha2 = "=0.10.9"
 serde_json = "=1.0.154"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Devices_Communication", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_Security"] }

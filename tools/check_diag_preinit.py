@@ -173,9 +173,11 @@ def run_case(name, image, start, instructions, overrides, expect_return, expecte
              expected_codes=None, expected_divisor=69, serial_delay=0,
              serial_block_after=None, expected_partial_bytes=0, early_bootstrap=True,
              hick_ready=True, switch_ready=True, gpio_clocks_latch=True,
-             expected_rf_shutdown=None, gpio_stuck_high=None):
+             expected_rf_shutdown=None, gpio_stuck_high=None, expected_b_shutdown=None):
     if expected_rf_shutdown is None:
         expected_rf_shutdown = expect_return or terminal_low
+    if expected_b_shutdown is None:
+        expected_b_shutdown = expected_rf_shutdown
     machine = unicorn.Uc(unicorn.UC_ARCH_ARM, unicorn.UC_MODE_THUMB | unicorn.UC_MODE_MCLASS)
     machine.ctl_set_cpu_model(arm.UC_CPU_ARM_CORTEX_M4)
     for address, size in ((FLASH_BASE, FLASH_SIZE), (0x1FFFF000, 0x1000),
@@ -218,15 +220,22 @@ def run_case(name, image, start, instructions, overrides, expect_return, expecte
     writes, reads, trace, serial_bytes, rf_gpio_writes, id_reads = [], [], [], [], [], []
     serial_wait = 0
     result = {"termination": "instruction_limit"}
-    rf_frames, rf_bits, rf_frame_end_writes = [], None, []
+    rf_frames, rf_frame_end_writes = {0: [], 1: []}, []
+    rf_bits, rf_selected = None, None
+    rf_buses = [(GPIO[0], 0x100, GPIO[3], 0x40, 0x200),
+                (GPIO[2], 0x80, GPIO[2], 0x100, 0x40)]
+    expected_shutdown = (expected_rf_shutdown, expected_b_shutdown)
     # Deliberately active internal PA/TX requests. This is a wire decoder/model,
     # not a physical BK4802 measurement or proof the device accepted writes.
-    rf_chip = {0x33: 0x00FF, 0x36: 0xFFFF, 0x30: 0xFFFF, 0x37: 0xFFFF}
+    rf_chip = [{0x33: 0x00FF, 0x36: 0xFFFF, 0x30: 0xFFFF, 0x37: 0xFFFF} for _ in rf_buses]
     last_rf_data, last_rf_high = None, None
     owned_pins = dict(GPIO_OWNED_PINS)
     if expected_rf_shutdown or not early_bootstrap or gpio_stuck_high:
         owned_pins[GPIO[2]] |= 0x0200
         owned_pins[GPIO[3]] |= 0x0040
+
+    if expected_b_shutdown or gpio_stuck_high or not early_bootstrap or expected_rf_shutdown:
+        owned_pins[GPIO[2]] |= 0x0140
 
     def code_hook(uc, address, size, _):
         if address == RETURN_PC:
@@ -241,7 +250,7 @@ def run_case(name, image, start, instructions, overrides, expect_return, expecte
             uc.emu_stop()
 
     def memory_hook(uc, access, address, size, value, _):
-        nonlocal serial_wait, rf_bits, last_rf_data, last_rf_high
+        nonlocal serial_wait, rf_bits, rf_selected, last_rf_data, last_rf_high
         def read32(at):
             return int.from_bytes(uc.mem_read(at, 4), "little")
         require(not 0x20000000 <= address < 0x40000000, f"{name}: SRAM access {address:#x}")
@@ -296,9 +305,10 @@ def run_case(name, image, start, instructions, overrides, expect_return, expecte
                 require(read32(CRM + 0x40) & 0xC000 == 0 and read32(CRM + 0x20) & 0xC000 == 0xC000,
                         f"{name}: changed clock before gating/resetting SPI2/3")
             if address == UART + 4:
-                if expected_rf_shutdown:
-                    require(rf_frames == RF_A_SHUTDOWN,
-                            f"{name}: UART byte precedes all four guarded RF-A shutdown frames")
+                for chip, expected in enumerate(expected_shutdown):
+                    if expected:
+                        require(rf_frames[chip] == RF_A_SHUTDOWN,
+                                f"{name}: UART byte precedes guarded RF shutdown")
                 status = int.from_bytes(uc.mem_read(UART, 4), "little")
                 require(status & 0x80 != 0, f"{name}: wrote UART DT before TDBE")
                 require(int.from_bytes(uc.mem_read(UART + 12, 4), "little") == 0x2008,
@@ -329,42 +339,44 @@ def run_case(name, image, start, instructions, overrides, expect_return, expecte
                     new = current | value if address == port + 0x18 else current & ~value
                     if gpio_stuck_high and port == gpio_stuck_high[0]:
                         new |= gpio_stuck_high[1]
-                    if port == GPIO[0] and value & 0x100:
-                        if address == port + 0x28:
-                            require(expected_rf_shutdown, f"{name}: RF-A selected on a rejected/startup path")
-                            require(read32(PID) in (0x700A3243, 0x700A3246)
-                                    and read32(SERIES) & 0xFF07 == 0x1200
-                                    and read32(FLASH_KIB) & 0xFFFF == 256,
-                                    f"{name}: RF frame before exact identity")
-                            require(read32(CRM + 0x30) & 0x27 == 0x27,
-                                    f"{name}: RF frame without GPIO clocks")
-                            for gate_port, mask in RF_LOW_PINS.items():
-                                require(read32(gate_port + 0x14) & mask == 0,
-                                        f"{name}: RF frame preceded MCU gate-low request")
-                            require(rf_bits is None, f"{name}: nested RF-A select")
-                            rf_bits, last_rf_data, last_rf_high = [], None, None
-                        elif rf_bits is not None:
-                            require(len(rf_bits) == 24, f"{name}: RF frame has {len(rf_bits)} edges")
-                            require(last_rf_high is not None and len(trace) - last_rf_high >= 1000,
-                                    f"{name}: last RF clock high phase too short in instruction model")
-                            frame = 0
-                            for bit in rf_bits:
-                                frame = (frame << 1) | bit
-                            rf_frames.append(frame)
-                            rf_chip[frame >> 16] = frame & 0xFFFF
-                            rf_frame_end_writes.append(len(writes))
-                            rf_bits = None
-                    if port == GPIO[2] and value & 0x200 and rf_bits is not None:
-                        last_rf_data = len(trace)
-                    if port == GPIO[3] and value & 0x40 and rf_bits is not None:
-                        if address == port + 0x18 and current & 0x40 == 0 and new & 0x40:
-                            require(last_rf_data is not None and len(trace) - last_rf_data >= 1000,
-                                    f"{name}: RF DATA setup lacks bounded500-iteration phase")
-                            rf_bits.append(1 if read32(GPIO[2] + 0x14) & 0x200 else 0)
-                            last_rf_high = len(trace)
-                        elif address == port + 0x28 and current & 0x40 and new & 0x40 == 0:
-                            require(last_rf_high is not None and len(trace) - last_rf_high >= 1000,
-                                    f"{name}: RF clock high phase lacks bounded delay")
+                    for chip, (cs_port, cs_mask, clock_port, clock_mask, data_mask) in enumerate(rf_buses):
+                        if port == cs_port and value & cs_mask:
+                            if address == port + 0x28:
+                                require(expected_shutdown[chip], f"{name}: RF chip selected on a rejected/startup path")
+                                require(read32(PID) in (0x700A3243, 0x700A3246)
+                                        and read32(SERIES) & 0xFF07 == 0x1200
+                                        and read32(FLASH_KIB) & 0xFFFF == 256,
+                                        f"{name}: RF frame before exact identity")
+                                require(read32(CRM + 0x30) & 0x27 == 0x27,
+                                        f"{name}: RF frame without GPIO clocks")
+                                for gate_port, mask in RF_LOW_PINS.items():
+                                    require(read32(gate_port + 0x14) & mask == 0,
+                                            f"{name}: RF frame preceded MCU gate-low request")
+                                require(rf_bits is None, f"{name}: nested RF-A select")
+                                rf_selected = chip
+                                rf_bits, last_rf_data, last_rf_high = [], None, None
+                            elif rf_selected == chip:
+                                require(len(rf_bits) == 24, f"{name}: RF frame has {len(rf_bits)} edges")
+                                require(last_rf_high is not None and len(trace) - last_rf_high >= 1000,
+                                        f"{name}: last RF clock high phase too short in instruction model")
+                                frame = 0
+                                for bit in rf_bits:
+                                    frame = (frame << 1) | bit
+                                rf_frames[chip].append(frame)
+                                rf_chip[chip][frame >> 16] = frame & 0xFFFF
+                                rf_frame_end_writes.append(len(writes))
+                                rf_bits = rf_selected = None
+                        if port == GPIO[2] and value & data_mask and rf_selected == chip:
+                            last_rf_data = len(trace)
+                        if port == clock_port and value & clock_mask and rf_selected == chip:
+                            if address == port + 0x18 and current & clock_mask == 0 and new & clock_mask:
+                                require(last_rf_data is not None and len(trace) - last_rf_data >= 1000,
+                                        f"{name}: RF DATA setup lacks bounded500-iteration phase")
+                                rf_bits.append(1 if read32(GPIO[2] + 0x14) & data_mask else 0)
+                                last_rf_high = len(trace)
+                            elif address == port + 0x28 and current & clock_mask and new & clock_mask == 0:
+                                require(last_rf_high is not None and len(trace) - last_rf_high >= 1000,
+                                        f"{name}: RF clock high phase lacks bounded delay")
                     uc.mem_write(port + 0x14, struct.pack("<I", new & 0xFFFFFFFF))
         elif not is_flash:
             require(address != UART + 4, f"{name}: RX/DT was read")
@@ -472,17 +484,16 @@ def run_case(name, image, start, instructions, overrides, expect_return, expecte
                         for address, _, value in writes[:first_tx]),
                     f"{name}: fault frame started before RF low attempt")
     require(rf_bits is None, f"{name}: unfinished RF-A transaction")
-    require(rf_frames == (RF_A_SHUTDOWN if expected_rf_shutdown else []),
-            f"{name}: RF shutdown frame sequence differs: {[hex(v) for v in rf_frames]}")
-    if expected_rf_shutdown:
-        require(rf_chip == {0x33: 0, 0x36: 0x007F, 0x30: 0, 0x37: 0x1D00},
-                f"{name}: modeled TX/PA bits remain requested")
+    for chip, expected in enumerate(expected_shutdown):
+        require(rf_frames[chip] == (RF_A_SHUTDOWN if expected else []),
+                f"{name}: RF shutdown frames differ on chip {chip}: {rf_frames[chip]}")
+        if expected:
+            require(rf_chip[chip] == {0x33: 0, 0x36: 0x007F, 0x30: 0, 0x37: 0x1D00},
+                    f"{name}: modeled TX/PA bits remain requested")
+    if any(expected_shutdown):
         first_tx = next((index for index, (address, _, _) in enumerate(writes) if address == UART + 4), None)
         if first_tx is not None:
-            require(rf_frame_end_writes[-1] <= first_tx,
-                    f"{name}: UART log precedes final RF-A shutdown request")
-    else:
-        require(rf_chip[0x33] & 0x0C == 0x0C, f"{name}: rejected path invented chip shutdown")
+            require(rf_frame_end_writes[-1] <= first_tx, f"{name}: UART log precedes RF shutdown")
     for offset, mask in ((0, 3 << 24), (4, 1 << 12), (8, 3 << 24), (12, 3 << 24), (0x24, 0xf << 16)):
         value = int.from_bytes(machine.mem_read(GPIO[0] + offset, 4), "little")
         require(value & mask == registers[GPIO[0] + offset] & mask, f"{name}: PA12 RX fields changed")
@@ -501,8 +512,9 @@ def run_case(name, image, start, instructions, overrides, expect_return, expecte
             "gpio_write_count": len(gpio_writes), "irq_bank_write_count": len(irq_writes),
             "stack_pointer_unchanged": True, "ram_accesses": 0,
             "wire_ascii": wire.decode("ascii"), "frames": frames,
-            "rf_a_frames": [f"0x{frame:06x}" for frame in rf_frames],
-            "rf_a_modeled_registers": {f"0x{register:02x}": f"0x{value:04x}" for register, value in rf_chip.items()},
+            "rf_a_frames": [f"0x{frame:06x}" for frame in rf_frames[0]],
+            "rf_a_modeled_registers": {f"0x{register:02x}": f"0x{value:04x}" for register, value in rf_chip[0].items()},
+            "rf_b_frames": [f"0x{frame:06x}" for frame in rf_frames[1]],
             "rf_a_shutdown_before_fault_log": bool(expected_rf_shutdown),
             "id_reads": id_reads, "watchdog_writes": 0,
             "mmio_write_whitelist_verified": True, "unowned_gpio_fields_preserved": True,
@@ -604,10 +616,13 @@ def check(path):
         ("startup_rf_a_data_locked", {GPIO[2] + 0x1C: 0x10200}),
     ):
         results.append(run_case(name, image, start, pre_decode, overrides, False, 0,
-            expected_codes=[0x300, 0xe100000a], expected_rf_shutdown=False))
+            expected_codes=[0x300, 0xe100000a], expected_rf_shutdown=False, expected_b_shutdown=True))
     results.append(run_case("startup_rf_a_data_stuck_high", image, start, pre_decode,
-        {}, False, 0, gpio_stuck_high=(GPIO[2], 0x0200), expected_rf_shutdown=False,
+        {}, False, 0, gpio_stuck_high=(GPIO[2], 0x0200), expected_rf_shutdown=False, expected_b_shutdown=True,
         expected_codes=[0x300, 0xe100000a]))
+    results.append(run_case("startup_rf_b_data_locked", image, start, pre_decode,
+        {GPIO[2] + 0x1C: 0x10040}, False, 0, expected_rf_shutdown=True,
+        expected_b_shutdown=False, expected_codes=[0x300, 0xe100000a]))
     results.append(run_case("startup_after_watchdog_reset_with_seeded_tx_bits", image,
         start, pre_decode, {CRM + 0x74: 1 << 29, GPIO[0] + 0x14: 0xFEFF}, True, 4,
         expected_codes=NORMAL_CODES, expected_rf_shutdown=True))
@@ -647,7 +662,7 @@ def check(path):
     ):
         terminal_results.append(run_case(name, image, terminal_start, terminal_decode,
             overrides, False, 0, ipsr=3, terminal_low=True, early_bootstrap=False,
-            expected_codes=[0xe1ff0000], expected_rf_shutdown=False))
+            expected_codes=[0xe1ff0000], expected_rf_shutdown=False, expected_b_shutdown=True))
     for name, overrides in (
         ("terminal_unsupported_revision", {SERIES: 0x1201}),
         ("terminal_unsupported_flash", {FLASH_KIB: 128}),
@@ -664,7 +679,11 @@ def check(path):
     terminal_results.append(run_case("terminal_rf_a_data_stuck_high", image,
         terminal_start, terminal_decode, {}, False, 0, ipsr=3, terminal_low=True,
         early_bootstrap=False, gpio_stuck_high=(GPIO[2], 0x0200), expected_codes=[0xe1ff0000],
-        expected_rf_shutdown=False))
+        expected_rf_shutdown=False, expected_b_shutdown=True))
+    terminal_results.append(run_case("terminal_rf_b_data_locked", image,
+        terminal_start, terminal_decode, {GPIO[2] + 0x1C: 0x10040}, False, 0,
+        ipsr=3, terminal_low=True, early_bootstrap=False, expected_rf_shutdown=True,
+        expected_b_shutdown=False, expected_codes=[0xe1ff0000]))
     terminal_results.append(run_case("terminal_inherited_rf_cs_low", image,
         terminal_start, terminal_decode, {GPIO[0] + 0x14: 0xFEFF}, False, 0,
         ipsr=3, terminal_low=True, early_bootstrap=False, expected_rf_shutdown=True,

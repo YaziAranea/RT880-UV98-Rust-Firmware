@@ -8,7 +8,27 @@ pub const CHANNEL_COUNT: usize = 1024;
 pub const MIN_FREQUENCY_10HZ: u32 = 10_000;
 pub const MAX_FREQUENCY_10HZ: u32 = 99_999_999;
 pub const DEFAULT_FREQUENCY_10HZ: u32 = 14_550_000;
+pub const SHIFT_10HZ: [i32; 7] = [0, -60_000, 60_000, -160_000, 160_000, -500_000, 500_000];
+// Standard CTCSS frequencies in tenths of a hertz. Zero disables TX tone.
+pub const TX_CTCSS: [u16; 51] = [
+    0, 670, 693, 719, 744, 770, 797, 825, 854, 885, 915, 948, 974, 1000, 1035, 1072, 1109, 1148,
+    1188, 1230, 1273, 1318, 1365, 1413, 1462, 1514, 1567, 1598, 1622, 1655, 1679, 1713, 1738, 1773,
+    1799, 1835, 1862, 1899, 1928, 1966, 1995, 2035, 2065, 2107, 2181, 2257, 2291, 2336, 2418, 2503,
+    2541,
+];
 pub const STEP_10HZ: [u32; 6] = [250, 500, 625, 1000, 1250, 2500];
+/// Spectrum window width in sweep intervals; points = intervals + 1.
+pub const SPECTRUM_INTERVALS: [u8; 5] = [4, 10, 20, 40, 80];
+/// Items in the spectrum context menu, in display order.
+pub const SPECTRUM_MENU_LEN: u8 = 8;
+pub const SPECTRUM_MENU_LISTEN: u8 = 0;
+pub const SPECTRUM_MENU_ACCEPT_VFO: u8 = 1;
+pub const SPECTRUM_MENU_SPAN_WIDER: u8 = 2;
+pub const SPECTRUM_MENU_SPAN_NARROWER: u8 = 3;
+pub const SPECTRUM_MENU_STEP_BIGGER: u8 = 4;
+pub const SPECTRUM_MENU_STEP_SMALLER: u8 = 5;
+pub const SPECTRUM_MENU_CLEAR_PEAKS: u8 = 6;
+pub const SPECTRUM_MENU_CLOSE: u8 = 7;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -43,6 +63,8 @@ pub struct Context {
     pub mode: Mode,
     pub channel: Option<u16>,
     pub vfo_10hz: u32,
+    pub shift_index: u8,
+    pub tx_tone_index: u8,
     pub zone: Option<u8>,
     pub step_index: u8,
     pub reverse: bool,
@@ -87,6 +109,11 @@ pub enum Screen {
     SideAction,
     Setting,
     Spectrum,
+    Shortwave,
+    Crossband,
+    Gps,
+    Aprs,
+    TxId,
 }
 
 /// Menu choice pages are drafts. Only MENU commits; opening, arrows and EXIT
@@ -102,12 +129,37 @@ pub enum Setting {
     Scan,
     DisplayLight,
     KeyLight,
+    Shift,
+    TxTone,
+    TopKey,
+    BottomKey,
+    BandPreset,
+    GpsEnable,
+    GpsBaud,
+    TxTail,
+    Dtmf,
 }
 
 impl Setting {
+    const fn is_tx_tone(self) -> bool {
+        matches!(self, Self::TxTone)
+    }
+
     pub const fn choice_count(self) -> u8 {
-        if matches!(self, Self::DisplayLight | Self::KeyLight) {
+        if matches!(self, Self::GpsBaud) {
+            10
+        } else if matches!(self, Self::BandPreset) {
+            4
+        } else if matches!(self, Self::TxTail) {
+            3
+        } else if self.is_tx_tone() {
+            TX_CTCSS.len() as u8
+        } else if matches!(self, Self::Shift) {
+            SHIFT_10HZ.len() as u8
+        } else if matches!(self, Self::DisplayLight | Self::KeyLight) {
             LIGHT_MODES.len() as u8
+        } else if matches!(self, Self::TopKey | Self::BottomKey) {
+            4
         } else if matches!(self, Self::Power) {
             3
         } else {
@@ -122,9 +174,6 @@ pub enum MenuItem {
     Channels,
     ChannelDetails,
     Step,
-    Calibration,
-    Keys,
-    Help,
     About,
     Reverse,
     Scan,
@@ -138,18 +187,28 @@ pub enum MenuItem {
     DisplayLight,
     KeyLight,
     Spectrum,
+    Shift,
+    TxTone,
+    TopKey,
+    BottomKey,
+    Shortwave,
+    BandPreset,
+    Gps,
+    GpsEnable,
+    GpsBaud,
+    Aprs,
+    TxTail,
+    TxId,
+    Dtmf,
 }
 
 /// Full catalog for tooling. The visible menu uses `menu_entries`.
-pub const MENU_ITEMS: [MenuItem; 20] = [
+pub const MENU_ITEMS: [MenuItem; 30] = [
     MenuItem::Mode,
     MenuItem::Modulation,
     MenuItem::Channels,
     MenuItem::ChannelDetails,
     MenuItem::Step,
-    MenuItem::Calibration,
-    MenuItem::Keys,
-    MenuItem::Help,
     MenuItem::About,
     MenuItem::Reverse,
     MenuItem::Scan,
@@ -162,6 +221,19 @@ pub const MENU_ITEMS: [MenuItem; 20] = [
     MenuItem::DisplayLight,
     MenuItem::KeyLight,
     MenuItem::Spectrum,
+    MenuItem::Shift,
+    MenuItem::TxTone,
+    MenuItem::TopKey,
+    MenuItem::BottomKey,
+    MenuItem::Shortwave,
+    MenuItem::BandPreset,
+    MenuItem::Gps,
+    MenuItem::GpsEnable,
+    MenuItem::GpsBaud,
+    MenuItem::Aprs,
+    MenuItem::TxTail,
+    MenuItem::TxId,
+    MenuItem::Dtmf,
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -171,6 +243,7 @@ pub enum MenuGroup {
     Scanning,
     Keys,
     System,
+    Navigation,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuEntry {
@@ -188,8 +261,10 @@ pub const fn menu_entries(group: Option<MenuGroup>) -> &'static [MenuEntry] {
             Group(MenuGroup::Scanning),
             Group(MenuGroup::Keys),
             Group(MenuGroup::System),
+            Group(MenuGroup::Navigation),
         ],
         Some(MenuGroup::Mode) => &[
+            Item(MenuItem::BandPreset),
             Item(MenuItem::Mode),
             Item(MenuItem::ActiveSlot),
             Item(MenuItem::Channels),
@@ -202,19 +277,33 @@ pub const fn menu_entries(group: Option<MenuGroup>) -> &'static [MenuEntry] {
             Item(MenuItem::Power),
             Item(MenuItem::Reverse),
             Item(MenuItem::Step),
+            Item(MenuItem::Shift),
+            Item(MenuItem::TxTone),
         ],
-        Some(MenuGroup::Scanning) => &[Item(MenuItem::Scan), Item(MenuItem::Spectrum)],
+        Some(MenuGroup::Scanning) => &[
+            Item(MenuItem::Scan),
+            Item(MenuItem::Spectrum),
+            Item(MenuItem::Shortwave),
+        ],
         Some(MenuGroup::Keys) => &[
             Item(MenuItem::Shortcuts),
             Item(MenuItem::SideKeys),
-            Item(MenuItem::Keys),
+            Item(MenuItem::TopKey),
+            Item(MenuItem::BottomKey),
+        ],
+        Some(MenuGroup::Navigation) => &[
+            Item(MenuItem::Gps),
+            Item(MenuItem::GpsEnable),
+            Item(MenuItem::GpsBaud),
+            Item(MenuItem::Aprs),
         ],
         Some(MenuGroup::System) => &[
             Item(MenuItem::DisplayLight),
             Item(MenuItem::KeyLight),
-            Item(MenuItem::Calibration),
-            Item(MenuItem::Help),
             Item(MenuItem::About),
+            Item(MenuItem::Dtmf),
+            Item(MenuItem::TxTail),
+            Item(MenuItem::TxId),
         ],
     }
 }
@@ -228,6 +317,7 @@ pub fn menu_location(item: MenuItem) -> (Option<MenuGroup>, u8) {
         Some(MenuGroup::Scanning),
         Some(MenuGroup::Keys),
         Some(MenuGroup::System),
+        Some(MenuGroup::Navigation),
     ] {
         if let Some(index) = menu_entries(group)
             .iter()
@@ -290,9 +380,11 @@ pub enum ShortcutAction {
     Zones,
     SwitchSlot,
     Spectrum,
+    Crossband,
+    DualWatch,
 }
 
-pub const SHORTCUT_ACTIONS: [ShortcutAction; 14] = [
+pub const SHORTCUT_ACTIONS: [ShortcutAction; 16] = [
     ShortcutAction::None,
     ShortcutAction::Power,
     ShortcutAction::Monitor,
@@ -306,6 +398,8 @@ pub const SHORTCUT_ACTIONS: [ShortcutAction; 14] = [
     ShortcutAction::Modulation,
     ShortcutAction::Zones,
     ShortcutAction::SwitchSlot,
+    ShortcutAction::DualWatch,
+    ShortcutAction::Crossband,
     ShortcutAction::Spectrum,
 ];
 
@@ -335,6 +429,8 @@ pub enum ScanState {
 /// An outer runtime must explicitly accept, execute and report these requests.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Request {
+    SendAprs,
+    RetryShortwave,
     CyclePower,
     ToggleMonitor,
     StartScan,
@@ -342,12 +438,32 @@ pub enum Request {
     CycleModulation,
     SetPower(u8),
     SetMonitor(bool),
-    SetModulation { am: bool },
+    SetModulation {
+        am: bool,
+    },
     SetDisplayLight(LightMode),
     SetKeyLight(LightMode),
     StartSpectrum,
     StopSpectrum,
-    AcceptSpectrum { bin: u8 },
+    /// Apply the volatile span/step selection: stop the current sweep and start
+    /// a new one around the same confirmed receive frequency.
+    RestartSpectrum,
+    PanSpectrum {
+        forward: bool,
+        fine: bool,
+    },
+    ResetSpectrumPeaks,
+    ResumeSpectrum,
+    /// Temporary audio on a measured bin; returns to the same window.
+    ListenSpectrum {
+        bin: u8,
+    },
+    /// End temporary listening and resume the same sweep window.
+    StopListenSpectrum,
+    /// Explicit operator action: accept the current bin into VFO/Home.
+    AcceptSpectrum {
+        bin: u8,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -367,6 +483,7 @@ pub struct Entry {
 pub enum Notice {
     None,
     InvalidChannel,
+    AuxBinding,
     InactiveChannel,
     InvalidFrequency,
     EntryFull,
@@ -375,19 +492,207 @@ pub enum Notice {
     NoChannels,
     ChannelOnly,
     RadioUnavailable,
+    SpectrumUnavailable,
+}
+
+pub const SW_MIN_KHZ: u16 = 1_700;
+pub const SW_MAX_KHZ: u16 = 26_100;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShortwaveMode {
+    Am,
+    Lsb,
+    Usb,
+    Cw,
+    Fm,
+}
+
+impl ShortwaveMode {
+    pub const fn is_ssb(self) -> bool {
+        matches!(self, Self::Lsb | Self::Usb | Self::Cw)
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Am => "AM",
+            Self::Lsb => "LSB",
+            Self::Usb => "USB",
+            Self::Cw => "CW",
+            Self::Fm => "WFM",
+        }
+    }
+
+    pub const fn steps_hz(self) -> &'static [u32] {
+        match self {
+            Self::Fm => &[10_000, 50_000, 100_000, 200_000],
+            Self::Am => &[1000, 2000, 2500, 5000, 9000, 10000],
+            _ => &[50, 100, 500, 1000, 2500, 5000, 10000],
+        }
+    }
+
+    pub const fn default_step_index(self) -> u8 {
+        match self {
+            Self::Fm => 2,
+            Self::Am => 3,
+            Self::Cw => 0,
+            _ => 1,
+        }
+    }
+
+    pub const fn tuner_function(self) -> u8 {
+        match self {
+            Self::Fm => 0x10,
+            Self::Am => 0x11,
+            _ => 0x31,
+        }
+    }
+
+    const fn next(self) -> Self {
+        match self {
+            Self::Am => Self::Lsb,
+            Self::Lsb => Self::Usb,
+            Self::Usb => Self::Cw,
+            Self::Cw => Self::Am,
+            Self::Fm => Self::Fm,
+        }
+    }
+
+    const fn default_bfo(self) -> i16 {
+        if matches!(self, Self::Cw) {
+            -500
+        } else {
+            0
+        }
+    }
+}
+
+// Presets are operator tuning limits and starting frequencies, not relay routes.
+pub const SW_BANDS: [(&str, u32, u32, u32); 10] = [
+    ("ВЕСЬ КВ", SW_MIN_KHZ as u32, SW_MAX_KHZ as u32, 6070),
+    ("160 М", 1800, 2000, 1900),
+    ("80 М", 3500, 3800, 3650),
+    ("40 М", 7000, 7200, 7100),
+    ("30 М", 10100, 10150, 10120),
+    ("20 М", 14000, 14350, 14200),
+    ("17 М", 18068, 18168, 18130),
+    ("15 М", 21000, 21450, 21200),
+    ("12 М", 24890, 24990, 24950),
+    ("FM ВЕЩАНИЕ", 64000, 108000, 98100),
+];
+
+pub const SW_FM_BAND: u8 = SW_BANDS.len() as u8 - 1;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShortwaveStatus {
+    Starting,
+    Patching(u8),
+    Recovering(u8),
+    Listening { part: u8, rssi: u8, snr: u8 },
+    Fault(u8),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CrossbandProbe {
+    Starting,
+    InvalidPair,
+    InvalidProbeChannels,
+    BusError,
+    Stopped,
+    Measuring {
+        a_rx: u32,
+        b_rx: u32,
+        rssi: u16,
+        status: u16,
+        tone_match: Option<bool>,
+    },
+    Ready {
+        a_rx: u32,
+        b_rx: u32,
+        traffic: Option<(Slot, u32, u32)>,
+        live: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GpsStatus {
+    pub valid: bool,
+    pub latitude_e7: i32,
+    pub longitude_e7: i32,
+    pub satellites: u8,
+    pub age_seconds: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AprsStatus {
+    #[default]
+    Unconfigured,
+    Unsupported,
+    NoFix,
+    Ready,
+    Sending,
+    Sent,
+    Failed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct View {
+    pub gps_enabled: bool,
+    pub gps_baud: u8,
+    pub gps_status: GpsStatus,
+    pub aprs_status: AprsStatus,
+    pub aprs_callsign: [u8; 6],
+    pub aprs_ssid: u8,
+    pub dtmf_enabled: bool,
+    pub tx_tail: u8,
+    pub tx_id: Option<u32>,
+    pub tx_id_draft: u32,
+    pub tx_id_digits: u8,
+    pub shortwave_scope: bool,
+    pub shortwave_filter: u8,
+    pub shortwave_soft_mute: bool,
+    pub shortwave_khz: u32,
+    pub shortwave_fraction_hz: u16,
+    pub shortwave_step: u8,
+    pub shortwave_band_draft: Option<u8>,
+    pub shortwave_mode: ShortwaveMode,
+    pub shortwave_band: u8,
+    pub shortwave_bfo: i16,
+    pub shortwave_scan: bool,
+    pub shortwave_entry: Option<u32>,
+    pub shortwave_status: ShortwaveStatus,
+    pub crossband_probe: CrossbandProbe,
+    pub dual_watch: bool,
+    pub watch_rx: Option<Slot>,
     pub screen: Screen,
     pub mode: Mode,
     pub channel: Option<u16>,
     pub list_channel: Option<u16>,
     pub vfo_10hz: u32,
+    pub shift_index: u8,
+    pub tx_tone_index: u8,
+    pub top_key: Option<Key>,
+    pub top_draft: Option<Key>,
+    pub top_action: u8,
+    pub bottom_key: Option<Key>,
+    pub bottom_action: u8,
     pub step_index: u8,
     pub menu_index: u8,
     pub menu_group: Option<MenuGroup>,
     pub spectrum_cursor: u8,
+    /// Volatile spectrum window: independent of `step_index` (the VFO step).
+    pub spectrum_span_index: u8,
+    pub spectrum_trigger: u8,
+    pub spectrum_auto_listen: bool,
+    pub spectrum_step_index: u8,
+    /// The context menu overlays the graph; it owns MENU/UP/DOWN until EXIT.
+    pub spectrum_menu: bool,
+    pub spectrum_option: u8,
+    /// A temporary Listen session owns RF; short EXIT stops it without leaving
+    /// the spectrum page or committing the original MR/VFO context.
+    pub spectrum_listening: bool,
+    /// Bin submitted for Listen while the RF restore is still pending. Input
+    /// cannot move the cursor until a confirmed callback clears this.
+    pub spectrum_pending_listen: Option<u8>,
     pub entry: Option<Entry>,
     pub locked: bool,
     pub notice: Notice,
@@ -415,6 +720,17 @@ pub struct View {
     /// Confirmed global RAM policy, not proof that a physical lamp is lit.
     pub display_light: LightMode,
     pub key_light: LightMode,
+}
+
+impl View {
+    pub fn shortwave_step_hz(&self, scanning: bool) -> u32 {
+        let step = self.shortwave_mode.steps_hz()[usize::from(self.shortwave_step)];
+        if scanning {
+            step.max(1000)
+        } else {
+            step
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -475,10 +791,16 @@ pub fn adjacent_channel(bitmap: &[u8; 128], current: Option<u16>, forward: bool)
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Controller {
+    spectrum_last_bin: u8,
     view: View,
     request: Option<Request>,
     ptt_tx_requested: bool,
     ptt_suppressed_until_release: bool,
+    /// Step chosen before the Step page opened. MENU commits the draft,
+    /// EXIT restores this value; no other screen changes it.
+    step_before: Option<u8>,
+    /// True when the Step page was opened from Home rather than from MENU.
+    step_home: bool,
     contexts: [Context; 2],
     zones: [u8; 32],
     channel_order: [u16; 200],
@@ -506,12 +828,29 @@ impl Controller {
             mode,
             channel,
             vfo_10hz,
+            shift_index: 0,
+            tx_tone_index: 0,
             zone: None,
             step_index: 4,
             reverse: false,
         };
         Self {
+            spectrum_last_bin: SPECTRUM_INTERVALS[0],
             view: View {
+                gps_enabled: false,
+                gps_baud: 1,
+                gps_status: GpsStatus::default(),
+                aprs_status: AprsStatus::Unconfigured,
+                aprs_callsign: [b' '; 6],
+                aprs_ssid: 0,
+                dtmf_enabled: true,
+                tx_tail: 0,
+                tx_id: None,
+                tx_id_draft: 0,
+                tx_id_digits: 0,
+                shortwave_scope: false,
+                shortwave_filter: 1,
+                shortwave_soft_mute: false,
                 screen: Screen::Home,
                 mode: if channel.is_some() {
                     Mode::Channel
@@ -520,6 +859,13 @@ impl Controller {
                 },
                 channel,
                 list_channel: channel,
+                shift_index: 0,
+                tx_tone_index: 0,
+                top_key: Some(Key::Aux18),
+                top_draft: None,
+                top_action: 0,
+                bottom_key: Some(Key::Aux17),
+                bottom_action: 0,
                 vfo_10hz: if valid_frequency(initial_vfo_10hz) {
                     initial_vfo_10hz
                 } else {
@@ -528,7 +874,28 @@ impl Controller {
                 step_index: 4,
                 menu_index: 0,
                 menu_group: None,
-                spectrum_cursor: 40,
+                spectrum_cursor: 20,
+                spectrum_span_index: 0,
+                spectrum_trigger: 24,
+                spectrum_auto_listen: true,
+                shortwave_khz: 6_070,
+                shortwave_fraction_hz: 0,
+                shortwave_step: ShortwaveMode::Am.default_step_index(),
+                shortwave_band_draft: None,
+                shortwave_mode: ShortwaveMode::Am,
+                shortwave_band: 0,
+                shortwave_bfo: 0,
+                shortwave_scan: false,
+                shortwave_entry: None,
+                shortwave_status: ShortwaveStatus::Starting,
+                crossband_probe: CrossbandProbe::Starting,
+                dual_watch: false,
+                watch_rx: None,
+                spectrum_step_index: 5,
+                spectrum_menu: false,
+                spectrum_option: 0,
+                spectrum_listening: false,
+                spectrum_pending_listen: None,
                 entry: None,
                 locked: false,
                 notice: if channel.is_some() {
@@ -559,6 +926,8 @@ impl Controller {
             request: None,
             ptt_tx_requested: false,
             ptt_suppressed_until_release: false,
+            step_before: None,
+            step_home: false,
             contexts: [context; 2],
             zones: [0; 32],
             channel_order: [0; 200],
@@ -615,6 +984,21 @@ impl Controller {
 
     fn open_setting(&mut self, setting: Setting) {
         self.view.setting_index = match setting {
+            Setting::BandPreset => 0,
+            Setting::GpsEnable => u8::from(self.view.gps_enabled),
+            Setting::GpsBaud => self.view.gps_baud,
+            Setting::TxTail => self.view.tx_tail,
+            Setting::Dtmf => u8::from(self.view.dtmf_enabled),
+            Setting::TopKey => {
+                self.view.top_draft = self.view.top_key;
+                self.view.top_action
+            }
+            Setting::BottomKey => {
+                self.view.top_draft = self.view.bottom_key;
+                self.view.bottom_action
+            }
+            Setting::Shift => self.view.shift_index,
+            Setting::TxTone => self.view.tx_tone_index,
             Setting::Mode => u8::from(self.view.mode == Mode::Vfo),
             Setting::Power => self.radio_power.unwrap_or(0),
             Setting::Monitor => u8::from(self.radio_monitor),
@@ -645,6 +1029,56 @@ impl Controller {
         };
         let selected = self.view.setting_index;
         match setting {
+            Setting::GpsEnable => self.view.gps_enabled = selected != 0,
+            Setting::GpsBaud => self.view.gps_baud = selected,
+            Setting::TxTail => self.view.tx_tail = selected,
+            Setting::Dtmf => self.view.dtmf_enabled = selected != 0,
+            Setting::BandPreset => {
+                // Presets select frequency, modulation and step together. The
+                // RF runtime still derives its relay route from frequency.
+                let (frequency, am, step) = match selected {
+                    0 => (14_550_000, false, 4),
+                    1 => (43_350_000, false, 4),
+                    2 => (2_713_500, true, 3),
+                    _ => (85_000_000, false, 5),
+                };
+                self.view.mode = Mode::Vfo;
+                self.view.vfo_10hz = frequency;
+                self.view.step_index = step;
+                self.view.shift_index = 0;
+                self.view.tx_tone_index = 0;
+                self.view.reverse = false;
+                self.queue_request(Request::SetModulation { am });
+                self.view.screen = Screen::Home;
+                return;
+            }
+            Setting::TopKey | Setting::BottomKey => {
+                let key = self.view.top_draft;
+                let (binding, action, other) = if setting == Setting::TopKey {
+                    (
+                        &mut self.view.top_key,
+                        &mut self.view.top_action,
+                        self.view.bottom_key,
+                    )
+                } else {
+                    (
+                        &mut self.view.bottom_key,
+                        &mut self.view.bottom_action,
+                        self.view.top_key,
+                    )
+                };
+                if selected != 0 && (key.is_none() || key == other) {
+                    self.view.notice = Notice::AuxBinding;
+                    self.view.setting = Some(setting);
+                    return;
+                }
+                if selected != 0 {
+                    *binding = key;
+                }
+                *action = selected;
+            }
+            Setting::Shift => self.view.shift_index = selected,
+            Setting::TxTone => self.view.tx_tone_index = selected,
             Setting::Mode => {
                 let mode = if selected == 0 {
                     Mode::Channel
@@ -767,6 +1201,8 @@ impl Controller {
             mode: self.view.mode,
             channel: self.view.channel,
             vfo_10hz: self.view.vfo_10hz,
+            shift_index: self.view.shift_index,
+            tx_tone_index: self.view.tx_tone_index,
             zone: self.view.zone,
             step_index: self.view.step_index,
             reverse: self.view.reverse,
@@ -778,6 +1214,13 @@ impl Controller {
     pub fn select_slot(&mut self, slot: Slot) -> Change {
         let before = self.view;
         self.ptt_tx_requested = false;
+        // Routing TX or switching slots ends the Step transaction as cancel,
+        // even when the requested slot is already active. Close the editor so
+        // a later EXIT cannot save a draft whose rollback was already taken.
+        if self.view.screen == Screen::Step {
+            self.finish_step_cancel();
+            self.view.screen = Screen::Home;
+        }
         if !self.view.locked {
             self.switch_slot(slot);
         }
@@ -787,6 +1230,10 @@ impl Controller {
     fn switch_slot(&mut self, slot: Slot) {
         if slot == self.view.active_slot {
             return;
+        }
+        if self.view.screen == Screen::Step {
+            self.finish_step_cancel();
+            self.view.screen = Screen::Home;
         }
         if self.view.ptt_down && self.view.ptt_slot != Some(slot) {
             self.view.ptt_slot = None;
@@ -799,6 +1246,8 @@ impl Controller {
         self.view.channel = context.channel;
         self.view.list_channel = context.channel;
         self.view.vfo_10hz = context.vfo_10hz;
+        self.view.shift_index = context.shift_index;
+        self.view.tx_tone_index = context.tx_tone_index;
         self.view.zone = context.zone;
         self.view.zone_cursor = context.zone;
         self.view.step_index = context.step_index;
@@ -1051,6 +1500,18 @@ impl Controller {
         self.view.notice = Notice::RadioUnavailable;
     }
 
+    /// Refuse a spectrum start without pretending the operator left the page.
+    /// The graph keeps showing only what was measured; no fake sweep appears.
+    pub fn reject_spectrum_start(&mut self) {
+        if self.view.screen == Screen::Spectrum {
+            self.view.spectrum_menu = false;
+            self.view.notice = Notice::SpectrumUnavailable;
+            self.view.ptt_slot = None;
+        } else {
+            self.reject_radio_request(Request::StartSpectrum);
+        }
+    }
+
     /// Explicit backend refusal, including a compile-time TX gate or unsupported
     /// channel. Keep physical button feedback, but revoke the held TX intent.
     pub fn reject_tx(&mut self) -> Change {
@@ -1110,6 +1571,260 @@ impl Controller {
         }
     }
 
+    pub fn set_gps_status(&mut self, status: GpsStatus) {
+        self.view.gps_status = status;
+    }
+
+    pub fn set_aprs_status(&mut self, status: AprsStatus) {
+        self.view.aprs_status = status;
+    }
+
+    pub fn set_aprs_identity(&mut self, callsign: [u8; 6], ssid: u8) {
+        if ssid <= 15
+            && callsign
+                .iter()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == b' ')
+        {
+            self.view.aprs_callsign = callsign;
+            self.view.aprs_ssid = ssid;
+        }
+    }
+
+    pub fn set_shortwave_status(&mut self, status: ShortwaveStatus) {
+        self.view.shortwave_status = status;
+        if matches!(status, ShortwaveStatus::Fault(_)) {
+            self.view.shortwave_scan = false;
+        }
+    }
+
+    pub fn set_watch_rx(&mut self, slot: Option<Slot>) {
+        self.view.watch_rx = slot;
+    }
+
+    pub fn set_crossband_probe(&mut self, status: CrossbandProbe) {
+        self.view.crossband_probe = status;
+    }
+
+    fn step_shortwave(&mut self, up: bool, scanning: bool) {
+        let (_, low, high, _) = SW_BANDS[usize::from(self.view.shortwave_band)];
+        let (low, high) = (low * 1000, high * 1000);
+        let hz = self.view.shortwave_khz * 1000 + u32::from(self.view.shortwave_fraction_hz);
+        let step = self.view.shortwave_step_hz(scanning);
+        let next = if up {
+            if scanning && hz >= high {
+                low
+            } else {
+                (hz + step).min(high)
+            }
+        } else {
+            hz.saturating_sub(step).max(low)
+        };
+        self.view.shortwave_khz = next / 1000;
+        self.view.shortwave_fraction_hz = (next % 1000) as u16;
+    }
+
+    /// True when the scan wants the next frequency. A peak or operator stop
+    /// leaves the tuner on the currently confirmed frequency.
+    pub fn continue_shortwave_scan(&mut self, rssi: u8, snr: u8) -> bool {
+        if !self.view.shortwave_scan {
+            return false;
+        }
+        let hit = if self.view.shortwave_mode.is_ssb() {
+            rssi >= 28
+        } else {
+            rssi >= 22 && snr >= 8
+        };
+        if hit {
+            self.view.shortwave_scan = false;
+            false
+        } else {
+            self.step_shortwave(true, true);
+            true
+        }
+    }
+
+    fn shortwave_input(&mut self, event: InputEvent) {
+        if let Some(draft) = self.view.shortwave_band_draft {
+            match event {
+                InputEvent::Short(Key::Menu) => {
+                    self.view.shortwave_scope = false;
+                    let mode = if draft == SW_FM_BAND {
+                        ShortwaveMode::Fm
+                    } else if self.view.shortwave_mode == ShortwaveMode::Fm {
+                        ShortwaveMode::Am
+                    } else {
+                        self.view.shortwave_mode
+                    };
+                    if mode != self.view.shortwave_mode {
+                        self.view.shortwave_mode = mode;
+                        self.view.shortwave_step = mode.default_step_index();
+                        self.view.shortwave_bfo = 0;
+                        self.view.shortwave_status = ShortwaveStatus::Starting;
+                    }
+                    self.view.shortwave_band = draft;
+                    self.view.shortwave_khz = SW_BANDS[usize::from(draft)].3;
+                    self.view.shortwave_fraction_hz = 0;
+                    self.view.shortwave_band_draft = None;
+                }
+                InputEvent::Short(Key::Up) | InputEvent::Repeat(Key::Up) => {
+                    self.view.shortwave_band_draft =
+                        Some(adjacent_index(draft, SW_BANDS.len() as u8, false));
+                }
+                InputEvent::Short(Key::Down) | InputEvent::Repeat(Key::Down) => {
+                    self.view.shortwave_band_draft =
+                        Some(adjacent_index(draft, SW_BANDS.len() as u8, true));
+                }
+                InputEvent::Short(Key::Exit) | InputEvent::Hold(Key::Exit) => {
+                    self.view.shortwave_band_draft = None;
+                }
+                _ => {}
+            }
+            return;
+        }
+        match event {
+            InputEvent::Hold(Key::Digit0) if self.view.shortwave_entry.is_none() => {
+                self.view.shortwave_scope = !self.view.shortwave_scope;
+                self.view.shortwave_scan = false;
+            }
+            InputEvent::Hold(Key::Digit1)
+                if self.view.shortwave_entry.is_none()
+                    && self.view.shortwave_mode == ShortwaveMode::Am =>
+            {
+                self.view.shortwave_filter = (self.view.shortwave_filter + 1) % 3;
+            }
+            InputEvent::Hold(Key::Digit2)
+                if self.view.shortwave_entry.is_none()
+                    && self.view.shortwave_mode == ShortwaveMode::Am =>
+            {
+                self.view.shortwave_soft_mute = !self.view.shortwave_soft_mute;
+            }
+            InputEvent::Short(Key::Exit) if self.view.shortwave_entry.is_some() => {
+                self.view.shortwave_entry = None;
+            }
+            InputEvent::Short(Key::Exit) if self.view.shortwave_scope => {
+                self.view.shortwave_scope = false;
+            }
+            InputEvent::Short(Key::Exit) if self.view.shortwave_scan => {
+                self.view.shortwave_scan = false;
+            }
+            InputEvent::Short(Key::Exit) | InputEvent::Hold(Key::Exit) => {
+                self.view.shortwave_entry = None;
+                self.view.shortwave_scan = false;
+                self.view.shortwave_scope = false;
+                self.view.screen = Screen::Home;
+                self.cancel_temporary = true;
+            }
+            InputEvent::Short(Key::Menu)
+                if self.view.shortwave_entry.is_none()
+                    && matches!(self.view.shortwave_status, ShortwaveStatus::Fault(_)) =>
+            {
+                self.queue_request(Request::RetryShortwave);
+            }
+            InputEvent::Short(Key::Menu) => {
+                if let Some(khz) = self.view.shortwave_entry.take() {
+                    let fm = self.view.shortwave_mode == ShortwaveMode::Fm;
+                    let (_, fm_low, fm_high, _) = SW_BANDS[usize::from(SW_FM_BAND)];
+                    if fm && (fm_low..=fm_high).contains(&khz) && khz % 10 == 0 {
+                        self.view.shortwave_khz = khz;
+                    } else if !fm && (u32::from(SW_MIN_KHZ)..=u32::from(SW_MAX_KHZ)).contains(&khz)
+                    {
+                        self.view.shortwave_khz = khz;
+                        self.view.shortwave_fraction_hz = 0;
+                        self.view.shortwave_band = SW_BANDS
+                            .iter()
+                            .enumerate()
+                            .skip(1)
+                            .take(usize::from(SW_FM_BAND - 1))
+                            .find(|(_, (_, low, high, _))| (*low..=*high).contains(&khz))
+                            .map_or(0, |(index, _)| index as u8);
+                    } else {
+                        self.view.shortwave_entry = Some(khz);
+                    }
+                }
+            }
+            InputEvent::Short(Key::Star)
+                if self.view.shortwave_entry.is_none()
+                    && self.view.shortwave_mode != ShortwaveMode::Fm =>
+            {
+                self.view.shortwave_scan = false;
+                let mode = self.view.shortwave_mode.next();
+                if self.view.shortwave_mode.is_ssb() != mode.is_ssb() || mode == ShortwaveMode::Cw {
+                    self.view.shortwave_step = mode.default_step_index();
+                }
+                if !mode.is_ssb() {
+                    self.view.shortwave_fraction_hz = 0;
+                }
+                self.view.shortwave_mode = mode;
+                self.view.shortwave_bfo = mode.default_bfo();
+                self.view.shortwave_status = ShortwaveStatus::Starting;
+            }
+            InputEvent::Hold(Key::Hash) if self.view.shortwave_entry.is_none() => {
+                self.view.shortwave_scan = false;
+                self.view.shortwave_scope = false;
+                self.view.shortwave_band_draft = Some(self.view.shortwave_band);
+            }
+            InputEvent::Short(Key::Hash)
+                if self.view.shortwave_entry.is_none()
+                    && !matches!(self.view.shortwave_status, ShortwaveStatus::Fault(_)) =>
+            {
+                self.view.shortwave_scope = false;
+                self.view.shortwave_scan = !self.view.shortwave_scan;
+                if self.view.shortwave_scan {
+                    self.step_shortwave(true, true);
+                }
+            }
+            InputEvent::Short(Key::Aux17) if self.view.shortwave_entry.is_none() => {
+                self.view.shortwave_scan = false;
+                self.view.shortwave_step = adjacent_index(
+                    self.view.shortwave_step,
+                    self.view.shortwave_mode.steps_hz().len() as u8,
+                    true,
+                );
+            }
+            InputEvent::Hold(Key::Digit4 | Key::Digit6) if self.view.shortwave_entry.is_none() => {
+                self.view.shortwave_scan = false;
+                let step = self.view.shortwave_step;
+                let last = self.view.shortwave_mode.steps_hz().len() as u8 - 1;
+                self.view.shortwave_step = if event == InputEvent::Hold(Key::Digit6) {
+                    step.saturating_add(1).min(last)
+                } else {
+                    step.saturating_sub(1)
+                };
+            }
+            InputEvent::Hold(Key::Digit1 | Key::Digit2 | Key::Digit3)
+                if self.view.shortwave_entry.is_none() && self.view.shortwave_mode.is_ssb() =>
+            {
+                self.view.shortwave_scan = false;
+                self.view.shortwave_bfo = match event {
+                    InputEvent::Hold(Key::Digit1) => (self.view.shortwave_bfo - 50).max(-2000),
+                    InputEvent::Hold(Key::Digit3) => (self.view.shortwave_bfo + 50).min(2000),
+                    _ => self.view.shortwave_mode.default_bfo(),
+                };
+            }
+            InputEvent::Short(Key::Up | Key::Down) | InputEvent::Repeat(Key::Up | Key::Down) => {
+                self.view.shortwave_entry = None;
+                self.view.shortwave_scan = false;
+                self.step_shortwave(
+                    matches!(
+                        event,
+                        InputEvent::Short(Key::Up) | InputEvent::Repeat(Key::Up)
+                    ),
+                    false,
+                );
+            }
+            InputEvent::Short(key) => {
+                if let Some(digit) = digit(key) {
+                    self.view.shortwave_scan = false;
+                    let khz = self.view.shortwave_entry.unwrap_or(0) * 10 + u32::from(digit);
+                    if khz <= 999_999 {
+                        self.view.shortwave_entry = Some(khz);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn apply(&mut self, event: InputEvent, bitmap: &[u8; 128]) {
         match event {
             InputEvent::Ptt(down) => {
@@ -1122,19 +1837,137 @@ impl Controller {
             }
             _ => {}
         }
+        if self.view.screen == Screen::TxId {
+            match event {
+                InputEvent::Hold(Key::Exit) => {
+                    self.view.screen = Screen::Home;
+                    self.cancel_temporary = true;
+                }
+                InputEvent::Short(Key::Exit) => self.view.screen = Screen::Menu,
+                InputEvent::Short(Key::Hash) => {
+                    self.view.tx_id_draft = 0;
+                    self.view.tx_id_digits = 0;
+                }
+                InputEvent::Short(Key::Menu) => {
+                    if self.view.tx_id_digits == 5 {
+                        self.view.tx_id = Some(self.view.tx_id_draft);
+                        self.view.screen = Screen::Menu;
+                    } else if self.view.tx_id_digits == 0 {
+                        self.view.tx_id = None;
+                        self.view.screen = Screen::Menu;
+                    }
+                }
+                InputEvent::Short(key) => {
+                    if let Some(digit) = digit(key) {
+                        if self.view.tx_id_digits < 5 {
+                            self.view.tx_id_draft = self.view.tx_id_draft * 10 + u32::from(digit);
+                            self.view.tx_id_digits += 1;
+                        }
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+        if self.view.screen == Screen::Gps || self.view.screen == Screen::Aprs {
+            match event {
+                InputEvent::Hold(Key::Exit) => {
+                    self.view.screen = Screen::Home;
+                    self.cancel_temporary = true;
+                }
+                InputEvent::Short(Key::Exit) => self.view.screen = Screen::Menu,
+                InputEvent::Short(Key::Menu) if self.view.screen == Screen::Gps => {
+                    self.open_setting(Setting::GpsEnable)
+                }
+                InputEvent::Short(Key::Menu)
+                    if matches!(
+                        self.view.aprs_status,
+                        AprsStatus::Ready | AprsStatus::Sent | AprsStatus::Failed
+                    ) =>
+                {
+                    self.queue_request(Request::SendAprs)
+                }
+                _ => {}
+            }
+            return;
+        }
+        if self.view.screen == Screen::Shortwave {
+            self.shortwave_input(event);
+            return;
+        }
         let key = match event {
             InputEvent::Short(key) | InputEvent::Hold(key) | InputEvent::Repeat(key) => key,
             InputEvent::Ptt(_) | InputEvent::PttB(_) => return,
         };
         self.view.last_key = Some(key);
+        if self.view.screen == Screen::Crossband {
+            let toggle = event == InputEvent::Hold(key)
+                && digit(key).and_then(|digit| self.binding(digit))
+                    == Some(ShortcutAction::Crossband);
+            if toggle
+                || matches!(
+                    event,
+                    InputEvent::Short(Key::Exit) | InputEvent::Hold(Key::Exit)
+                )
+            {
+                self.view.screen = Screen::Home;
+                self.cancel_temporary = true;
+            }
+            return;
+        }
+        if matches!(key, Key::Aux16 | Key::Aux17 | Key::Aux18) && event == InputEvent::Short(key) {
+            if self.view.screen == Screen::Setting
+                && matches!(
+                    self.view.setting,
+                    Some(Setting::TopKey | Setting::BottomKey)
+                )
+            {
+                self.view.top_draft = Some(key);
+            } else if !self.view.locked && self.view.screen == Screen::Home {
+                let selected = if self.view.top_key == Some(key) {
+                    self.view.top_action
+                } else if self.view.bottom_key == Some(key) {
+                    self.view.bottom_action
+                } else {
+                    0
+                };
+                let action = match selected {
+                    1 => ShortcutAction::Monitor,
+                    2 => ShortcutAction::Scan,
+                    3 => ShortcutAction::Spectrum,
+                    _ => ShortcutAction::None,
+                };
+                self.shortcut(action, bitmap);
+            }
+            return;
+        }
+        // Short EXIT on an open spectrum overlay only closes the overlay, and
+        // short EXIT during temporary listening only ends the listen. Neither
+        // is the runtime cancel that stops the sweep session; long EXIT, PTT
+        // and EXIT from the graph itself still cancel.
+        let closes_overlay_only = event == InputEvent::Short(Key::Exit)
+            && self.view.screen == Screen::Spectrum
+            && self.view.spectrum_menu;
+        let stops_listen_only = event == InputEvent::Short(Key::Exit)
+            && self.view.screen == Screen::Spectrum
+            && !self.view.spectrum_menu
+            && self.view.spectrum_listening;
         if matches!(
             event,
             InputEvent::Short(Key::Exit) | InputEvent::Hold(Key::Exit)
-        ) {
+        ) && !closes_overlay_only
+            && !stops_listen_only
+        {
+            self.cancel_spectrum_pending();
             self.cancel_temporary = true;
             self.request_scan_stop();
         }
         if event == InputEvent::Hold(Key::Hash) {
+            if self.view.screen == Screen::Spectrum {
+                self.cancel_spectrum_pending();
+                self.cancel_temporary = true;
+                self.queue_request(Request::StopSpectrum);
+            }
             self.toggle_lock();
             return;
         }
@@ -1151,19 +1984,96 @@ impl Controller {
             return;
         }
         self.view.notice = Notice::None;
+        if self.view.screen == Screen::Spectrum {
+            if let InputEvent::Short(key) = event {
+                if !self.view.spectrum_menu && self.view.spectrum_pending_listen.is_none() {
+                    match key {
+                        Key::Hash => {
+                            self.view.spectrum_auto_listen = !self.view.spectrum_auto_listen;
+                            if self.view.spectrum_listening && !self.view.spectrum_auto_listen {
+                                self.queue_request(Request::StopListenSpectrum);
+                            }
+                            return;
+                        }
+                        Key::Digit4 | Key::Digit5 => {
+                            let level = self.view.spectrum_trigger;
+                            self.view.spectrum_trigger = if key == Key::Digit4 {
+                                level.saturating_add(4).min(96)
+                            } else {
+                                level.saturating_sub(4).max(4)
+                            };
+                            return;
+                        }
+                        Key::Digit3 | Key::Digit9 => {
+                            self.queue_request(Request::PanSpectrum {
+                                forward: key == Key::Digit3,
+                                fine: false,
+                            });
+                            return;
+                        }
+                        Key::Digit0 => {
+                            self.queue_request(if self.view.spectrum_listening {
+                                Request::StopListenSpectrum
+                            } else {
+                                Request::ResumeSpectrum
+                            });
+                            return;
+                        }
+                        Key::Star => {
+                            self.apply_spectrum_option(SPECTRUM_MENU_ACCEPT_VFO);
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+                if !self.view.spectrum_menu
+                    && !self.view.spectrum_listening
+                    && self.view.spectrum_pending_listen.is_none()
+                {
+                    let option = match key {
+                        Key::Digit1 => Some(SPECTRUM_MENU_STEP_BIGGER),
+                        Key::Digit7 => Some(SPECTRUM_MENU_STEP_SMALLER),
+                        Key::Digit2 => Some(SPECTRUM_MENU_SPAN_WIDER),
+                        Key::Digit8 => Some(SPECTRUM_MENU_SPAN_NARROWER),
+                        Key::Digit6 => Some(SPECTRUM_MENU_LISTEN),
+                        _ => None,
+                    };
+                    if let Some(option) = option {
+                        self.apply_spectrum_option(option);
+                        return;
+                    }
+                }
+            }
+            // Mode/slot shortcuts belong to the home screen. Leaving the
+            // graph without a Stop request would strand a muted sweep.
+            if matches!(
+                event,
+                InputEvent::Hold(Key::Menu | Key::Star) | InputEvent::Short(Key::Star)
+            ) {
+                return;
+            }
+        }
         match event {
+            InputEvent::Short(Key::Exit) if stops_listen_only => {
+                self.view.spectrum_menu = false;
+                self.queue_request(Request::StopListenSpectrum);
+            }
             InputEvent::Hold(Key::Menu) => {
                 self.view.entry = None;
                 self.toggle_mode(bitmap);
             }
             InputEvent::Hold(Key::Exit) => {
                 self.view.entry = None;
+                self.finish_step_cancel();
                 self.view.screen = Screen::Home;
                 self.view.menu_group = None;
                 self.view.menu_index = 0;
             }
             InputEvent::Hold(Key::Star) if self.view.screen != Screen::Keys => {
-                self.switch_slot(self.view.active_slot.other())
+                // The Step page owns a draft; switching slots would save it.
+                if self.view.screen != Screen::Step {
+                    self.switch_slot(self.view.active_slot.other());
+                }
             }
             InputEvent::Hold(key) => {
                 // An editing field or test page never accidentally invokes an
@@ -1188,7 +2098,7 @@ impl Controller {
             InputEvent::Short(Key::Hash)
                 if self.view.screen == Screen::Home && self.view.entry.is_none() =>
             {
-                self.view.screen = Screen::Step
+                self.open_step(true)
             }
             InputEvent::Short(key) => {
                 if let Some(digit) = digit(key) {
@@ -1220,6 +2130,14 @@ impl Controller {
             }
             return;
         }
+        if matches!(
+            self.view.screen,
+            Screen::Shortwave | Screen::Crossband | Screen::Gps | Screen::Aprs | Screen::TxId
+        ) {
+            self.view.ptt_slot = None;
+            self.ptt_suppressed_until_release = true;
+            return;
+        }
         if self.view.side_down[1 - index] || self.view.locked {
             self.view.ptt_slot = None;
             self.ptt_suppressed_until_release = true;
@@ -1237,6 +2155,7 @@ impl Controller {
         if self.view.screen == Screen::Spectrum {
             self.view.ptt_slot = None;
             self.ptt_suppressed_until_release = true;
+            self.cancel_spectrum_pending();
             self.cancel_temporary = true;
             self.queue_request(Request::StopSpectrum);
             return;
@@ -1272,6 +2191,7 @@ impl Controller {
     fn toggle_lock(&mut self) {
         self.view.locked = !self.view.locked;
         self.view.entry = None;
+        self.finish_step_cancel();
         self.view.screen = Screen::Home;
         if self.view.locked && self.view.ptt_down {
             self.ptt_suppressed_until_release = true;
@@ -1295,24 +2215,224 @@ impl Controller {
             ShortcutAction::Scan => self.toggle_scan(bitmap),
             ShortcutAction::Reverse => self.toggle_reverse(),
             ShortcutAction::Mode => self.toggle_mode(bitmap),
-            ShortcutAction::Step => self.view.screen = Screen::Step,
+            ShortcutAction::Step => self.open_step(true),
             ShortcutAction::Channels => self.open_channels(bitmap),
             ShortcutAction::Keys => self.view.screen = Screen::Keys,
             ShortcutAction::Lock => self.toggle_lock(),
             ShortcutAction::Zones => self.open_zones(),
             ShortcutAction::SwitchSlot => self.switch_slot(self.view.active_slot.other()),
             ShortcutAction::Spectrum => self.open_spectrum(),
+            ShortcutAction::DualWatch => {
+                self.view.dual_watch = !self.view.dual_watch;
+                self.view.watch_rx = None;
+                if self.view.dual_watch {
+                    self.request_scan_stop();
+                }
+            }
+            ShortcutAction::Crossband => {
+                self.request_scan_stop();
+                self.cancel_temporary = true;
+                self.view.crossband_probe = CrossbandProbe::Starting;
+                self.view.screen = Screen::Crossband;
+            }
         }
+    }
+
+    /// The Step page edits a volatile draft. MENU commits it, EXIT restores the
+    /// value that was active when the page opened.
+    fn open_step(&mut self, from_home: bool) {
+        if self.view.screen != Screen::Step {
+            self.step_before = Some(self.view.step_index);
+            self.step_home = from_home;
+        }
+        self.view.screen = Screen::Step;
+    }
+
+    fn revert_step(&mut self) {
+        if let Some(previous) = self.step_before.take() {
+            self.view.step_index = previous;
+        }
+    }
+
+    /// End a Step draft without committing it and leave no transaction state
+    /// behind for a later slot switch.
+    fn finish_step_cancel(&mut self) {
+        self.revert_step();
+        self.step_before = None;
+        self.step_home = false;
+    }
+
+    fn finish_step_commit(&mut self) {
+        self.step_before = None;
+        self.step_home = false;
     }
 
     fn open_spectrum(&mut self) {
         self.view.entry = None;
         self.view.screen = Screen::Spectrum;
-        self.view.spectrum_cursor = 40;
+        self.spectrum_last_bin = self.spectrum_intervals();
+        self.view.spectrum_cursor = self.spectrum_last_bin / 2;
+        self.view.spectrum_menu = false;
+        self.view.spectrum_option = 0;
+        self.view.spectrum_listening = false;
+        self.view.spectrum_pending_listen = None;
         self.view.menu_group = Some(MenuGroup::Scanning);
         self.view.menu_index = menu_location(MenuItem::Spectrum).1;
         self.cancel_temporary = true;
         self.queue_request(Request::StartSpectrum);
+    }
+
+    /// Current spectrum window width in intervals (points = intervals + 1).
+    pub const fn spectrum_intervals(&self) -> u8 {
+        SPECTRUM_INTERVALS[self.view.spectrum_span_index as usize]
+    }
+    /// Spectrum grid step, deliberately independent of the ordinary VFO step.
+    pub const fn spectrum_step_10hz(&self) -> u32 {
+        STEP_10HZ[self.view.spectrum_step_index as usize]
+    }
+    /// Keep the UI's short-EXIT contract in step with the runtime listening
+    /// phase; the runtime is the owner of the actual RF state.
+    pub fn set_spectrum_listening(&mut self, listening: bool) -> bool {
+        if !listening {
+            self.view.spectrum_pending_listen = None;
+        }
+        if self.view.spectrum_listening == listening {
+            return false;
+        }
+        self.view.spectrum_listening = listening;
+        true
+    }
+
+    /// Main calls this only after the RF restore completed for this exact bin.
+    /// It atomically clears the pending freeze, pins the displayed cursor to
+    /// the confirmed bin and only then marks audio as listening.
+    pub fn begin_peak_listen(&mut self, bin: u8) -> bool {
+        if self.view.screen != Screen::Spectrum
+            || self.view.spectrum_menu
+            || !self.view.spectrum_auto_listen
+            || self.view.spectrum_listening
+            || self.view.spectrum_pending_listen.is_some()
+        {
+            return false;
+        }
+        self.view.spectrum_cursor = bin;
+        self.view.spectrum_pending_listen = Some(bin);
+        true
+    }
+
+    pub fn confirm_spectrum_listen(&mut self, bin: u8) -> bool {
+        let bin = bin.min(80);
+        let Some(pending) = self.view.spectrum_pending_listen else {
+            return false;
+        };
+        if pending != bin {
+            return false;
+        }
+        self.view.spectrum_pending_listen = None;
+        let mut changed = true;
+        if self.view.screen != Screen::Spectrum {
+            return changed;
+        }
+        if self.view.spectrum_cursor != bin {
+            self.view.spectrum_cursor = bin;
+            changed = true;
+        }
+        if !self.view.spectrum_listening {
+            self.view.spectrum_listening = true;
+            changed = true;
+        }
+        changed
+    }
+
+    /// Cancel a submitted Listen that has not reached its ACK yet.
+    pub fn cancel_spectrum_pending(&mut self) -> bool {
+        self.view.spectrum_pending_listen.take().is_some()
+    }
+
+    /// Place the cursor on an explicit bin after a window change. Frequency
+    /// preservation is computed by the caller that owns both snapshots.
+    pub fn place_spectrum_cursor(&mut self, index: u8) -> bool {
+        let index = index.min(80);
+        if self.view.screen == Screen::Spectrum && self.view.spectrum_cursor != index {
+            self.view.spectrum_cursor = index;
+            return true;
+        }
+        false
+    }
+
+    /// Keep the cursor inside a published window after a span change.
+    pub fn clamp_spectrum_cursor(&mut self, last: u8) -> bool {
+        self.spectrum_last_bin = last.min(80);
+        if self.view.screen == Screen::Spectrum && self.view.spectrum_cursor > last {
+            self.view.spectrum_cursor = last;
+            if self.view.spectrum_option > 0 {
+                self.view.spectrum_option = self.view.spectrum_option.min(SPECTRUM_MENU_LEN - 1);
+            }
+            return true;
+        }
+        false
+    }
+
+    /// MENU confirms the highlighted spectrum option. Span and step changes are
+    /// applied by an explicit restart; EXIT only leaves the menu.
+    fn confirm_spectrum_option(&mut self) {
+        self.apply_spectrum_option(self.view.spectrum_option);
+    }
+
+    fn apply_spectrum_option(&mut self, option: u8) {
+        match option {
+            SPECTRUM_MENU_LISTEN => {
+                self.view.spectrum_menu = false;
+                let bin = self.view.spectrum_cursor;
+                if !self.view.spectrum_listening && self.view.spectrum_pending_listen.is_none() {
+                    self.view.spectrum_pending_listen = Some(bin);
+                }
+                self.queue_request(Request::ListenSpectrum { bin });
+            }
+            SPECTRUM_MENU_ACCEPT_VFO => {
+                self.view.spectrum_menu = false;
+                self.queue_request(Request::AcceptSpectrum {
+                    bin: self.view.spectrum_cursor,
+                });
+            }
+            SPECTRUM_MENU_SPAN_WIDER | SPECTRUM_MENU_SPAN_NARROWER => {
+                let wider = option == SPECTRUM_MENU_SPAN_WIDER;
+                let last = SPECTRUM_INTERVALS.len() as u8 - 1;
+                let next = if wider {
+                    self.view.spectrum_span_index.saturating_add(1).min(last)
+                } else {
+                    self.view.spectrum_span_index.saturating_sub(1)
+                };
+                if next != self.view.spectrum_span_index {
+                    self.view.spectrum_span_index = next;
+                    self.view.spectrum_menu = false;
+                    self.queue_request(Request::RestartSpectrum);
+                }
+            }
+            SPECTRUM_MENU_STEP_BIGGER | SPECTRUM_MENU_STEP_SMALLER => {
+                let bigger = option == SPECTRUM_MENU_STEP_BIGGER;
+                let last = STEP_10HZ.len() as u8 - 1;
+                let next = if bigger {
+                    self.view.spectrum_step_index.saturating_add(1).min(last)
+                } else {
+                    self.view.spectrum_step_index.saturating_sub(1)
+                };
+                if next != self.view.spectrum_step_index {
+                    self.view.spectrum_step_index = next;
+                    self.view.spectrum_menu = false;
+                    self.queue_request(Request::RestartSpectrum);
+                }
+            }
+            SPECTRUM_MENU_CLEAR_PEAKS => {
+                self.view.spectrum_menu = false;
+                self.queue_request(Request::ResetSpectrumPeaks);
+            }
+            _ => {
+                self.view.spectrum_menu = false;
+                self.queue_request(Request::StopSpectrum);
+                self.view.screen = Screen::Home;
+            }
+        }
     }
 
     fn toggle_scan(&mut self, bitmap: &[u8; 128]) {
@@ -1338,7 +2458,9 @@ impl Controller {
     }
 
     fn toggle_reverse(&mut self) {
-        if self.view.mode == Mode::Channel && self.view.channel.is_some() {
+        if (self.view.mode == Mode::Channel && self.view.channel.is_some())
+            || (self.view.mode == Mode::Vfo && self.view.shift_index != 0)
+        {
             self.view.reverse = !self.view.reverse;
             self.view.screen = Screen::Home;
         } else {
@@ -1368,6 +2490,7 @@ impl Controller {
     }
 
     fn toggle_mode(&mut self, bitmap: &[u8; 128]) {
+        self.finish_step_cancel();
         self.view.screen = Screen::Home;
         match self.view.mode {
             Mode::Channel => self.view.mode = Mode::Vfo,
@@ -1423,11 +2546,20 @@ impl Controller {
                 )
             }
             Screen::Spectrum => {
-                self.view.spectrum_cursor = if forward {
-                    self.view.spectrum_cursor.saturating_add(1).min(80)
-                } else {
-                    self.view.spectrum_cursor.saturating_sub(1)
-                };
+                if self.view.spectrum_menu {
+                    self.view.spectrum_option =
+                        adjacent_index(self.view.spectrum_option, SPECTRUM_MENU_LEN, forward);
+                } else if self.view.spectrum_pending_listen.is_none() {
+                    let cursor = self.view.spectrum_cursor;
+                    if (forward && cursor == self.spectrum_last_bin) || (!forward && cursor == 0) {
+                        self.queue_request(Request::PanSpectrum {
+                            forward,
+                            fine: true,
+                        });
+                    } else if !self.view.spectrum_listening {
+                        self.view.spectrum_cursor = if forward { cursor + 1 } else { cursor - 1 };
+                    }
+                }
             }
             Screen::Channels => {
                 self.view.list_channel =
@@ -1509,6 +2641,7 @@ impl Controller {
                         return;
                     }
                     self.view.vfo_10hz = value;
+                    self.view.reverse = false;
                     self.view.mode = Mode::Vfo;
                 }
             }
@@ -1532,13 +2665,29 @@ impl Controller {
                     return;
                 };
                 match item {
+                    MenuItem::BandPreset => self.open_setting(Setting::BandPreset),
+                    MenuItem::GpsEnable => self.open_setting(Setting::GpsEnable),
+                    MenuItem::GpsBaud => self.open_setting(Setting::GpsBaud),
+                    MenuItem::TxTail => self.open_setting(Setting::TxTail),
+                    MenuItem::Dtmf => self.open_setting(Setting::Dtmf),
+                    MenuItem::Gps => self.view.screen = Screen::Gps,
+                    MenuItem::Aprs => self.view.screen = Screen::Aprs,
+                    MenuItem::TxId => {
+                        self.view.tx_id_draft = 0;
+                        self.view.tx_id_digits = 0;
+                        self.view.screen = Screen::TxId;
+                    }
                     MenuItem::Mode => self.open_setting(Setting::Mode),
                     MenuItem::Channels => self.open_channels(bitmap),
                     MenuItem::ChannelDetails => self.view.screen = Screen::ChannelDetails,
-                    MenuItem::Step => self.view.screen = Screen::Step,
-                    MenuItem::Calibration => self.view.screen = Screen::Calibration,
-                    MenuItem::Keys => self.view.screen = Screen::Keys,
-                    MenuItem::Help => self.view.screen = Screen::Help,
+                    MenuItem::Shift if self.view.mode == Mode::Vfo => {
+                        self.open_setting(Setting::Shift)
+                    }
+                    MenuItem::TxTone if self.view.mode == Mode::Vfo => {
+                        self.open_setting(Setting::TxTone)
+                    }
+                    MenuItem::Shift | MenuItem::TxTone => self.view.screen = Screen::ChannelDetails,
+                    MenuItem::Step => self.open_step(false),
                     MenuItem::About => self.view.screen = Screen::About,
                     MenuItem::Reverse => self.open_setting(Setting::Reverse),
                     MenuItem::Scan => self.open_setting(Setting::Scan),
@@ -1548,15 +2697,29 @@ impl Controller {
                     MenuItem::Modulation => self.open_setting(Setting::Modulation),
                     MenuItem::Zones => self.open_zones(),
                     MenuItem::ActiveSlot => self.open_setting(Setting::ActiveSlot),
+                    MenuItem::TopKey => self.open_setting(Setting::TopKey),
+                    MenuItem::BottomKey => self.open_setting(Setting::BottomKey),
                     MenuItem::SideKeys => self.view.screen = Screen::SideKeys,
                     MenuItem::DisplayLight => self.open_setting(Setting::DisplayLight),
                     MenuItem::KeyLight => self.open_setting(Setting::KeyLight),
                     MenuItem::Spectrum => self.open_spectrum(),
+                    MenuItem::Shortwave => {
+                        self.view.shortwave_scope = false;
+                        self.view.shortwave_entry = None;
+                        self.view.shortwave_band_draft = None;
+                        self.view.shortwave_status = ShortwaveStatus::Starting;
+                        self.view.screen = Screen::Shortwave;
+                    }
                 }
             }
-            Screen::Spectrum => self.queue_request(Request::AcceptSpectrum {
-                bin: self.view.spectrum_cursor,
-            }),
+            Screen::Spectrum => {
+                if self.view.spectrum_menu {
+                    self.confirm_spectrum_option();
+                } else {
+                    self.view.spectrum_menu = true;
+                    self.view.spectrum_option = 0;
+                }
+            }
             Screen::Channels => {
                 if let Some(slot) = self
                     .view
@@ -1570,7 +2733,11 @@ impl Controller {
                     self.view.notice = Notice::NoChannels;
                 }
             }
-            Screen::Step => self.view.screen = Screen::Home,
+            Screen::Step => {
+                // MENU commits the draft; it is the only confirmation path.
+                self.finish_step_commit();
+                self.view.screen = Screen::Home;
+            }
             Screen::Shortcuts => self.open_binding_action(),
             Screen::ShortcutAction => {
                 self.view.bindings[self.view.binding_index as usize] =
@@ -1597,6 +2764,7 @@ impl Controller {
             }
             Screen::Setting => self.commit_setting(bitmap),
             // A test page must allow MENU/EXIT to leave; other keys stay visible.
+            Screen::Shortwave | Screen::Crossband | Screen::Gps | Screen::Aprs | Screen::TxId => {}
             Screen::ChannelDetails
             | Screen::Calibration
             | Screen::Keys
@@ -1608,6 +2776,14 @@ impl Controller {
     fn back(&mut self) {
         if self.view.entry.is_some() {
             self.view.entry = None;
+            return;
+        }
+        if self.view.screen == Screen::Spectrum {
+            if self.view.spectrum_menu {
+                self.view.spectrum_menu = false;
+            } else {
+                self.view.screen = Screen::Home;
+            }
             return;
         }
         self.view.screen = match self.view.screen {
@@ -1623,6 +2799,15 @@ impl Controller {
             Screen::Menu => Screen::Home,
             Screen::ShortcutAction => Screen::Shortcuts,
             Screen::SideAction => Screen::SideKeys,
+            Screen::Step => {
+                let from_home = self.step_home;
+                self.finish_step_cancel();
+                if from_home {
+                    Screen::Home
+                } else {
+                    Screen::Menu
+                }
+            }
             _ => Screen::Menu,
         };
     }
@@ -1715,6 +2900,51 @@ mod tests {
         for &key in keys {
             press(controller, key, bitmap);
         }
+    }
+
+    #[test]
+    fn learned_top_key_runs_only_committed_receive_action() {
+        let bitmap = [0; 128];
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        ui.open_setting(Setting::TopKey);
+        assert!(
+            !ui.handle(InputEvent::Short(Key::Aux16), &bitmap)
+                .ptt_tx_requested
+        );
+        ui.view.setting_index = 1;
+        ui.commit_setting(&bitmap);
+        ui.view.screen = Screen::Home;
+        let matched = ui.handle(InputEvent::Short(Key::Aux16), &bitmap);
+        assert_eq!(matched.request, Some(Request::ToggleMonitor));
+        assert!(!matched.ptt_tx_requested);
+        assert_eq!(
+            ui.handle(InputEvent::Short(Key::Aux17), &bitmap).request,
+            None
+        );
+    }
+
+    #[test]
+    fn bottom_key_cycles_step_only_on_shortwave_receiver_screen() {
+        let bitmap = [0; 128];
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        ui.view.bottom_action = 1;
+        ui.view.screen = Screen::Shortwave;
+        ui.view.shortwave_step = ShortwaveMode::Am.steps_hz().len() as u8 - 1;
+        ui.view.shortwave_scan = true;
+        let change = press(&mut ui, Key::Aux17, &bitmap);
+        assert_eq!(ui.view.shortwave_step_hz(false), 1000);
+        assert!(!ui.view.shortwave_scan);
+        assert_eq!(change.request, None);
+        assert!(!change.ptt_tx_requested);
+
+        ui.handle(InputEvent::Hold(Key::Hash), &bitmap);
+        press(&mut ui, Key::Aux17, &bitmap);
+        assert_eq!(ui.view.shortwave_step_hz(false), 1000);
+        press(&mut ui, Key::Exit, &bitmap);
+        press(&mut ui, Key::Exit, &bitmap);
+        let change = press(&mut ui, Key::Aux17, &bitmap);
+        assert_eq!(ui.view.shortwave_step_hz(false), 1000);
+        assert_eq!(change.request, Some(Request::ToggleMonitor));
     }
 
     #[test]
@@ -2019,6 +3249,54 @@ mod tests {
     }
 
     #[test]
+    fn review_spectrum_overlay_exit_does_not_cancel_runtime_sweep() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        choose_menu(&mut ui, MenuItem::Spectrum, &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        assert!(ui.view().spectrum_menu);
+        let update = press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(ui.view().screen, Screen::Spectrum);
+        assert!(!ui.view().spectrum_menu);
+        assert_eq!(update.request, None);
+        // Firmware main maps this flag directly to scope Event::Stop.
+        assert!(
+            !update.cancel_temporary,
+            "closing only the overlay must not stop the sweep"
+        );
+    }
+
+    #[test]
+    fn review_ptt_slot_selection_does_not_commit_or_leak_step_draft() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        ui.view.step_index = 1;
+        let old_a = ui.context(Slot::A).step_index;
+        let old_b = ui.context(Slot::B).step_index;
+        assert_ne!(old_a, old_b);
+        assert!(ui.set_side_binding(0, SideAction::PttB));
+        press(&mut ui, Key::Hash, &bitmap);
+        press(&mut ui, Key::Down, &bitmap);
+        assert_ne!(ui.view().step_index, old_a);
+        let update = ui.handle(InputEvent::Ptt(true), &bitmap);
+        if update.ptt_tx_requested {
+            if let Some(slot) = update.ptt_slot {
+                ui.select_slot(slot);
+            }
+        }
+        ui.handle(InputEvent::Ptt(false), &bitmap);
+        ui.handle(InputEvent::Hold(Key::Hash), &bitmap);
+        assert_eq!(
+            (
+                ui.context(Slot::A).step_index,
+                ui.context(Slot::B).step_index
+            ),
+            (old_a, old_b),
+            "PTT routing must not commit A's draft or leak its rollback into B"
+        );
+    }
+
+    #[test]
     fn categories_retain_every_item_and_exit_returns_through_the_selected_parent() {
         let bitmap = catalog(&[0]);
         assert_eq!(menu_entries(None)[0], MenuEntry::Item(MenuItem::Modulation));
@@ -2031,6 +3309,13 @@ mod tests {
             assert_eq!(ui.context(Slot::A), original);
             assert_ne!(ui.view.screen, Screen::Menu);
             press(&mut ui, Key::Exit, &bitmap);
+            if matches!(item, MenuItem::Spectrum | MenuItem::Shortwave) {
+                // EXIT on a receive tool returns straight to the same A/B
+                // view after the backend stops and restores reception.
+                assert_eq!(ui.view.screen, Screen::Home);
+                assert_eq!(ui.context(Slot::A), original);
+                continue;
+            }
             assert_eq!(ui.view.screen, Screen::Menu);
             assert_eq!((ui.view.menu_group, ui.view.menu_index), (group, index));
             press(&mut ui, Key::Exit, &bitmap);
@@ -2058,7 +3343,8 @@ mod tests {
         assert!(start.cancel_temporary);
         assert_eq!(start.request, Some(Request::StartSpectrum));
         assert_eq!(ui.view.screen, Screen::Spectrum);
-        assert_eq!(ui.view.spectrum_cursor, 40);
+        assert_eq!(ui.view.spectrum_cursor, 2);
+        ui.clamp_spectrum_cursor(80); // Backend publishes a wider grid.
         for _ in 0..100 {
             press(&mut ui, Key::Up, &bitmap);
         }
@@ -2067,12 +3353,24 @@ mod tests {
             press(&mut ui, Key::Down, &bitmap);
         }
         assert_eq!(ui.view.spectrum_cursor, 80);
+        let opened = press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(opened.request, None);
+        assert!(ui.view.spectrum_menu);
+        assert_eq!(ui.view.spectrum_option, SPECTRUM_MENU_LISTEN);
+        assert_eq!(
+            press(&mut ui, Key::Menu, &bitmap).request,
+            Some(Request::ListenSpectrum { bin: 80 })
+        );
+        assert_eq!(ui.view.screen, Screen::Spectrum);
+        assert_eq!(ui.context(Slot::A), old_a);
+        // Listen never commits context; explicit ACCEPT VFO is a second action.
+        press(&mut ui, Key::Menu, &bitmap);
+        press(&mut ui, Key::Down, &bitmap);
+        assert_eq!(ui.view.spectrum_option, SPECTRUM_MENU_ACCEPT_VFO);
         assert_eq!(
             press(&mut ui, Key::Menu, &bitmap).request,
             Some(Request::AcceptSpectrum { bin: 80 })
         );
-        assert_eq!(ui.view.screen, Screen::Spectrum);
-        assert_eq!(ui.context(Slot::A), old_a);
         ui.accept_spectrum_frequency(0);
         assert_eq!(ui.context(Slot::A), old_a);
         ui.accept_spectrum_frequency(43_297_500);
@@ -2080,6 +3378,203 @@ mod tests {
         assert_eq!(ui.view.mode, Mode::Vfo);
         assert_eq!(ui.view.vfo_10hz, 43_297_500);
         assert_eq!(ui.context(Slot::B), old_b);
+    }
+
+    #[test]
+    fn graph_shortcuts_use_existing_requests_and_respect_modal_listen() {
+        let bitmap = [0; 128];
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        ui.open_spectrum();
+        assert_eq!(ui.spectrum_intervals(), 4);
+        assert_eq!(ui.spectrum_step_10hz(), 2_500);
+        ui.view.spectrum_span_index = 4;
+        ui.view.spectrum_step_index = 4;
+        let initial_step = ui.view.spectrum_step_index;
+        assert_eq!(
+            ui.handle(InputEvent::Short(Key::Digit8), &bitmap).request,
+            Some(Request::RestartSpectrum)
+        );
+        assert_eq!(ui.view.spectrum_span_index, 3);
+        assert_eq!(
+            ui.handle(InputEvent::Short(Key::Digit1), &bitmap).request,
+            Some(Request::RestartSpectrum)
+        );
+        assert_eq!(ui.view.spectrum_step_index, initial_step + 1);
+        assert_eq!(
+            ui.handle(InputEvent::Short(Key::Digit6), &bitmap).request,
+            Some(Request::ListenSpectrum { bin: 2 })
+        );
+        assert_eq!(
+            ui.handle(InputEvent::Short(Key::Digit7), &bitmap).request,
+            None
+        );
+        assert_eq!(ui.view.spectrum_step_index, initial_step + 1);
+        assert_eq!(
+            ui.handle(InputEvent::Hold(Key::Star), &bitmap).request,
+            None
+        );
+        assert_eq!(ui.view.screen, Screen::Spectrum);
+        assert_eq!(
+            ui.handle(InputEvent::Hold(Key::Hash), &bitmap).request,
+            Some(Request::StopSpectrum)
+        );
+    }
+
+    #[test]
+    fn spectrum_menu_applies_span_and_step_only_by_explicit_choice() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        choose_menu(&mut ui, MenuItem::Spectrum, &bitmap);
+        assert_eq!(ui.spectrum_intervals(), 4);
+        ui.view.spectrum_span_index = 4;
+        ui.view.spectrum_step_index = 4;
+        // MENU opens the overlay; EXIT closes it without stopping the sweep.
+        press(&mut ui, Key::Menu, &bitmap);
+        assert!(ui.view.spectrum_menu);
+        let closed = press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(closed.request, None);
+        assert!(!ui.view.spectrum_menu);
+        assert_eq!(ui.view.screen, Screen::Spectrum);
+
+        press(&mut ui, Key::Menu, &bitmap);
+        press(&mut ui, Key::Down, &bitmap); // ACCEPT VFO
+        press(&mut ui, Key::Down, &bitmap); // span wider, already maximum
+        assert_eq!(
+            press(&mut ui, Key::Menu, &bitmap).request,
+            None,
+            "a saturated choice does not restart the sweep"
+        );
+        assert!(ui.view.spectrum_menu);
+        press(&mut ui, Key::Down, &bitmap); // narrower
+        let narrower = press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(narrower.request, Some(Request::RestartSpectrum));
+        assert!(!ui.view.spectrum_menu);
+        assert_eq!(ui.spectrum_intervals(), 40);
+        assert_eq!(ui.spectrum_step_10hz(), STEP_10HZ[4]);
+
+        press(&mut ui, Key::Menu, &bitmap);
+        for _ in 0..SPECTRUM_MENU_STEP_SMALLER {
+            press(&mut ui, Key::Down, &bitmap);
+        }
+        assert_eq!(
+            press(&mut ui, Key::Menu, &bitmap).request,
+            Some(Request::RestartSpectrum)
+        );
+        assert_eq!(ui.spectrum_step_10hz(), STEP_10HZ[3]);
+        // The VFO step is a separate context and must not follow the sweep.
+        assert_eq!(ui.view.step_index, 4);
+        assert_eq!(ui.view.screen, Screen::Spectrum);
+    }
+
+    #[test]
+    fn spectrum_cursor_is_clamped_when_a_shorter_window_is_published() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        choose_menu(&mut ui, MenuItem::Spectrum, &bitmap);
+        press(&mut ui, Key::Down, &bitmap);
+        assert_eq!(ui.view.spectrum_cursor, 3);
+        assert!(ui.clamp_spectrum_cursor(1));
+        assert_eq!(ui.view.spectrum_cursor, 1);
+        assert!(!ui.clamp_spectrum_cursor(1));
+    }
+
+    #[test]
+    fn caught_peak_keeps_exact_bin_and_quick_keys_work_during_listen() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        choose_menu(&mut ui, MenuItem::Spectrum, &bitmap);
+        assert!(ui.begin_peak_listen(3));
+        assert_eq!(ui.view.spectrum_cursor, 3);
+        assert_eq!(ui.view.spectrum_pending_listen, Some(3));
+        assert!(!ui.confirm_spectrum_listen(2));
+        assert!(ui.confirm_spectrum_listen(3));
+        press(&mut ui, Key::Digit5, &bitmap);
+        assert_eq!(ui.view.spectrum_trigger, 20);
+        assert_eq!(
+            press(&mut ui, Key::Star, &bitmap).request,
+            Some(Request::AcceptSpectrum { bin: 3 })
+        );
+        assert_eq!(
+            press(&mut ui, Key::Digit0, &bitmap).request,
+            Some(Request::StopListenSpectrum)
+        );
+        assert_eq!(
+            press(&mut ui, Key::Hash, &bitmap).request,
+            Some(Request::StopListenSpectrum)
+        );
+        assert!(!ui.view.spectrum_auto_listen);
+        assert_eq!(ui.view.spectrum_trigger, 20);
+    }
+
+    #[test]
+    fn listen_freezes_cursor_until_exit_and_overlay_does_not_stop_it() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        choose_menu(&mut ui, MenuItem::Spectrum, &bitmap);
+        let cursor = ui.view.spectrum_cursor;
+        ui.set_spectrum_listening(true);
+        press(&mut ui, Key::Up, &bitmap);
+        press(&mut ui, Key::Down, &bitmap);
+        ui.handle(InputEvent::Repeat(Key::Down), &bitmap);
+        assert_eq!(ui.view.spectrum_cursor, cursor);
+
+        // Overlay navigation is allowed, closing only the overlay is soft.
+        let opened = press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(opened.request, None);
+        let closed = press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(closed.request, None);
+        assert!(!closed.cancel_temporary);
+        assert_eq!(ui.view.screen, Screen::Spectrum);
+        // The next short EXIT stops Listen, not the whole session.
+        let stop = press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(stop.request, Some(Request::StopListenSpectrum));
+        assert!(!stop.cancel_temporary);
+        ui.set_spectrum_listening(false);
+        press(&mut ui, Key::Down, &bitmap);
+        assert_eq!(ui.view.spectrum_cursor, cursor + 1);
+    }
+
+    #[test]
+    fn spectrum_listen_short_exit_resumes_and_long_exit_cancels() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        choose_menu(&mut ui, MenuItem::Spectrum, &bitmap);
+        let old = ui.context(Slot::A);
+        ui.set_spectrum_listening(true);
+        let stop = press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(stop.request, Some(Request::StopListenSpectrum));
+        assert!(!stop.cancel_temporary);
+        assert_eq!(ui.view.screen, Screen::Spectrum);
+        assert_eq!(ui.context(Slot::A), old);
+
+        // Long EXIT during listening ends the whole temporary session.
+        let cancel = ui.handle(InputEvent::Hold(Key::Exit), &bitmap);
+        assert!(cancel.cancel_temporary);
+        assert_eq!(cancel.request, Some(Request::StopSpectrum));
+        assert_eq!(ui.view.screen, Screen::Home);
+    }
+
+    #[test]
+    fn spectrum_clear_peaks_and_close_are_explicit_menu_requests() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        choose_menu(&mut ui, MenuItem::Spectrum, &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        for _ in 0..SPECTRUM_MENU_CLEAR_PEAKS {
+            press(&mut ui, Key::Down, &bitmap);
+        }
+        assert_eq!(
+            press(&mut ui, Key::Menu, &bitmap).request,
+            Some(Request::ResetSpectrumPeaks)
+        );
+        assert!(!ui.view.spectrum_menu);
+        press(&mut ui, Key::Menu, &bitmap);
+        for _ in 0..SPECTRUM_MENU_CLOSE {
+            press(&mut ui, Key::Down, &bitmap);
+        }
+        let close = press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(close.request, Some(Request::StopSpectrum));
+        assert_eq!(ui.view.screen, Screen::Home);
     }
 
     #[test]
@@ -2150,7 +3645,9 @@ mod tests {
             None
         );
         assert_eq!(ui.view.entry, before);
-        choose_menu(&mut ui, MenuItem::Keys, &bitmap);
+        ui.handle(InputEvent::Hold(Key::Exit), &bitmap);
+        ui.handle(InputEvent::Hold(Key::Digit8), &bitmap);
+        assert_eq!(ui.view.screen, Screen::Keys);
         assert_eq!(
             ui.handle(InputEvent::Hold(Key::Digit3), &bitmap).request,
             None
@@ -2666,6 +4163,37 @@ mod tests {
     }
 
     #[test]
+    fn step_page_commits_only_on_menu_and_exit_restores_the_previous_value() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        let original = ui.view.step_index;
+        choose_menu(&mut ui, MenuItem::Step, &bitmap);
+        assert_eq!(ui.view.screen, Screen::Step);
+        press(&mut ui, Key::Down, &bitmap);
+        assert_ne!(ui.view.step_index, original);
+        press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(ui.view.screen, Screen::Menu);
+        assert_eq!(ui.view.step_index, original, "EXIT cancels the draft");
+
+        choose_menu(&mut ui, MenuItem::Step, &bitmap);
+        press(&mut ui, Key::Down, &bitmap);
+        let committed = ui.view.step_index;
+        assert_ne!(committed, original);
+        press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(ui.view.screen, Screen::Home);
+        assert_eq!(ui.view.step_index, committed);
+
+        // The physical # shortcut also edits a draft; EXIT goes Home.
+        press(&mut ui, Key::Hash, &bitmap);
+        assert_eq!(ui.view.screen, Screen::Step);
+        press(&mut ui, Key::Up, &bitmap);
+        assert_ne!(ui.view.step_index, committed);
+        press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(ui.view.screen, Screen::Home);
+        assert_eq!(ui.view.step_index, committed);
+    }
+
+    #[test]
     fn exit_cancels_temporary_state_stepwise_without_reverting_confirmed_context_or_settings() {
         let bitmap = catalog(&[0, 2]);
         let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
@@ -2790,4 +4318,186 @@ mod tests {
         ui.set_lighting_modes(LightMode::Seconds5, LightMode::On);
         assert_eq!(ui.view.setting_index, 5); // Incoming ack never moves the draft.
     }
+
+    #[test]
+    fn codex_same_slot_ptt_keeps_step_cancel_transaction_valid() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        ui.view.step_index = 1;
+        let original = ui.context(Slot::A).step_index;
+        assert!(ui.set_side_binding(0, SideAction::PttA));
+        press(&mut ui, Key::Hash, &bitmap);
+        press(&mut ui, Key::Down, &bitmap);
+        let update = ui.handle(InputEvent::Ptt(true), &bitmap);
+        assert!(update.ptt_tx_requested);
+        ui.select_slot(update.ptt_slot.unwrap());
+        ui.handle(InputEvent::Ptt(false), &bitmap);
+        // Allow either leaving Step on cancellation or retaining a valid editor.
+        if ui.view.screen != Screen::Step {
+            press(&mut ui, Key::Hash, &bitmap);
+        }
+        assert_eq!(ui.view.screen, Screen::Step);
+        press(&mut ui, Key::Down, &bitmap);
+        press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(
+            ui.context(Slot::A).step_index,
+            original,
+            "same-slot PTT must not leave a Step editor without rollback"
+        );
+    }
+
+    #[test]
+    fn step_route_cancellation_covers_same_and_cross_slot_paths() {
+        for active in [Slot::A, Slot::B] {
+            for target in [Slot::A, Slot::B] {
+                let bitmap = catalog(&[0]);
+                let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+                ui.select_slot(active);
+                ui.view.step_index = if active == Slot::A { 1 } else { 4 };
+                let before = ui.context(active).step_index;
+                let other = ui.context(active.other()).step_index;
+                press(&mut ui, Key::Hash, &bitmap);
+                press(&mut ui, Key::Down, &bitmap);
+                ui.select_slot(target);
+                assert_eq!(ui.view.screen, Screen::Home);
+                assert_eq!(ui.context(active).step_index, before);
+                assert_eq!(ui.context(active.other()).step_index, other);
+                // Re-entry must start a fresh transaction with rollback.
+                press(&mut ui, Key::Hash, &bitmap);
+                press(&mut ui, Key::Down, &bitmap);
+                press(&mut ui, Key::Exit, &bitmap);
+                assert_eq!(ui.context(active).step_index, before);
+            }
+        }
+    }
+
+    #[test]
+    fn codex_pending_listen_keeps_confirmed_rf_bin_visible() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        choose_menu(&mut ui, MenuItem::Spectrum, &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        assert!(ui.view.spectrum_menu);
+        assert_eq!(ui.view.spectrum_option, SPECTRUM_MENU_LISTEN);
+        let update = press(&mut ui, Key::Menu, &bitmap);
+        let Some(Request::ListenSpectrum { bin }) = update.request else {
+            panic!("Listen must request the current bin");
+        };
+        assert_eq!(ui.view.spectrum_pending_listen, Some(bin));
+        assert!(!ui.view.spectrum_listening);
+        // RF restore pending; foreground arrows/repeat must not move the bin.
+        press(&mut ui, Key::Down, &bitmap);
+        ui.handle(InputEvent::Repeat(Key::Up), &bitmap);
+        assert_eq!(ui.view.spectrum_cursor, bin);
+        // Main's confirmation callback after the exact restore ACK.
+        ui.confirm_spectrum_listen(bin);
+        assert_eq!(ui.view.spectrum_cursor, bin);
+        assert!(ui.view.spectrum_listening);
+        assert_eq!(ui.view.spectrum_pending_listen, None);
+    }
+
+    #[test]
+    fn confirmed_listen_rebinds_a_cursor_that_moved_during_pending_restore() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        choose_menu(&mut ui, MenuItem::Spectrum, &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        let update = press(&mut ui, Key::Menu, &bitmap);
+        let Some(Request::ListenSpectrum { bin }) = update.request else {
+            panic!("Listen");
+        };
+        // A stale frame/other caller could still place the cursor elsewhere.
+        ui.place_spectrum_cursor(bin + 1);
+        ui.confirm_spectrum_listen(bin);
+        assert_eq!(ui.view.spectrum_cursor, bin);
+        assert!(ui.view.spectrum_listening);
+    }
+
+    #[test]
+    fn pending_listen_duplicate_request_keeps_the_original_confirmation_bin() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        choose_menu(&mut ui, MenuItem::Spectrum, &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        let first = press(&mut ui, Key::Menu, &bitmap);
+        let Some(Request::ListenSpectrum { bin }) = first.request else {
+            panic!("Listen");
+        };
+        press(&mut ui, Key::Menu, &bitmap);
+        let second = press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(second.request, Some(Request::ListenSpectrum { bin }));
+        assert_eq!(ui.view.spectrum_pending_listen, Some(bin));
+        // The later request is refused in main; the original ACK still binds.
+        ui.confirm_spectrum_listen(bin);
+        assert!(ui.view.spectrum_listening);
+        assert_eq!(ui.view.spectrum_cursor, bin);
+    }
+
+    #[test]
+    fn pending_listen_cancel_clears_freeze_without_listening() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        choose_menu(&mut ui, MenuItem::Spectrum, &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        let update = press(&mut ui, Key::Menu, &bitmap);
+        assert!(matches!(
+            update.request,
+            Some(Request::ListenSpectrum { .. })
+        ));
+        assert!(ui.view.spectrum_pending_listen.is_some());
+        // Overlay is allowed while pending; EXIT closes only the overlay.
+        assert_eq!(press(&mut ui, Key::Menu, &bitmap).request, None);
+        assert_eq!(press(&mut ui, Key::Exit, &bitmap).request, None);
+        assert!(ui.view.spectrum_pending_listen.is_some());
+        let exit = press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(exit.request, Some(Request::StopSpectrum));
+        assert_eq!(ui.view.spectrum_pending_listen, None);
+        assert!(!ui.view.spectrum_listening);
+        // Late ACK must not start Listen or move the confirmed VFO.
+        ui.confirm_spectrum_listen(40);
+        assert!(!ui.view.spectrum_listening);
+    }
+
+    #[test]
+    fn pending_listen_ptt_cancels_and_late_ack_is_ignored() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        choose_menu(&mut ui, MenuItem::Spectrum, &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        let update = press(&mut ui, Key::Menu, &bitmap);
+        assert!(matches!(
+            update.request,
+            Some(Request::ListenSpectrum { .. })
+        ));
+        let ptt = ui.handle(InputEvent::Ptt(true), &bitmap);
+        assert!(ptt.cancel_temporary);
+        assert_eq!(ptt.request, Some(Request::StopSpectrum));
+        assert_eq!(ui.view.spectrum_pending_listen, None);
+        assert!(!ui.view.spectrum_listening);
+        ui.confirm_spectrum_listen(40);
+        assert!(!ui.view.spectrum_listening);
+    }
+
+    #[test]
+    fn step_menu_is_the_only_commit_after_slot_route() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        ui.view.step_index = 1;
+        let original = ui.context(Slot::A).step_index;
+        press(&mut ui, Key::Hash, &bitmap);
+        press(&mut ui, Key::Down, &bitmap);
+        ui.select_slot(Slot::A);
+        press(&mut ui, Key::Hash, &bitmap);
+        press(&mut ui, Key::Down, &bitmap);
+        let committed = ui.view.step_index;
+        press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(ui.view.screen, Screen::Home);
+        assert_eq!(ui.context(Slot::A).step_index, committed);
+        assert_ne!(committed, original);
+    }
+}
+
+pub fn vfo_tx_frequency(view: View) -> Option<u32> {
+    view.vfo_10hz
+        .checked_add_signed(*SHIFT_10HZ.get(usize::from(view.shift_index))?)
 }

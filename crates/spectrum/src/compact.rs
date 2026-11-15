@@ -69,6 +69,10 @@ pub struct Plot {
     pub fresh: [u8; BITMAP_BYTES],
     pub peak_valid: [u8; BITMAP_BYTES],
     pub sweep: u32,
+    pub display_floor: Option<u16>,
+    pub held_bin: Option<u8>,
+    pub trigger_bin: Option<u8>,
+    pub elapsed_ms: u16,
 }
 
 impl Plot {
@@ -79,6 +83,10 @@ impl Plot {
         fresh: [0; BITMAP_BYTES],
         peak_valid: [0; BITMAP_BYTES],
         sweep: 0,
+        display_floor: None,
+        held_bin: None,
+        trigger_bin: None,
+        elapsed_ms: 0,
     };
     pub fn valid(&self, index: usize) -> bool {
         bit(&self.valid, index)
@@ -88,6 +96,44 @@ impl Plot {
     }
     pub fn peak_valid(&self, index: usize) -> bool {
         bit(&self.peak_valid, index)
+    }
+    /// Number of points with at least one measurement. Points outside a short
+    /// window are never set, so this is also the progress denominator.
+    pub fn measured(&self) -> u8 {
+        let mut count = 0;
+        for index in 0..BINS {
+            if self.valid(index) {
+                count += 1;
+            }
+        }
+        count
+    }
+    /// Smallest and largest measured RAW value, or None when nothing is known.
+    pub fn raw_range(&self) -> Option<(u16, u16)> {
+        let mut range: Option<(u16, u16)> = None;
+        for index in 0..BINS {
+            if self.valid(index) {
+                let value = self.latest[index];
+                range = Some(match range {
+                    None => (value, value),
+                    Some((low, high)) => (low.min(value), high.max(value)),
+                });
+            }
+        }
+        range
+    }
+    /// First bin holding the strongest measured value, for a stable readout.
+    pub fn strongest(&self) -> Option<(u8, u16)> {
+        let mut best: Option<(u8, u16)> = None;
+        for index in 0..BINS {
+            if self.valid(index) {
+                let value = self.latest[index];
+                if best.is_none_or(|(_, previous)| value > previous) {
+                    best = Some((index as u8, value));
+                }
+            }
+        }
+        best
     }
 }
 
@@ -473,7 +519,7 @@ impl Engine {
 }
 
 // These are target-independent upper bounds, including a 64-bit host's padding.
-const _: () = assert!(core::mem::size_of::<Plot>() <= 368);
+const _: () = assert!(core::mem::size_of::<Plot>() <= 384);
 const _: () = assert!(core::mem::size_of::<Engine>() < 1024);
 
 #[cfg(test)]
@@ -511,7 +557,7 @@ mod tests {
     #[test]
     fn footprint_and_config_reject_more_than_eighty_one() {
         assert!(core::mem::size_of::<Engine>() < 1024);
-        assert!(core::mem::size_of::<Plot>() <= 368);
+        assert!(core::mem::size_of::<Plot>() <= 384);
         assert_eq!(
             Config::new(
                 Range::new(1, 82, 1).unwrap(),
@@ -543,6 +589,21 @@ mod tests {
         ));
         assert!(!e.plot().valid(0)); // elapsed time is not a sample
     }
+    #[test]
+    fn summary_helpers_never_count_unknown_points() {
+        let mut plot = Plot::EMPTY;
+        assert_eq!(plot.measured(), 0);
+        assert_eq!(plot.raw_range(), None);
+        assert_eq!(plot.strongest(), None);
+        for (index, raw) in [(0usize, 10u16), (2, 40), (3, 25)] {
+            plot.latest[index] = raw;
+            set_bit(&mut plot.valid, index);
+        }
+        assert_eq!(plot.measured(), 3);
+        assert_eq!(plot.raw_range(), Some((10, 40)));
+        assert_eq!(plot.strongest(), Some((2, 40)));
+    }
+
     #[test]
     fn partial_sweeps_and_peaks_remain_honest() {
         let mut e = Engine::new();

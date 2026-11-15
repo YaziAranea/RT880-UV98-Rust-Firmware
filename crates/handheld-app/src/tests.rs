@@ -259,7 +259,7 @@ fn backwards_clock_is_terminal_and_hides_snapshot() {
 fn key_page_refreshes_on_invalid_input_and_rearm_but_not_idle() {
     let mut app = app(Memory::new(), PRESERVED_CALIBRATION_SHA256);
     app.start(0).unwrap();
-    menu(&mut app, controller::MenuItem::Keys);
+    event(&mut app, InputEvent::Hold(Key::Digit8));
     assert_eq!(app.status.view.screen, Screen::Keys);
     app.draw().unwrap();
     let release = InputSample::Stable {
@@ -501,13 +501,14 @@ fn backend_metadata_damage_is_bounded_and_simulation_never_writes_nor() {
     let mut radio = RadioView {
         state: render::RadioState::Receiving,
         rssi: Some(80),
+        meter_floor: 70,
         ..RadioView::OFF
     };
     app.set_radio_view(radio).unwrap();
     while app.render_pending() {
         app.render_step(4).unwrap();
     }
-    radio.rssi = Some(84);
+    radio.rssi = Some(90);
     app.set_radio_view(radio).unwrap();
     let mut rows = 0;
     while app.render_pending() {
@@ -588,6 +589,7 @@ fn continuous_50ms_rssi_cannot_starve_a_full_home_pass_or_lose_the_latest_value(
     let mut radio = RadioView {
         state: render::RadioState::Receiving,
         rssi: Some(165),
+        meter_floor: 150,
         ..RadioView::OFF
     };
     app.set_radio_view(radio).unwrap();
@@ -709,7 +711,7 @@ fn menu_and_up_are_not_lost_during_a_partial_home_frame_with_flickering_rssi() {
     event(&mut app, InputEvent::Short(Key::Exit));
     assert_eq!(app.status.view.screen, Screen::Home);
     assert_eq!(app.radio_view(), radio); // Latest metadata survives page changes.
-    assert_eq!(app.pending_rows.next(app.row_cursor), Some(11));
+    assert_eq!(app.pending_rows.next(app.row_cursor), Some(0));
 }
 
 #[test]
@@ -747,7 +749,7 @@ fn navigation_keeps_unpainted_unlock_banner_and_deferred_damage_pixel_exact() {
     radio.squelch_open = true;
     radio.rssi = Some(271);
     app.set_radio_view(radio).unwrap();
-    assert!(app.deferred_radio_rows.has(34));
+    assert!(app.deferred_radio_rows.has(6));
     let pending = app.pending_rows;
     let deferred = app.deferred_radio_rows;
     event(&mut app, InputEvent::Short(Key::Menu));
@@ -784,6 +786,7 @@ fn radio_control_and_ptt_changes_are_queued_without_waiting_for_telemetry_pass()
     let mut radio = RadioView {
         state: render::RadioState::Receiving,
         rssi: Some(165),
+        meter_floor: 150,
         ..RadioView::OFF
     };
     app.set_radio_view(radio).unwrap();
@@ -793,17 +796,23 @@ fn radio_control_and_ptt_changes_are_queued_without_waiting_for_telemetry_pass()
     app.pending_rows.mark(300, 320);
     radio.rssi = Some(170);
     app.set_radio_view(radio).unwrap();
-    assert!(!app.pending_rows.has(258));
-    assert!(app.deferred_radio_rows.has(258));
+    assert!(!app
+        .pending_rows
+        .has(render::home_slot_rows(app.status.view.active_slot).0 + render::HOME_METER_Y));
+    assert!(app
+        .deferred_radio_rows
+        .has(render::home_slot_rows(app.status.view.active_slot).0 + render::HOME_METER_Y));
     radio.state = render::RadioState::Transmitting; // Explicit simulated backend report.
     app.set_radio_view(radio).unwrap();
-    assert!(app.pending_rows.has(28));
-    assert!(app.pending_rows.has(258));
+    assert!(app.pending_rows.has(0));
+    assert!(app
+        .pending_rows
+        .has(render::home_slot_rows(app.status.view.active_slot).0 + render::HOME_METER_Y));
     assert!(!app.deferred_radio_rows.any());
     event(&mut app, InputEvent::Ptt(true));
     app.reject_tx().unwrap();
     assert_eq!(app.status.view.notice, controller::Notice::TxDisabled);
-    assert!(app.pending_rows.has(269));
+    assert!(app.pending_rows.has(0));
 }
 
 #[test]
@@ -828,18 +837,18 @@ fn actual_lcd_banner_preempts_an_old_page_tail_without_a_fake_tx_state() {
         ..RadioView::OFF
     })
     .unwrap();
-    for _ in 0..12 {
+    for _ in 0..18 {
         assert!(app.render_step(2).unwrap().rows <= 2);
     }
     let drawn = windows.borrow();
-    assert_eq!(drawn[0], (28, 30));
-    let mut banner = [false; 20];
+    assert_eq!(drawn[0], (0, 2));
+    let mut banner = [false; 27];
     for &(start, end) in drawn.iter() {
-        for row in start.max(28)..end.min(48) {
-            banner[(row - 28) as usize] = true;
+        for row in start..end.min(27) {
+            banner[row as usize] = true;
         }
     }
-    assert!(banner.iter().all(|row| *row)); // <= 12 small batches, not 160.
+    assert!(banner.iter().all(|row| *row)); // <= 18 small batches, not 160.
     assert!(drawn.iter().any(|&(start, _)| start >= 300));
     assert_eq!(app.radio_view().state, render::RadioState::Starting);
     assert_eq!(app.nor.reads, reads);
@@ -891,7 +900,7 @@ fn continuously_replaced_banner_cannot_starve_footer_or_consume_rssi_priority() 
     radio.squelch_open = !radio.squelch_open;
     app.set_radio_view(radio).unwrap();
     assert_eq!(app.priority_banner, 0); // Even SQL banner updates are coalesced.
-    assert!(app.deferred_radio_rows.has(28));
+    assert!(app.deferred_radio_rows.has(0));
 }
 
 #[test]
@@ -920,7 +929,7 @@ fn ptt_and_menu_input_do_not_flush_lcd_and_exit_discards_old_priority_work() {
     };
     app.sample(100, ptt).unwrap();
     assert!(app.sample(130, ptt).unwrap().ptt_tx_requested);
-    assert_eq!(app.priority_banner.count_ones(), 20);
+    assert_eq!(app.priority_banner.count_ones(), 27);
     assert_eq!(app.radio_view(), RadioView::OFF); // Input is not TX acknowledgement.
     app.sample(160, released).unwrap();
     app.sample(190, released).unwrap();
@@ -1119,7 +1128,7 @@ fn menu_and_list_cursors_reuse_ram_windows_and_page_changes_do_not_replan_the_fr
     assert_eq!(app.list_anchor, Some(7));
     assert_eq!(app.nor.reads - reads, 7);
     assert!(!app.pending_rows.has(0));
-    assert!(!app.pending_rows.has(28));
+    assert!(!app.pending_rows.has(0));
     assert!(!app.pending_rows.has(300));
     assert!(app.pending_rows.has(54));
     menu(&mut app, controller::MenuItem::Zones);
@@ -1194,6 +1203,300 @@ fn independent_slot_names_zones_and_modes_are_cached_and_lighting_is_global() {
 }
 
 #[test]
+fn app_confirms_pending_listen_on_the_restored_bin_not_a_moved_cursor() {
+    let mut app = app(Memory::new(), PRESERVED_CALIBRATION_SHA256);
+    app.start(0).unwrap();
+    assert_eq!(
+        menu(&mut app, controller::MenuItem::Spectrum).request,
+        Some(Request::StartSpectrum)
+    );
+    event(&mut app, InputEvent::Short(Key::Digit2)); // 81-point test grid
+    let mut snapshot = SpectrumSnapshot {
+        state: SpectrumState::Sweeping,
+        window_id: 1,
+        start_10hz: 43_200_000,
+        center_10hz: 43_250_000,
+        step_10hz: 1_250,
+        len: 81,
+        plot: uv98_spectrum::compact::Plot::EMPTY,
+    };
+    snapshot.plot.valid[5] = 1;
+    assert!(app.set_spectrum(snapshot).unwrap());
+    let bin = app.status.view.spectrum_cursor;
+    let opened = event(&mut app, InputEvent::Short(Key::Menu));
+    assert_eq!(opened.request, None);
+    let requested = event(&mut app, InputEvent::Short(Key::Menu));
+    assert_eq!(requested.request, Some(Request::ListenSpectrum { bin }));
+    assert_eq!(app.status.view.spectrum_pending_listen, Some(bin));
+    assert!(!app.status.view.spectrum_listening);
+    event(&mut app, InputEvent::Short(Key::Down));
+    assert_eq!(app.status.view.spectrum_cursor, bin);
+    // Real app callback used by main after the scope confirmed this bin.
+    app.confirm_spectrum_listen(bin).unwrap();
+    assert_eq!(app.status.view.spectrum_cursor, bin);
+    assert!(app.status.view.spectrum_listening);
+    assert_eq!(app.status.view.spectrum_pending_listen, None);
+    let view = app.spectrum_view().unwrap();
+    assert_eq!(
+        view.frequency_10hz(bin),
+        Some(43_250_000),
+        "displayed Listen frequency must be the confirmed RF bin"
+    );
+}
+
+#[test]
+fn app_scope_grid_identity_rejects_stale_bin_after_restart_and_backlog() {
+    use uv98_radio_runtime::{scope::Scope, Io, Runtime, State as RadioState};
+    use uv98_rf_sequence::RxRequest;
+    use uv98_spectrum::Window;
+    struct ScopeIo {
+        words: [u16; 128],
+    }
+    impl Io for ScopeIo {
+        type Error = &'static str;
+        fn read(&mut self, register: u8) -> Result<u16, Self::Error> {
+            Ok(self.words[register as usize])
+        }
+        fn write(&mut self, register: u8, value: u16) -> Result<(), Self::Error> {
+            self.words[register as usize] = value;
+            Ok(())
+        }
+        fn mute(&mut self, _muted: bool) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        fn antenna(&mut self, _high: bool) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        fn hf_gates(&mut self, _high: bool, _b: bool) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        fn indicators(&mut self, _rx: bool, _tx: bool) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        fn backlights(&mut self, _display: bool, _keys: bool) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        fn verify_control(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+    let calibration = uv98_calibration::Calibration::parse(include_bytes!(
+        "../../calibration/tests/fixtures/uv98-plus-stock-1.16.bin"
+    ))
+    .unwrap();
+    let request = RxRequest {
+        frequency_10hz: 14_550_000,
+        width: uv98_rf_sequence::Width::Wide,
+        level: 1,
+        tone: 0,
+        tone_mode: 0,
+        option_nibble: 0,
+        squelch_delay: 10,
+        modulation: uv98_rf_sequence::Modulation::Fm,
+    };
+    let mut radio = Runtime::new(ScopeIo { words: [0; 128] });
+    let mut now = 0;
+    radio.cold_start(&calibration, now).unwrap();
+    for _ in 0..400 {
+        now += 2;
+        radio.tick(now, false).unwrap();
+        if radio.state() != RadioState::Configuring {
+            break;
+        }
+    }
+    radio.receive(&calibration, request, now).unwrap();
+    for _ in 0..400 {
+        now += 2;
+        radio.tick(now, false).unwrap();
+        if radio.state() == RadioState::Receiving {
+            break;
+        }
+    }
+    assert_eq!(radio.state(), RadioState::Receiving);
+
+    let wide = Window::centered(14_550_000, 1_000_000, 12_500).unwrap();
+    let mut scope = Scope::new();
+    scope
+        .start_window(&radio, &calibration, request, wide, now)
+        .unwrap();
+    for _ in 0..2000 {
+        now += 2;
+        radio.tick(now, false).unwrap();
+        scope.step(&mut radio, &calibration, || now).unwrap();
+        if scope.plot().valid(0) {
+            break;
+        }
+    }
+    assert!(scope.plot().valid(0), "wide grid bin0 must be measured");
+
+    let mut app = app(Memory::new(), PRESERVED_CALIBRATION_SHA256);
+    app.start(0).unwrap();
+    assert_eq!(
+        menu(&mut app, controller::MenuItem::Spectrum).request,
+        Some(Request::StartSpectrum)
+    );
+    let old = SpectrumSnapshot {
+        state: SpectrumState::Sweeping,
+        window_id: scope.generation(),
+        start_10hz: wide.start_10hz(),
+        center_10hz: wide.center_10hz(),
+        step_10hz: wide.step_10hz(),
+        len: wide.len() as u8,
+        plot: *scope.plot(),
+    };
+    assert!(app.set_spectrum(old).unwrap());
+    for _ in 0..40 {
+        event(&mut app, InputEvent::Short(Key::Up));
+    }
+    assert_eq!(app.spectrum_view().unwrap().start_10hz, 14_050_000);
+    assert_eq!(app.status.view.spectrum_cursor, 0);
+    // Keep an old frame on screen: one row drained, many still pending.
+    app.render_step(1).unwrap();
+
+    // Real Scope restart to a narrower grid; old app snapshot stays published.
+    scope.event(now, uv98_spectrum::compact::Event::Stop);
+    let mut restored = false;
+    for _ in 0..2000 {
+        now += 2;
+        radio.tick(now, false).unwrap();
+        if let uv98_radio_runtime::scope::Completion::Restored { .. } =
+            scope.step(&mut radio, &calibration, || now).unwrap()
+        {
+            restored = true;
+            break;
+        }
+    }
+    assert!(restored, "old sweep must restore before restart");
+    let narrow = Window::centered(14_550_000, 500_000, 12_500).unwrap();
+    if radio.state() != RadioState::Receiving {
+        radio.receive(&calibration, request, now).unwrap();
+        for _ in 0..400 {
+            now += 2;
+            radio.tick(now, false).unwrap();
+            if radio.state() == RadioState::Receiving {
+                break;
+            }
+        }
+    }
+    scope
+        .start_window(&radio, &calibration, request, narrow, now)
+        .unwrap();
+    for _ in 0..2000 {
+        now += 2;
+        radio.tick(now, false).unwrap();
+        scope.step(&mut radio, &calibration, || now).unwrap();
+        if scope.plot().valid(0) {
+            break;
+        }
+    }
+    assert!(scope.plot().valid(0), "narrow grid bin0 must be measured");
+    let newer = SpectrumSnapshot {
+        state: SpectrumState::Sweeping,
+        window_id: scope.generation(),
+        start_10hz: narrow.start_10hz(),
+        center_10hz: narrow.center_10hz(),
+        step_10hz: narrow.step_10hz(),
+        len: narrow.len() as u8,
+        plot: *scope.plot(),
+    };
+    assert!(
+        !app.set_spectrum(newer).unwrap(),
+        "old frame must win backlog"
+    );
+    let displayed = app.spectrum_view().unwrap();
+    assert_eq!(displayed.window_id, old.window_id);
+    let published = uv98_radio_runtime::spectrum_flow::PublishedWindow {
+        generation: displayed.window_id,
+        start_10hz: displayed.start_10hz,
+        step_10hz: displayed.step_10hz,
+        len: displayed.len,
+    };
+    assert_eq!(
+        uv98_radio_runtime::spectrum_flow::bind_bin(
+            Some(published),
+            scope.window(),
+            scope.generation(),
+            0,
+        ),
+        Err(uv98_radio_runtime::spectrum_flow::SelectionError::StaleWindow)
+    );
+    assert_ne!(narrow.start_10hz(), wide.start_10hz());
+    assert_eq!(narrow.start_10hz(), 14_300_000);
+
+    while app.render_pending() {
+        app.render_step(32).unwrap();
+    }
+    assert!(app.set_spectrum(newer).unwrap());
+    let displayed = app.spectrum_view().unwrap();
+    let accepted = uv98_radio_runtime::spectrum_flow::PublishedWindow {
+        generation: displayed.window_id,
+        start_10hz: displayed.start_10hz,
+        step_10hz: displayed.step_10hz,
+        len: displayed.len,
+    };
+    assert_eq!(
+        uv98_radio_runtime::spectrum_flow::bind_bin(
+            Some(accepted),
+            scope.window(),
+            scope.generation(),
+            0,
+        ),
+        Ok(14_300_000)
+    );
+}
+
+#[test]
+fn app_error_before_listen_ack_clears_pending_without_audio() {
+    let mut app = app(Memory::new(), PRESERVED_CALIBRATION_SHA256);
+    app.start(0).unwrap();
+    assert_eq!(
+        menu(&mut app, controller::MenuItem::Spectrum).request,
+        Some(Request::StartSpectrum)
+    );
+    let snapshot = SpectrumSnapshot {
+        state: SpectrumState::Sweeping,
+        window_id: 1,
+        start_10hz: 43_200_000,
+        center_10hz: 43_250_000,
+        step_10hz: 1_250,
+        len: 81,
+        plot: uv98_spectrum::compact::Plot::EMPTY,
+    };
+    assert!(app.set_spectrum(snapshot).unwrap());
+    let bin = app.status.view.spectrum_cursor;
+    event(&mut app, InputEvent::Short(Key::Menu));
+    let requested = event(&mut app, InputEvent::Short(Key::Menu));
+    assert_eq!(requested.request, Some(Request::ListenSpectrum { bin }));
+    app.cancel_spectrum_pending().unwrap();
+    app.note_spectrum_error(SpectrumError::Restore).unwrap();
+    assert_eq!(app.status.view.spectrum_pending_listen, None);
+    assert!(!app.status.view.spectrum_listening);
+}
+
+#[test]
+fn codex_listen_confirmation_after_external_slot_change_is_refused() {
+    let mut app = app(Memory::new(), PRESERVED_CALIBRATION_SHA256);
+    app.start(0).unwrap();
+    assert_eq!(
+        menu(&mut app, controller::MenuItem::Spectrum).request,
+        Some(Request::StartSpectrum)
+    );
+    let bin = app.status.view.spectrum_cursor;
+    event(&mut app, InputEvent::Short(Key::Menu));
+    let requested = event(&mut app, InputEvent::Short(Key::Menu));
+    assert_eq!(requested.request, Some(Request::ListenSpectrum { bin }));
+    assert_eq!(app.status.view.spectrum_pending_listen, Some(bin));
+
+    // Public coordinator API can change context independently of the normal
+    // keyboard event path. A late callback must not authorize audio on Home.
+    app.select_slot(controller::Slot::B).unwrap();
+    assert_eq!(app.status.view.screen, Screen::Home);
+    assert!(!app.confirm_spectrum_listen(bin).unwrap());
+    assert!(!app.status.view.spectrum_listening);
+    assert_eq!(app.status.view.spectrum_pending_listen, None);
+}
+
+#[test]
 fn spectrum_publications_stay_immutable_until_rows_drain_and_never_read_nor() {
     let mut app = app(Memory::new(), PRESERVED_CALIBRATION_SHA256);
     app.start(0).unwrap();
@@ -1201,11 +1504,14 @@ fn spectrum_publications_stay_immutable_until_rows_drain_and_never_read_nor() {
         menu(&mut app, controller::MenuItem::Spectrum).request,
         Some(Request::StartSpectrum)
     );
+    event(&mut app, InputEvent::Short(Key::Digit2)); // 81-point test grid
     let reads = app.nor.reads;
     let old_context = app.controller.context(Slot::A);
     let mut snapshot = SpectrumSnapshot {
         state: SpectrumState::Sweeping,
+        window_id: 1,
         start_10hz: 43_200_000,
+        center_10hz: 43_250_000,
         step_10hz: 1_250,
         len: 81,
         plot: uv98_spectrum::compact::Plot::EMPTY,
@@ -1225,9 +1531,18 @@ fn spectrum_publications_stay_immutable_until_rows_drain_and_never_read_nor() {
     }
     assert!(app.set_spectrum(latest).unwrap());
     assert_eq!(app.spectrum_view().unwrap().plot.latest[40], 170);
+    let opened = event(&mut app, InputEvent::Short(Key::Menu));
+    assert_eq!(opened.request, None);
+    assert!(app.status.view.spectrum_menu);
     let requested = event(&mut app, InputEvent::Short(Key::Menu));
-    assert_eq!(requested.request, Some(Request::AcceptSpectrum { bin: 41 }));
+    assert_eq!(requested.request, Some(Request::ListenSpectrum { bin: 41 }));
     assert_eq!(app.controller.context(Slot::A), old_context);
+    assert_eq!(app.status.view.screen, Screen::Spectrum);
+    // Listen leaves the MR/VFO context alone; explicit accept is separate.
+    event(&mut app, InputEvent::Short(Key::Menu));
+    event(&mut app, InputEvent::Short(Key::Down));
+    let accepted = event(&mut app, InputEvent::Short(Key::Menu));
+    assert_eq!(accepted.request, Some(Request::AcceptSpectrum { bin: 41 }));
     app.accept_spectrum_frequency(43_251_250).unwrap();
     assert_eq!(app.status.view.mode, Mode::Vfo);
     assert_eq!(app.status.view.screen, Screen::Home);
@@ -1235,6 +1550,136 @@ fn spectrum_publications_stay_immutable_until_rows_drain_and_never_read_nor() {
     app.clear_spectrum().unwrap();
     assert!(app.spectrum_view().is_none());
     assert_eq!(app.nor.reads, reads);
+}
+
+#[test]
+fn nudging_from_the_edge_keeps_the_cursor_at_the_new_edge() {
+    let mut app = app(Memory::new(), PRESERVED_CALIBRATION_SHA256);
+    app.start(0).unwrap();
+    menu(&mut app, controller::MenuItem::Spectrum);
+    let mut snapshot = SpectrumSnapshot {
+        state: SpectrumState::Sweeping,
+        window_id: 1,
+        start_10hz: 43_200_000,
+        center_10hz: 43_205_000,
+        step_10hz: 2_500,
+        len: 5,
+        plot: uv98_spectrum::compact::Plot::EMPTY,
+    };
+    assert!(app.set_spectrum(snapshot).unwrap());
+    for expected in [3, 4] {
+        assert_eq!(event(&mut app, InputEvent::Short(Key::Down)).request, None);
+        assert_eq!(app.status.view.spectrum_cursor, expected);
+    }
+    let right = Some(Request::PanSpectrum {
+        forward: true,
+        fine: true,
+    });
+    assert_eq!(event(&mut app, InputEvent::Short(Key::Down)).request, right);
+    assert_eq!(
+        event(&mut app, InputEvent::Repeat(Key::Down)).request,
+        right
+    );
+    while app.render_pending() {
+        app.render_step(8).unwrap();
+    }
+    snapshot.window_id += 1;
+    snapshot.start_10hz += 5_000;
+    snapshot.center_10hz += 5_000;
+    assert!(app.set_spectrum_with_cursor(snapshot, Some(4)).unwrap());
+    assert_eq!(
+        app.spectrum_view().unwrap().frequency_10hz(4),
+        Some(43_215_000)
+    );
+    assert_eq!(app.status.view.spectrum_cursor, 4);
+    assert_eq!(event(&mut app, InputEvent::Short(Key::Down)).request, right);
+    for _ in 0..4 {
+        assert_eq!(event(&mut app, InputEvent::Short(Key::Up)).request, None);
+    }
+    assert_eq!(
+        event(&mut app, InputEvent::Short(Key::Up)).request,
+        Some(Request::PanSpectrum {
+            forward: false,
+            fine: true
+        }),
+    );
+}
+
+#[test]
+fn spectrum_window_change_keeps_cursor_frequency() {
+    let mut app = app(Memory::new(), PRESERVED_CALIBRATION_SHA256);
+    app.start(0).unwrap();
+    menu(&mut app, controller::MenuItem::Spectrum);
+    event(&mut app, InputEvent::Short(Key::Digit2)); // 81-point test grid
+    let first = SpectrumSnapshot {
+        state: SpectrumState::Sweeping,
+        window_id: 1,
+        start_10hz: 43_247_500,
+        center_10hz: 43_297_500,
+        step_10hz: 1_250,
+        len: 81,
+        plot: uv98_spectrum::compact::Plot::EMPTY,
+    };
+    assert!(app.set_spectrum(first).unwrap());
+    for _ in 0..20 {
+        event(&mut app, InputEvent::Short(Key::Down));
+    }
+    assert_eq!(app.status.view.spectrum_cursor, 60);
+    let frequency = 43_247_500 + 60 * 1_250;
+    while app.render_pending() {
+        app.render_step(4).unwrap();
+    }
+    // Same centre, wider step: 81 -> 41 points. Keep the same frequency.
+    let second = SpectrumSnapshot {
+        step_10hz: 2_500,
+        len: 41,
+        ..first
+    };
+    assert!(app.set_spectrum(second).unwrap());
+    let index = u32::from(app.status.view.spectrum_cursor);
+    assert_eq!(
+        second.start_10hz + index * second.step_10hz,
+        frequency,
+        "cursor keeps its frequency when the window grid changes"
+    );
+}
+
+#[test]
+fn rejected_spectrum_start_keeps_reason_and_window_menu_without_stale_plot() {
+    let mut app = app(Memory::new(), PRESERVED_CALIBRATION_SHA256);
+    app.start(0).unwrap();
+    menu(&mut app, controller::MenuItem::Spectrum);
+    let mut snapshot = SpectrumSnapshot {
+        state: SpectrumState::Sweeping,
+        window_id: 1,
+        start_10hz: 43_200_000,
+        center_10hz: 43_250_000,
+        step_10hz: 1_250,
+        len: 81,
+        plot: uv98_spectrum::compact::Plot::EMPTY,
+    };
+    snapshot.plot.valid[5] = 1;
+    snapshot.plot.latest[40] = 200;
+    assert!(app.set_spectrum(snapshot).unwrap());
+    app.clear_spectrum().unwrap();
+    app.reject_spectrum_start(render::SpectrumError::Window)
+        .unwrap();
+    assert!(app.spectrum_view().is_none(), "old plot must not return");
+    assert_eq!(app.status.view.screen, Screen::Spectrum);
+    assert_eq!(
+        app.status.view.notice,
+        controller::Notice::SpectrumUnavailable
+    );
+
+    // The overlay is usable before any measurement: widen the default narrow window.
+    let opened = event(&mut app, InputEvent::Short(Key::Menu));
+    assert_eq!(opened.request, None);
+    assert!(app.status.view.spectrum_menu);
+    event(&mut app, InputEvent::Short(Key::Down)); // ACCEPT VFO
+    event(&mut app, InputEvent::Short(Key::Down)); // SPAN WIDER
+    let restart = event(&mut app, InputEvent::Short(Key::Menu));
+    assert_eq!(restart.request, Some(Request::RestartSpectrum));
+    assert!(!app.status.view.spectrum_menu);
 }
 
 #[test]

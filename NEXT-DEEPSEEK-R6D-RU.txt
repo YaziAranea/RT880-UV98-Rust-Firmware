@@ -1,0 +1,91 @@
+ЗАДАНИЕ CODEX: r6d — закрыть оставшиеся ошибки Step / Listen / restore
+Дата: 2026-11-10. Назначено после проверки DRX-00 и исходников r6c.
+
+Рабочий проект: C:/Users/User/Documents/deepseek-harness/default-workspace/uv98-rust
+Сначала прочитать AGENTS.md и FEATURES-NEXT-RU.txt. Не начинать новый поиск
+функций или косметическую переработку: этот этап исправляет конкретные ошибки.
+Работать автономно до отчёта. COM/рацию/прошивку/RF/PTT не использовать.
+Исходные калибровки, NOR, codeplug и выпущенные архивы не менять. На станции r5.
+Релиз r6c оставить неизменным. DRX-00 не означает готовый двойной приём.
+
+1. DS-05: Step после PTT текущего слота (ВОСПРОИЗВЕДЕНО CODEX)
+crates/handheld-ui/src/controller.rs::select_slot вызывает finish_step_cancel,
+но switch_slot при том же слоте немедленно возвращает управление. Экран Step
+остаётся открыт без step_before. Следующий UP/DOWN и EXIT сохраняют черновик.
+Сценарий: A -> # -> изменить шаг -> PTT A -> release -> изменить шаг -> EXIT.
+Независимый тест на распакованном source.zip r6c: FAILED, left 2/right 1,
+exit_code 101. До изменения production воспроизвести приложенный тест.
+Файлы рядом с этим заданием: r6c-same-slot-regression.patch и .log.
+SHA256 исходного r6c source.zip:
+4a03c104bfc55ba7ede32f943aa791463fdfa96f1222d2e7b07afd70faa9a563
+Исправление: отменённый редактор закрывается либо получает новую корректную
+транзакцию; EXIT не сохраняет, MENU — единственный commit. Тесты для A->A,
+B->B, A->B, B->A, прямого select_slot, удержания/отпускания и повторного входа.
+Не возвращать прежнюю утечку отката A->B. Тест может разрешать оба корректных
+UX-решения; не подгонять его под реализацию и не удалять прошлые регрессии.
+
+2. DS-06: Listen показывает не ту частоту и ошибочное состояние звука
+Исходники проверены Codex: controller.rs::navigate меняет spectrum_cursor
+во время Listen; render.rs берёт крупную частоту по cursor, хотя RF остаётся
+на bin, выбранном при начале Listen. Overlay пишет «ЗВУК ВЫКЛ», хотя monitor
+открыт. Сделать фактически прослушиваемую частоту отдельным подтверждённым
+состоянием либо блокировать изменение курсора во время Listen (наименьшая
+корректная правка предпочтительна). Не обозначать выбранный курсор как actual.
+Подпись звука зависит от подтверждённого состояния; во время restore не
+показывать, что новый сигнал уже слушается. Короткий EXIT из overlay закрывает
+overlay; короткий EXIT с Listen возвращает sweep; долгий EXIT/PTT отменяет.
+Проверки: Listen bin X -> стрелки/repeat -> MENU/overlay -> EXIT -> EXIT;
+фактический RF-план и показанная Listen-frequency остаются согласованы.
+Симулятор: Listening, Listening+overlay, Restoring, возврат в sweep.
+
+3. DS-07: проверить смену intent при незавершённом restore
+Это ОБНАРУЖЕННЫЙ РИСК ПО КОДУ, пока без воспроизведения Codex, не готовый диагноз.
+main.rs Request::ListenSpectrum / AcceptSpectrum допускают scope.active() &&
+!scope.listening(), включая Restoring. Новый intent записывается до проверки,
+принял ли compact::Engine новый Accept. Engine принимает Accept только running.
+Старый Restored(accepted index X) потенциально завершает новый intent для Y.
+До исправления создать тест реальной связки request -> scope/engine -> delayed
+completion -> action; отдельная таблица spectrum_flow::completion недостаточна.
+Сценарии: Listen X -> Accept Y до ACK; Accept X -> Listen Y; повторный Listen;
+EXIT/PTT/долгий EXIT при restore; timeout/fault; restart с отложенным ACK.
+Если воспроизведётся, привязать intent к принятой операции/идентификатору/bin
+или явно отклонять новые действия Busy до смены intent. Отказ не меняет VFO,
+не теряет исходный RxRequest и не воскрешает sweep после отмены. Не добавлять
+ещё независимых bool без описания переходов. Минимальную логику координации
+вынести из main в тестируемый модуль, если без этого реальная гонка не тестируется.
+Запуск TX по отменяющему нажатию запрещён существующим release/new-edge guard;
+сохранить channel-tx/TOT и обычные разрешённые сценарии передачи.
+
+4. Закончить точечную коррекцию DRX-00 (основные цепи уже исправлены)
+- DRX-00-REPORT-RU.md:37-38, evidence:85-86, JSON:125-126: заменить «105pF»
+  у C431/C489 на «105P (маркировка схемы)». Не путать код номинала с 105 pF.
+- research/dual-rx/DRX-00-EVIDENCE-RU.txt:132: убрать предположение «B audio
+  после C433/до U501». Правильно: проверить EARO/C433/AF OUT4819B и отдельно
+  установить дальнейший путь к усилителю/динамику; связь AF OUT4819B->U501
+  не доказана. В строке 11 NC относится к последовательному C433, не EARO.
+- JSON:122: вместо «None of these is an antenna RX input» написать
+  «No antenna connection is shown for LNAIN; MICP and MICN are separate
+  microphone/modulation pins». LNAIN остаётся RF-входом.
+- Пересчитать зависимые SHA. Номера строк ориентировочные: искать по тексту.
+- receiver_for_slot(B)->SecondaryB — гипотетическое назначение, не фактическое
+  production. Добавить явное ограничение в документацию будущего DRX-01;
+  не подключать этот mapper к текущему RF/TX. Hardware B остаётся asleep.
+
+ПРИЁМКА И ВЫХОД
+- Сначала failing regressions на r6c, затем исправления и PASS; сохранить логи.
+- Осмысленные host-тесты интеграции событий, не только тесты новой функции.
+- Предыдущие DS-01..04 и Listen return, scanner/scope exclusion остаются зелёными.
+- Один итоговый полный прогон проекта после правок: fmt/host/ARM/image checks,
+  симулятор и визуальный просмотр изменённых экранов. Root DeepSeek запускает
+  Cargo один; его субагенты не запускают конкурирующие сборки.
+- Отдельный кандидат r6d и outputs/UV98-r6d-20261110-1, точные BIN/ELF/ZIP SHA,
+  исходники соответствуют образу, фактические тестовые итоги, лимиты flash/RAM
+  и fixed main stack. Layout не выдавать за измеренный максимальный стек.
+- R6D-REPORT-RU.md: defect -> reproduction -> fix -> tests -> remaining risk.
+  Обновить FEATURES-NEXT-RU.txt, PROGRESS.md, MODEL-HANDOFF-RU.md и вечерний
+  live-check. Убрать устаревшие Open questions, которые уже закрыты кодом,
+  сохраняя отдельно непроверенное на железе.
+- device_accessed=false, flash_performed=false. Не публиковать/не загружать
+  private calibration fixture. Архивы с ним остаются локальными/private.
+- После отчёта остановиться. DRX-01 (профили A/B без изменения фокуса), AM,
+  PAN, GPS/APRS/DSP остаются в реестре; не заявлять их реализованными этим этапом.

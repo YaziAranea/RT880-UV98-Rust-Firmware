@@ -310,6 +310,15 @@ class PackageTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "feature declarations"):
                     packaging.validate_inputs(self.folder, self.root, "channel-tx")
 
+    def test_disabled_verbose_faults_does_not_change_tx_policy(self):
+        self.prepare_channel()
+        original = self.manifest.read_text()
+        self.manifest.write_text(original + 'verbose-faults = []\n')
+        packaging.validate_inputs(self.folder, self.root, "channel-tx")
+        self.manifest.write_text(original + 'verbose-faults = ["channel-tx"]\n')
+        with self.assertRaisesRegex(ValueError, "feature declarations"):
+            packaging.validate_inputs(self.folder, self.root, "channel-tx")
+
     def test_channel_package_retains_no_overwrite_and_private_calibration_exclusion(self):
         self.prepare_channel()
         elf = bytearray(policy_fixture(packaging.CHANNEL_TX_POLICY))

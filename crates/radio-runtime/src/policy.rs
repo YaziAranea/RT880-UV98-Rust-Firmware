@@ -2,7 +2,7 @@
 //! frequencies, tones, calibration or operation permissions are normalized.
 use crate::{scan, Audio};
 use uv98_codeplug::channels::{Bandwidth, Channel, OperationMode};
-use uv98_handheld_ui::controller::{Mode, View, STEP_10HZ};
+use uv98_handheld_ui::controller::{Mode, View, STEP_10HZ, TX_CTCSS};
 use uv98_rf_sequence::{Modulation, RxRequest, TxRequest, Width};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +43,45 @@ pub struct Profile {
 pub fn receive_changed(previous: Option<Profile>, next: Option<Profile>) -> bool {
     previous.map(|p| p.receive) != next.map(|p| p.receive)
 }
+
+/// A confirmed spectrum restoration leaves the receiver on `confirmed`. Reuse
+/// the freshly computed profile as the applied cache only when ordinary policy
+/// still asks for exactly that receive plan; otherwise the caller must retune
+/// once instead of trusting a partial match.
+pub fn restored_current(wanted: Option<Profile>, confirmed: RxRequest) -> Option<Profile> {
+    wanted.filter(|profile| profile.receive == Some(confirmed))
+}
+
+/// Temporary listen on a confirmed RX plan: audio is unconditionally open and
+/// the original channel/VFO context is never replaced. The receive fields are
+/// exactly the plan the adapter reported restored, so no hidden retune occurs.
+pub fn listen_profile(request: RxRequest, cfg: Settings) -> Profile {
+    let [gain, dac] = match request.modulation {
+        Modulation::Fm => cfg.fm_volume,
+        Modulation::Am => cfg.am_volume,
+    };
+    let route = uv98_band_plan::select_routes(
+        request.frequency_10hz,
+        uv98_band_plan::SelectorMode::Primary,
+    )
+    .and_then(|routes| routes.rx_code())
+    .unwrap_or(0);
+    Profile {
+        receive: Some(request),
+        transmit: None,
+        audio: Audio {
+            modulation: request.modulation,
+            gain,
+            dac,
+            squelch: 0,
+            monitor: true,
+            tone_required: false,
+        },
+        frequency: request.frequency_10hz,
+        route,
+        power: 0,
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     MissingChannel,
@@ -79,9 +118,13 @@ pub fn profile(
         match view.mode {
             Mode::Vfo => (
                 view.vfo_10hz,
-                view.vfo_10hz,
+                uv98_handheld_ui::controller::vfo_tx_frequency(view).unwrap_or(0),
                 0,
-                0,
+                match TX_CTCSS.get(usize::from(view.tx_tone_index)) {
+                    Some(0) => 0,
+                    Some(tone) => 0x1000 | tone,
+                    None => return Err(Error::Tone),
+                },
                 Width::Wide,
                 Modulation::Fm,
                 OperationMode::ReceiveTransmit,
@@ -120,7 +163,11 @@ pub fn profile(
         core::mem::swap(&mut rx, &mut tx);
         core::mem::swap(&mut rx_tone, &mut tx_tone);
     }
-    let modulation = setting.modulation.unwrap_or(modulation);
+    let modulation = if aviation_band(rx) {
+        Modulation::Am
+    } else {
+        setting.modulation.unwrap_or(modulation)
+    };
     if tone_mode > 3 {
         return Err(Error::Options);
     }
@@ -144,6 +191,7 @@ pub fn profile(
     // disable a valid RX side, but it can never inherit the RX frequency/tone.
     let transmit = if mode == OperationMode::ReceiveOnly
         || modulation != Modulation::Fm
+        || aviation_band(tx)
         || (view.mode == Mode::Channel && channel.is_some_and(|ch| ch.power().is_none()))
         || range(tx).is_none()
         || uv98_rf_sequence::tone(tx_tone, tone_mode).is_err()
@@ -185,6 +233,10 @@ pub fn profile(
     })
 }
 
+pub const fn aviation_band(f: u32) -> bool {
+    f >= 11_800_000 && f < 13_700_000
+}
+
 /// Coverage of the traced route selector, not a sensitivity specification.
 pub const fn range(f: u32) -> Option<(u32, u32)> {
     match f {
@@ -220,6 +272,127 @@ mod tests {
             am_volume: [50, 12],
             squelch_delay: 10,
         }
+    }
+
+    #[test]
+    fn airband_selects_am_and_disallows_tx_even_with_fm_override() {
+        let mut v = view();
+        v.mode = Mode::Vfo;
+        for f in [11_800_000, 12_640_000, 13_699_999] {
+            v.vfo_10hz = f;
+            let p = profile(
+                v,
+                None,
+                cfg(),
+                Overrides {
+                    modulation: Some(Modulation::Fm),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(p.receive.unwrap().modulation, Modulation::Am);
+            assert!(p.transmit.is_none());
+        }
+        v.vfo_10hz = 13_700_000;
+        assert_eq!(
+            profile(v, None, cfg(), Overrides::default())
+                .unwrap()
+                .audio
+                .modulation,
+            Modulation::Fm
+        );
+    }
+
+    #[test]
+    fn vfo_shift_and_reverse_swap_the_effective_rx_and_tx() {
+        let mut v = view();
+        v.mode = Mode::Vfo;
+        v.vfo_10hz = 43_500_000;
+        v.shift_index = 5;
+        for reverse in [false, true] {
+            v.reverse = reverse;
+            let p = profile(v, None, cfg(), Overrides::default()).unwrap();
+            assert_eq!(
+                p.receive.unwrap().frequency_10hz,
+                if reverse { 43_000_000 } else { 43_500_000 }
+            );
+            assert_eq!(
+                p.transmit.unwrap().frequency_10hz,
+                if reverse { 43_500_000 } else { 43_000_000 }
+            );
+        }
+    }
+
+    #[test]
+    fn shifted_vfo_uses_the_configured_tone_only_on_the_tx_half() {
+        let mut v = view();
+        v.mode = Mode::Vfo;
+        v.vfo_10hz = 43_180_000;
+        v.shift_index = 3;
+        v.tx_tone_index = TX_CTCSS.iter().position(|&tone| tone == 770).unwrap() as u8;
+
+        let profile_at = |view| profile(view, None, cfg(), Overrides::default()).unwrap();
+        let normal = profile_at(v);
+        let rx = normal.receive.unwrap();
+        let tx = normal.transmit.unwrap();
+        assert_eq!((rx.frequency_10hz, rx.tone), (43_180_000, 0));
+        assert_eq!((tx.frequency_10hz, tx.tone), (43_020_000, 0x1302));
+
+        v.reverse = true;
+        let reverse = profile_at(v);
+        let rx = reverse.receive.unwrap();
+        let tx = reverse.transmit.unwrap();
+        assert_eq!((rx.frequency_10hz, rx.tone), (43_020_000, 0x1302));
+        assert_eq!((tx.frequency_10hz, tx.tone), (43_180_000, 0));
+    }
+
+    #[test]
+    fn listen_profile_opens_audio_without_changing_receive_plan() {
+        let request = RxRequest {
+            frequency_10hz: 14_550_000,
+            width: Width::Wide,
+            level: 1,
+            tone: 0,
+            tone_mode: 0,
+            option_nibble: 0,
+            squelch_delay: 10,
+            modulation: Modulation::Fm,
+        };
+        let profile = listen_profile(request, cfg());
+        assert_eq!(profile.receive, Some(request));
+        assert_eq!(profile.frequency, request.frequency_10hz);
+        assert_eq!(profile.audio.modulation, request.modulation);
+        assert_eq!(profile.audio.squelch, 0);
+        assert!(profile.audio.monitor);
+        assert!(!profile.audio.tone_required);
+        assert_ne!(profile.route, 0, "qualified frequency keeps a route");
+        assert!(profile.transmit.is_none());
+    }
+
+    #[test]
+    fn restored_cache_requires_the_complete_confirmed_receive_plan() {
+        let mut v = view();
+        v.mode = Mode::Vfo;
+        let wanted = profile(v, None, cfg(), Overrides::default()).unwrap();
+        let confirmed = wanted.receive.unwrap();
+        assert_eq!(restored_current(Some(wanted), confirmed), Some(wanted));
+
+        let mut other = confirmed;
+        other.tone = 0x1302;
+        assert_eq!(restored_current(Some(wanted), other), None);
+        let mut other = confirmed;
+        other.width = Width::Narrow;
+        assert_eq!(restored_current(Some(wanted), other), None);
+        let mut other = confirmed;
+        other.frequency_10hz += 250;
+        assert_eq!(restored_current(Some(wanted), other), None);
+        let mut other = confirmed;
+        other.option_nibble = 1;
+        assert_eq!(restored_current(Some(wanted), other), None);
+        let mut other = confirmed;
+        other.level = confirmed.level.wrapping_add(1);
+        assert_eq!(restored_current(Some(wanted), other), None);
+        assert_eq!(restored_current(None, confirmed), None);
     }
 
     #[test]

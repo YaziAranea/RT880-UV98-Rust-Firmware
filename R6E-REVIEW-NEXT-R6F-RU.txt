@@ -1,0 +1,100 @@
+CODEX: независимая проверка r6e. Следующий этап r6f: согласованное состояние Spectrum.
+Дата: 2026-11-10. Рабочий проект DeepSeek uv98-rust. Сначала AGENTS.md и
+FEATURES-NEXT-RU.txt. Никаких COM/рации/прошивки/RF/live-действий.
+
+ЧТО НЕЗАВИСИМО ПОДТВЕРЖДЕНО
+Из r6e source.zip (SHA fe22c278987ad9f130b877ad72fc7b3bdcafe7059d3836481807963d90911abd)
+создан отдельный review checkout. Все 546 файлов совпадали с рабочей копией.
+Root Codex выполнил полный build-diagnostic-image.ps1 -ChannelTx:
+480 Rust PASS / 1 ignored / 61 suites; 79 Python; 57 ARM + 57 decode; 67 PNG.
+BIN ПОБАЙТОВО совпал с опубликованным тобой r6e:
+afbe515a19576b6a5abf5fc27aa7af7e6c7377cbce9f796e58ccec661c43dc81.
+Таким образом прежнее сомнение по mtime main.rs снято независимой пересборкой.
+NOR и calibration hash сохранены, device_accessed=false, flash_performed=false.
+Исходный r6e и старые релизы оставлять неизменными.
+
+НО r6e НЕ ПРИНЯТ: два новых pixel regression падают, ещё один дефект по code trace.
+Patch r6e-render-regressions.patch и log r6e-render-regressions.log рядом.
+Root run: 2 прежних codex tests PASS; 2 новых render tests FAILED, exit101.
+Не удалять тесты и не возвращаться к исправлению уже закрытых DS-05/06 сценариев.
+
+DS-08 / ВОСПРОИЗВЕДЕНО: неполная инвалидация экрана при Listen
+render.rs::dirty_ranges, Spectrum arm (около581), не учитывает изменение
+View.spectrum_listening. Header/status/footer зависят от этого поля; callback
+вызывает redraw, но нужные строки не попадают в damage. spectrum_dirty_ranges
+(около736) тоже не охватывает нижнюю подсказку305..312.
+Тест codex_listen_transition_incremental_matches_full_frame использует реальный
+compare_incremental(old,new); падает уже на row28. Проверить оба направления,
+pending->Listening, Listening->Restoring/Stopped, overlay open/closed и footer.
+Исправить инвалидацию нужных областей, не маскировать всё постоянным full redraw.
+
+DS-09 / ВОСПРОИЗВЕДЕНО: старый snapshot снова утверждает «СЛУШАЕМ» после stop
+main при StopListen/timeout сбрасывает актуальный listening. App::set_spectrum
+может откладывать новый snapshot, пока рисуется старый. Renderer при false live
+flag снова берёт SpectrumState::Listening из старого snapshot (header~919,
+status~1271). Получается ложная зелёная индикация и несовместимые подписи.
+codex_stopped_listen_does_not_claim_audio_from_stale_snapshot падает на row34.
+Установить единый актуальный источник фазы Pending/Sweeping/Listening/Restoring/
+Stopped/Error, отдельно от immutable plot. Старый график допустим, старое
+утверждение о звуке — нет. Обновления фазы должны работать и при render backlog.
+Проверять одинаковость incremental/full кадра для всех этих переходов.
+
+DS-10 / CODE TRACE, ЕЩЁ НЕ ЗАПУЩЕН ROOT INTEGRATION REGRESSION
+Идентичность окна отсутствует у Listen/AcceptVfo. Request несёт только bin;
+main проверяет scope.plot.valid(bin) новой сетки, пока UI показывает старую.
+Успешный Restart не очищает старый snapshot. App::set_spectrum349..366 штатно
+возвращает false при pending_rows.any, оставляя его на экране.
+Пример: центр433MHz, шаг12.5kHz, 81точка -> bin0=432.500MHz.
+После сужения до41точки новый bin0=432.750MHz. Новая точка0 уже измерена,
+но новый snapshot ещё не принят UI. Listen/AcceptVfo со старого графика
+передают0; backend восстанавливает432.750MHz вместо видимых432.500MHz.
+Это затрагивает и прослушивание, и явное принятие частоты в VFO.
+
+Сначала воспроизвести интеграционным тестом App+Scope:
+- старый snapshot и cursor0, не дренировать render_step;
+- реальный restart Scope в меньшее окно, дождаться valid0;
+- App отказывает публикации нового snapshot из-за pending_rows;
+- UI MENU->Listen/Accept формирует запрос;
+- пройти тот же production coordinator/validation, что вызывает main;
+- при разрешённом действии confirmed RxRequest.frequency_10hz обязана
+  совпадать с выбранной отображённой частотой, иначе явный отказ ДО retune/commit.
+Повторить span/step changes, stale completion прошлого сеанса, отказ restart.
+Решение: связать selection с session/window identity + частотой и проверять
+против текущего Scope, либо явно блокировать selection до публикации нужной
+сетки. Только valid(bin) и совпадение bin в ACK недостаточны.
+
+КОНТРАКТ И ПРОВЕРКА РЕАЛЬНОЙ СВЯЗКИ
+Не добавлять очередной независимый bool без описанных переходов. Минимальную
+логику согласования запроса, опубликованного окна, RF completion и UI phase
+выделить в тестируемый coordinator, ИСПОЛЬЗУЕМЫЙ main. Существующий
+spectrum_flow.rs можно расширить; отдельный поток/RTOS/большая архитектура
+не требуются. Snapshot графика и текущее управление не должны спорить за phase.
+App::confirm_spectrum_listen сейчас возвращает Result<(),...> и проглатывает
+Controller false; отчёт r6e ошибочно обещает false наружу. Сделать явный результат
+принято/отклонено с нужной identity; main учитывает отказ до включения Listen/
+audio profile. Это дефект контракта; отдельный достижимый RF-case root пока
+не подтвердил. Не выдавать его за уже воспроизведённую передачу/опасный RF.
+
+Acceptance:
+- тесты вызывают реальный coordinator, а не повторяют ветвления main в тесте;
+- pending request -> ACK, повтор/Busy, overlay EXIT, короткий/долгий EXIT,
+  PTT до/послеACK, timeout/fault, delayed/obsolete ACK, window change + backlog;
+- UIphase/показанная частота/audio routing/confirmed RFplan согласованы;
+- EXIT/отказ не коммитят VFO; ПРИНЯТЬВVFO отдельное явное действие;
+- cancel PTT не запускаетTX, existing release/new-edge/TOT сохранены;
+- полный исходный RxRequest восстанавливается; отмена не resurrects sweep;
+- scheduler остаётся bounded, RF input/watchdog не зависят от LCD/UART;
+- все предыдущие DS-01..07 и scanner/scope tests остаются зелёными.
+
+ВЫХОД r6f
+1. Воспроизвести два supplied failures до production changes; третий case
+   подтвердить либо опровергнуть реальным integration trace. Сохранитьлоги.
+2. Исправить связку целиком, без новых PAN/AM/DRX/GPS/APRS/DSP функций.
+3. Targeted regression PASS -> один итоговый полный прогон в новом каталоге
+   outputs/UV98-r6f-20261110-1; точные BIN/ELF/ZIP SHA, исходники совпадают.
+4. Минимальная таблица переходов + R6F-REPORT-RU.md; FEATURES/PROGRESS/handoff/
+   вечернийLIVE-CHECK обновлены. Отдельно код/host и непроверенное на железе.
+5. Калибровки/NOR/codeplug не писать, private fixture не публиковать. Ни старые
+   артефакты, ни установленную r5 не менять. Cargo только root DeepSeek.
+6. В финале честный результат для каждого DS08/09/10, не закрывать по одному
+   числу tests. После отчёта остановиться и ждать независимого review.
