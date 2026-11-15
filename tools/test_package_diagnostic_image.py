@@ -231,9 +231,9 @@ class PackageTests(unittest.TestCase):
             'compile_error!("Select exactly one TX profile");\n'
             'const LIVE_TX: bool = cfg!(any(\n feature = "upper-exo-tx-trial",\n'
             ' feature = "channel-tx",\n));\n'
-            'const LOWER_PTT_CODE: Option<u8> = None;\n'
-            'fn fixture_only() { tx_policy::authorize(); tx_policy::hold_within_limit(); '
-            'auth.still_held(); tx_trial::permits(); tx_trial::record_permitted(); '
+            'const LOWER_PTT_ENABLED: bool = cfg!(feature = "channel-tx");\n'
+            'fn fixture_only() { ptt::lower_pressed(); ptt::side_idle(); tx_policy::authorize_target(); tx_policy::hold_within_limit(); '
+            'auth.still_held_target(); tx_trial::permits(); tx_trial::record_permitted(); '
             'tx_trial::hold_within_limit(); }\n')
 
     def prepare_channel(self):
@@ -247,11 +247,11 @@ class PackageTests(unittest.TestCase):
         self.assertTrue(runtime["live_tx_enabled"])
         self.assertIsNone(runtime["trial_restrictions"])
         self.assertEqual(runtime["linked_release_policy"]["words"],
-                         ["0x00000108", "0x00000001", "0xFFFFFFFF", "0x464D5431"])
+                         ["0x00000108", "0x00000001", "0x00000016", "0x464D5431"])
         self.assertEqual(runtime["channel_tx_constraints"]["max_hold_ms"], 30000)
         self.assertEqual(runtime["channel_tx_constraints"]["power_codes"], [0, 1, 2])
         self.assertEqual(runtime["compiled_features"][-1], "FM_TX_CHANNEL_VFO")
-        self.assertFalse(runtime["channel_tx_constraints"]["lower_physical_ptt_mapped"])
+        self.assertTrue(runtime["channel_tx_constraints"]["lower_physical_ptt_mapped"])
         self.assertFalse(runtime["hardware_qualified"])
         self.assertFalse(runtime["live_test_performed"])
         self.assertIn("not full TX reachability proof", runtime["validation_scope"])
@@ -288,7 +288,7 @@ class PackageTests(unittest.TestCase):
                    original.replace(gate, gate + " || true"),
                    original.replace('compile_error!("Select exactly one TX profile");', ""),
                    original + "\nconst LIVE_TX: bool = true;\n"]
-        for guard in ("tx_policy::authorize()", "tx_policy::hold_within_limit()", "auth.still_held()"):
+        for guard in ("tx_policy::authorize_target()", "tx_policy::hold_within_limit()", "auth.still_held_target()", "ptt::lower_pressed()", "ptt::side_idle()"):
             sources += [original.replace(guard, "missing()"),
                         original.replace(guard, "/* " + guard + " */"),
                         original.replace(guard, '"' + guard + '"')]

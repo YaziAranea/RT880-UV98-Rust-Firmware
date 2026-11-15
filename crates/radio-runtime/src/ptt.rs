@@ -2,6 +2,20 @@
 //! An eligible edge is still only an input fact: caller must validate channel,
 //! calibration, permissions and executor state before transmitting.
 
+/// The UV98 Plus FP1KEY divider (15 kΩ to ground, 10 kΩ pull-up)
+/// produces about 2457 on the 12-bit ADC. Top key plus FP1KEY
+/// produces about 2010, also in the stock Aux16 range.
+pub const fn lower_pressed(raw: u16) -> bool {
+    raw >= 2300 && raw <= 2600
+}
+
+/// A released ladder reads approximately 4092 on this board. The stock
+/// decoder's 0xff class starts much lower and includes ambiguous voltages;
+/// only this isolated idle window may qualify a release or upper PTT hold.
+pub const fn side_idle(raw: u16) -> bool {
+    raw >= 4000 && raw <= 4095
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Input {
     pub upper: bool,
@@ -102,6 +116,48 @@ impl Default for Guard {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ambiguous_stock_idle_never_releases_or_sustains_a_ptt() {
+        use super::*;
+        for raw in [0, 3600, 3999, 4096, u16::MAX] {
+            assert!(!side_idle(raw));
+            let mut guard = Guard::new();
+            guard.observe(
+                Input {
+                    upper: false,
+                    lower: false,
+                    clean: true,
+                },
+                false,
+            );
+            assert!(guard.arm(Input {
+                upper: true,
+                lower: false,
+                clean: true
+            }));
+            assert!(!guard.observe(
+                Input {
+                    upper: true,
+                    lower: false,
+                    clean: side_idle(raw)
+                },
+                false
+            ));
+            guard.observe(
+                Input {
+                    upper: false,
+                    lower: false,
+                    clean: side_idle(raw),
+                },
+                false,
+            );
+            assert!(!guard.allow_edge());
+        }
+        assert!(side_idle(4000));
+        assert!(side_idle(4092));
+        assert!(side_idle(4095));
+    }
+
     use super::*;
 
     const RELEASED: Input = Input {
@@ -130,6 +186,62 @@ mod tests {
         assert!(!guard.observe(RELEASED, false));
         assert!(guard.allow_edge());
         guard
+    }
+
+    #[test]
+    fn lower_ptt_window_excludes_other_keys_and_all_analog_chords() {
+        // RT880 V2 page 3: R543 pull-up, R579 top key, R578 FP1KEY
+        // and R571 FP2KEY. Pressed key resistors are in parallel.
+        let keys = [27_000.0, 15_000.0, 4_700.0];
+        for pressed in 0u8..8 {
+            let conductance: f64 = keys
+                .iter()
+                .enumerate()
+                .filter(|&(index, _)| pressed & (1 << index) != 0)
+                .map(|(_, &ohms)| 1.0 / ohms)
+                .sum();
+            let raw = (4095.0 / (1.0 + 10_000.0 * conductance)).round() as u16;
+            assert_eq!(
+                lower_pressed(raw),
+                pressed == 0b010,
+                "ADC {raw}, keys {pressed:03b}"
+            );
+        }
+        assert!(lower_pressed(2458)); // Archived hardware sample.
+        assert!(!lower_pressed(2299));
+        assert!(lower_pressed(2300));
+        assert!(lower_pressed(2600));
+        assert!(!lower_pressed(2601));
+    }
+
+    #[test]
+    fn lower_ptt_chord_and_timeout_require_a_clean_release_before_rearming() {
+        let lower = Input {
+            lower: lower_pressed(2458),
+            ..RELEASED
+        };
+        let analog_chord = Input {
+            lower: lower_pressed(2010),
+            clean: false,
+            ..RELEASED
+        };
+        let mut guard = Guard::new();
+        assert!(!guard.arm(lower));
+        assert!(!guard.observe(RELEASED, false));
+        assert!(guard.arm(lower));
+        assert!(guard.observe(lower, false));
+        assert!(!guard.observe(analog_chord, false));
+        assert!(!guard.arm(lower));
+        assert!(!guard.observe(lower, false));
+        assert!(!guard.observe(RELEASED, false));
+        assert!(guard.arm(lower));
+        guard.disarm(); // Executor reached TOT while lower PTT was still held.
+        assert!(!guard.arm(lower));
+        assert!(!guard.observe(lower, false));
+        assert!(!guard.observe(RELEASED, false));
+        assert!(guard.allow_edge());
+        assert!(!guard.observe(lower, false)); // A raw hold cannot arm TX.
+        assert!(guard.arm(lower));
     }
 
     #[test]

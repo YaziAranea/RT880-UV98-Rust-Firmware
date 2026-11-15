@@ -1,12 +1,16 @@
 #![no_std]
 #![cfg_attr(not(feature = "hardware"), forbid(unsafe_code))]
-//! PC2/ADC1 channel12 only. No DMA, IRQ, battery conversion or RF side effects.
+//! PC2/ADC1 channel 12 side keys and PA7/ADC1 channel 7 battery.
+//! Conversions use foreground polling without DMA, IRQ or RF side effects.
 //! SDK calibration is volatile ADC self-calibration, not a calibration-NOR write.
 //! Auxiliary codes preserve stock thresholds; physical PTT B mapping is unproved.
 
+mod battery;
 pub mod engine;
 #[cfg(feature = "hardware")]
 pub mod hardware;
+
+pub use battery::BatteryMonitor;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Error {

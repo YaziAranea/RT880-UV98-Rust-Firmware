@@ -472,6 +472,7 @@ fn capture(
         "view": format!("{:?}", status.view),
         "screen": format!("{:?}", status.view.screen),
         "radio_status_explicitly_simulated":format!("{:?}", app.radio_view()),
+        "battery_mv_explicitly_simulated":app.battery_voltage(),
         "state": format!("{:?}", status.state),
         "calibration_matches_preserved_backup": status.calibration_matches_backup,
         "slot_index": view.as_ref().map(|s| s.index()),
@@ -678,6 +679,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "02-menu.png",
         milliseconds.get(),
     )?);
+    let before = panel.borrow().pixel_words;
+    tap(&mut app, &mut now, Key::Down);
+    drain(&mut app);
+    let cursor_pixel_bytes = (panel.borrow().pixel_words - before) * 2;
+    assert_eq!(cursor_pixel_bytes, 15 * WIDTH * 2);
+    performance.push(serde_json::json!({
+        "action":"menu cursor within current page",
+        "rows":15, "pixel_bytes":cursor_pixel_bytes, "old_rows":67,
+        "physical_latency_measured":false
+    }));
+    tap(&mut app, &mut now, Key::Up);
     menu(&mut app, &mut now, MenuItem::Channels);
     assert_eq!(app.status().view.screen, Screen::Channels);
     frames.push(capture(
@@ -1093,6 +1105,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("synthetic scan backend acknowledgement"));
     let simulated_rx = RadioView {
         state: RadioState::Receiving,
+        tx_slot: None,
         rssi: Some(245),
         meter_floor: 0,
         squelch_open: true,
@@ -1133,6 +1146,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Explicit fake backend metadata only. No transmit function/device exists.
     app.set_radio_view(RadioView {
         state: RadioState::Transmitting,
+        tx_slot: Some(Slot::A),
         rssi: None,
         ..simulated_rx
     })
@@ -1978,8 +1992,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "long_zero_requests_backend_without_fabricated_measurements":true,
         "labels_use_digit0_not_binding10":true}));
 
-    // Meter design proof uses explicit fake backend reports only. Both cards
-    // remain visible, but only the selected context receives a live reading.
+    // Meter design proof uses explicit fake backend reports only.
     home(&mut app, &mut now);
     for (slot, state, rssi, power, name) in [
         (
@@ -2014,6 +2027,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         app.select_slot(slot).expect("synthetic meter context");
         app.set_radio_view(RadioView {
             state,
+            tx_slot: (state == RadioState::Transmitting).then_some(slot),
             rssi,
             power,
             squelch_open: state == RadioState::Receiving && rssi.is_some(),
@@ -2420,6 +2434,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (Language::English, "en"),
         (Language::German, "de"),
     ] {
+        empty_app.set_battery_voltage(Some(7800)).unwrap();
         open_setting(
             &mut empty_app,
             &mut empty_now,
@@ -2469,6 +2484,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &format!("{code}-home.png"),
             empty_ms.get(),
         )?);
+        empty_app.set_battery_voltage(Some(6480)).unwrap();
+        frames.push(capture(
+            &mut empty_app,
+            &empty_panel,
+            output,
+            &format!("{code}-battery-low.png"),
+            empty_ms.get(),
+        )?);
+        empty_app.set_battery_voltage(Some(8230)).unwrap();
+        empty_app
+            .set_radio_view(RadioView {
+                state: RadioState::Transmitting,
+                tx_slot: Some(Slot::B),
+                route: Some(RadioRoute::Uhf),
+                power: Some(1),
+                ..RadioView::OFF
+            })
+            .unwrap();
+        assert_eq!(empty_app.status().view.active_slot, Slot::A);
+        assert!(!empty_app.status().view.ptt_down);
+        frames.push(capture(
+            &mut empty_app,
+            &empty_panel,
+            output,
+            &format!("{code}-tx-b.png"),
+            empty_ms.get(),
+        )?);
+        empty_app.set_battery_voltage(Some(7800)).unwrap();
+        empty_app
+            .set_radio_view(RadioView {
+                state: RadioState::Receiving,
+                ..RadioView::OFF
+            })
+            .unwrap();
 
         digits(&mut empty_app, &mut empty_now, "433500");
         tap(&mut empty_app, &mut empty_now, Key::Menu);
@@ -2581,11 +2630,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "maximum_slice_pixel_bytes":WIDTH*4*2,"minimum_slice_wire_time_at_3mhz_ms":5.12,
             "input_tested_while_render_pending":true,"physical_latency_measured":false},
         "radio_simulation":{"metadata_injected":true,"hardware_backend_present":false,
-            "mock_values_not_measurements":true,"rf_image_filename_marker":"SIMULATED"},
+            "mock_values_not_measurements":true,"rf_image_filename_marker":"SIMULATED",
+            "gallery_tx_b_preserves_focus_a":true,"gallery_battery_mv":[6480,7800,8230]},
         "empty_catalog":{"synthetic_only":true,"input_sha256":empty_hash,"ready_in_vfo":true,"calibration_match":true,"selection_remains_none":true,"bytes_unchanged":true},
         "localization":{"languages":["ru","en","de"],"default":"ru","runtime_setting":true,"persistent":false,
             "gallery_uses_empty_channel_catalog":true,"gallery_rf_values_are_simulated":true,
-            "files_per_language":["home","menu","spectrum","hf"]},
+            "files_per_language":["home","menu","spectrum","hf","tx-b","battery-low"]},
         "reads":memory.reads,"render_work":performance,"frame_count":frame_count,"frames":frames,
         "acceptance":["first/adjacent active channels", "channel list choice", "explicit numeric channel confirm",
             "invalid channel does not navigate", "cancel does not commit", "VFO entry commits only on MENU", "six-digit MHz entry pads right",

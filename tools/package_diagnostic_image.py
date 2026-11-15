@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RELEASE_SYMBOL = b"UV98_RELEASE_POLICY"
 RX_CANDIDATE_POLICY = (0x108, 0, 0xFFFFFFFF, 0x52584331)
 UPPER_EXO_TRIAL_POLICY = (0x108, 1, 0xFFFFFFFF, 0x45584F31)
-CHANNEL_TX_POLICY = (0x108, 1, 0xFFFFFFFF, 0x464D5431)
+CHANNEL_TX_POLICY = (0x108, 1, 0x16, 0x464D5431)
 TRIAL_FEATURE = "upper-exo-tx-trial"
 CHANNEL_TX_FEATURE = "channel-tx"
 PROFILES = {
@@ -131,10 +131,20 @@ def validate_source(text, manifest, profile):
             r"\btx_trial\s*::\s*hold_within_limit\s*\(")):
         raise ValueError("Trial source must retain the allowlist and hold deadline")
     if profile == "channel-tx" and any(not re.search(pattern, calls) for pattern in (
-            r"\btx_policy\s*::\s*authorize\s*\(",
+            r"\btx_policy\s*::\s*authorize_target\s*\(",
             r"\btx_policy\s*::\s*hold_within_limit\s*\(",
-            r"\.\s*still_held\s*\(")):
+            r"\.\s*still_held_target\s*\(")):
         raise ValueError("Channel TX source must retain authorization, held-context checks, and hold deadline")
+    lower = re.findall(r'^\s*const\s+LOWER_PTT_ENABLED\s*:\s*bool\s*=\s*([^;]+);', code, re.M)
+    lower_gate = re.sub(r"\s+", "", lower[0]) if len(lower) == 1 else None
+    legacy_lower = re.findall(r"^const LOWER_PTT_CODE:\s*Option<u8>\s*=\s*(\w+)\s*;", code, re.M) == ["None"]
+    if lower_gate != 'cfg!(feature="channel-tx")' and not (legacy_lower and profile != "channel-tx"):
+        raise ValueError("Lower PTT must be gated exclusively by channel-tx")
+    if profile == "channel-tx" and not re.search(r"\bptt\s*::\s*lower_pressed\s*\(", calls):
+        raise ValueError("Lower PTT requires isolated ADC window checking")
+    if profile == "channel-tx" and not re.search(r"\bptt\s*::\s*side_idle\s*\(", calls):
+        raise ValueError("PTT release requires isolated idle ADC checking")
+
 
 
 def validate_inputs(folder, root, profile="rx"):
@@ -173,8 +183,7 @@ def validate_inputs(folder, root, profile="rx"):
     text = source.read_text(encoding="utf-8-sig")
     firmware_manifest = root / "firmware-diagnostic/Cargo.toml"
     validate_source(text, tomllib.loads(firmware_manifest.read_text(encoding="utf-8-sig")), profile)
-    if re.findall(r"^const LOWER_PTT_CODE:\s*Option<u8>\s*=\s*(\w+)\s*;", text, re.M) != ["None"]:
-        raise ValueError("Packaged source must leave physical side-key assignment pending")
+
     if not (root / "DIAGNOSTIC-IMAGE-RU.txt").read_text(encoding="utf-8-sig").startswith(f"UV98 Rust {VERSION}"):
         raise ValueError("Diagnostic README version is stale")
     calibration = root / "crates/calibration/tests/fixtures/uv98-plus-stock-1.16.bin"
@@ -184,7 +193,7 @@ def validate_inputs(folder, root, profile="rx"):
     if calibration_data in bin_data:
         raise ValueError("Full private calibration block unexpectedly embedded in BIN")
     return {"live_tx_enabled": trial or channel_tx,
-            "physical_sidekey_mapping": ("upper_PB6_only_lower_unmapped" if trial or channel_tx else "pending_live_adc_observation"),
+            "physical_sidekey_mapping": ("upper_PB6_lower_PC2_isolated_2300_2600" if channel_tx else "upper_PB6_only_lower_unmapped" if trial else "pending_live_adc_observation"),
             "candidate_scope": ("upper PTT A / CH002 EXO Rep / LOW / 5s maximum; no live RF acceptance"
                                 if trial else "explicit PTT / FM channel and VFO / A-B and reverse / power codes 0..2 / calibrated plans and traced stock routes / 30s maximum; no live RF acceptance"
                                 if channel_tx else "offline RX/AM radio candidate; no live RF acceptance"),
@@ -195,7 +204,9 @@ def validate_inputs(folder, root, profile="rx"):
             "channel_tx_constraints": ({"modulation": "FM", "max_hold_ms": 30000,
                                         "power_codes": [0, 1, 2], "explicit_ptt_required": True,
                                         "calibrated_plan_required": True,
-                                        "lower_physical_ptt_mapped": False}
+                                        "lower_physical_ptt_mapped": True,
+                                        "lower_adc_window": [2300, 2600],
+                                        "mapping_evidence": "RT880_V2_ladder_and_recorded_adc; live_R37_acceptance_pending"}
                                        if channel_tx else None),
             "compiled_features": ["FM_RX", "AM_RX", "channel_and_vfo_scan", "A_B_selection",
                                   "zones", "key_shortcuts"] + (["FM_TX_UPPER_EXO_LIMITED"] if trial else

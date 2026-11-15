@@ -779,6 +779,169 @@ fn navigation_keeps_unpainted_unlock_banner_and_deferred_damage_pixel_exact() {
     assert_eq!(incremental, capture.borrow().pixels);
 }
 
+fn assert_matches_complete_frame(
+    app: &mut App<Memory, Panel, NoDelay>,
+    capture: &Rc<RefCell<CapturedFrame>>,
+) {
+    while app.render_pending() {
+        app.render_step(4).unwrap();
+    }
+    let incremental = capture.borrow().pixels.clone();
+    app.last_rendered = None;
+    app.draw().unwrap();
+    while app.render_pending() {
+        app.render_step(4).unwrap();
+    }
+    assert_eq!(incremental, capture.borrow().pixels);
+}
+
+#[test]
+fn battery_refresh_is_limited_to_its_rows_and_coalesces_equivalent_readings() {
+    let capture = Rc::new(RefCell::new(CapturedFrame::new()));
+    let panel = Panel {
+        capture: Some(capture.clone()),
+        ..Panel::default()
+    };
+    let windows = panel.windows.clone();
+    let mut app = App::new(
+        Memory::new(),
+        panel,
+        NoDelay,
+        Timing::new(30, 600).unwrap(),
+        PRESERVED_CALIBRATION_SHA256,
+    );
+    app.start(0).unwrap();
+    let reads = app.nor.reads;
+    assert_eq!(app.battery_voltage(), None);
+    let (start, end) = render::battery_rows();
+    let mut previous = capture.borrow().pixels.clone();
+    for mv in [Some(8000), Some(7999), Some(6800), None] {
+        windows.borrow_mut().clear();
+        app.set_battery_voltage(mv).unwrap();
+        while app.render_pending() {
+            app.render_step(4).unwrap();
+        }
+        assert_eq!(
+            *windows.borrow(),
+            [(start, start + 4), (start + 4, start + 8), (start + 8, end)]
+        );
+        assert_ne!(previous, capture.borrow().pixels);
+        assert_matches_complete_frame(&mut app, &capture);
+        previous = capture.borrow().pixels.clone();
+    }
+    app.set_battery_voltage(Some(8020)).unwrap();
+    while app.render_pending() {
+        app.render_step(4).unwrap();
+    }
+    app.set_battery_voltage(Some(8020)).unwrap();
+    app.set_battery_voltage(Some(8049)).unwrap();
+    assert_eq!(app.battery_voltage(), Some(8049));
+    assert!(!app.render_pending());
+    assert_eq!(app.nor.reads, reads);
+}
+
+#[test]
+fn rapid_menu_steps_with_battery_and_rf_updates_match_full_frame() {
+    let capture = Rc::new(RefCell::new(CapturedFrame::new()));
+    let panel = Panel {
+        capture: Some(capture.clone()),
+        ..Panel::default()
+    };
+    let mut app = App::new(
+        Memory::new(),
+        panel,
+        NoDelay,
+        Timing::new(30, 600).unwrap(),
+        PRESERVED_CALIBRATION_SHA256,
+    );
+    app.start(0).unwrap();
+    event(&mut app, InputEvent::Short(Key::Menu));
+    while app.render_pending() {
+        app.render_step(4).unwrap();
+    }
+    event(&mut app, InputEvent::Short(Key::Down));
+    let mut rows = 0;
+    while app.render_pending() {
+        rows += app.render_step(4).unwrap().rows;
+    }
+    assert_eq!(rows, 15);
+    for (index, key) in [
+        Key::Down,
+        Key::Down,
+        Key::Up,
+        Key::Up,
+        Key::Up,
+        Key::Up,
+        Key::Down,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        event(&mut app, InputEvent::Short(key));
+        app.set_battery_voltage(Some(6800 + index as u16 * 300))
+            .unwrap();
+        app.set_radio_view(RadioView {
+            state: render::RadioState::Receiving,
+            squelch_open: index % 2 == 0,
+            rssi: Some(160 + index as u16 * 5),
+            ..RadioView::OFF
+        })
+        .unwrap();
+        app.render_step(3).unwrap();
+    }
+    assert_matches_complete_frame(&mut app, &capture);
+}
+
+#[test]
+fn off_focus_tx_badges_preempt_page_work_and_clear_after_tail() {
+    let capture = Rc::new(RefCell::new(CapturedFrame::new()));
+    let panel = Panel {
+        capture: Some(capture.clone()),
+        ..Panel::default()
+    };
+    let windows = panel.windows.clone();
+    let mut app = App::new(
+        Memory::new(),
+        panel,
+        NoDelay,
+        Timing::new(30, 600).unwrap(),
+        PRESERVED_CALIBRATION_SHA256,
+    );
+    app.start(0).unwrap();
+    let receiving = RadioView {
+        state: render::RadioState::Receiving,
+        ..RadioView::OFF
+    };
+    for focus in [Slot::A, Slot::B] {
+        let tx_slot = focus.other();
+        app.select_slot(focus).unwrap();
+        app.set_radio_view(receiving).unwrap();
+        while app.render_pending() {
+            app.render_step(4).unwrap();
+        }
+        app.pending_rows.mark(302, 306);
+        app.row_cursor = 302;
+        windows.borrow_mut().clear();
+        app.set_radio_view(RadioView {
+            state: render::RadioState::Transmitting,
+            tx_slot: Some(tx_slot),
+            power: Some(1),
+            ..receiving
+        })
+        .unwrap();
+        app.render_step(4).unwrap();
+        let (start, end) = render::home_ptt_badge_rows(tx_slot);
+        assert_eq!(windows.borrow()[0], (start, start + 4));
+        assert!(app.priority_rows.has(end - 1));
+        assert_eq!(app.status.view.active_slot, focus);
+        assert!(!app.status.view.ptt_down);
+        assert_matches_complete_frame(&mut app, &capture);
+        app.set_radio_view(receiving).unwrap();
+        assert!(app.priority_rows.has(start));
+        assert_matches_complete_frame(&mut app, &capture);
+    }
+}
+
 #[test]
 fn radio_control_and_ptt_changes_are_queued_without_waiting_for_telemetry_pass() {
     let mut app = app(Memory::new(), PRESERVED_CALIBRATION_SHA256);
@@ -803,6 +966,7 @@ fn radio_control_and_ptt_changes_are_queued_without_waiting_for_telemetry_pass()
         .deferred_radio_rows
         .has(render::home_slot_rows(app.status.view.active_slot).0 + render::HOME_METER_Y));
     radio.state = render::RadioState::Transmitting; // Explicit simulated backend report.
+    radio.tx_slot = Some(app.status.view.active_slot);
     app.set_radio_view(radio).unwrap();
     assert!(app.pending_rows.has(0));
     assert!(app
@@ -899,7 +1063,7 @@ fn continuously_replaced_banner_cannot_starve_footer_or_consume_rssi_priority() 
     radio.rssi = Some(170);
     radio.squelch_open = !radio.squelch_open;
     app.set_radio_view(radio).unwrap();
-    assert_eq!(app.priority_banner, 0); // Even SQL banner updates are coalesced.
+    assert!(!app.priority_rows.any()); // Even SQL banner updates are coalesced.
     assert!(app.deferred_radio_rows.has(0));
 }
 
@@ -929,7 +1093,9 @@ fn ptt_and_menu_input_do_not_flush_lcd_and_exit_discards_old_priority_work() {
     };
     app.sample(100, ptt).unwrap();
     assert!(app.sample(130, ptt).unwrap().ptt_tx_requested);
-    assert_eq!(app.priority_banner.count_ones(), 27);
+    assert_eq!(app.priority_rows.next(0), Some(0));
+    assert!((0..27).all(|row| app.priority_rows.has(row)));
+    assert!(!app.priority_rows.has(27));
     assert_eq!(app.radio_view(), RadioView::OFF); // Input is not TX acknowledgement.
     app.sample(160, released).unwrap();
     app.sample(190, released).unwrap();
@@ -942,14 +1108,14 @@ fn ptt_and_menu_input_do_not_flush_lcd_and_exit_discards_old_priority_work() {
     app.sample(260, released).unwrap();
     assert_eq!(app.sample(290, released).unwrap().pressed, Some(Key::Menu));
     assert_eq!(app.status.view.screen, Screen::Menu);
-    assert_eq!(app.priority_banner, 0);
+    assert!(!app.priority_rows.any());
     assert_eq!(app.row_cursor, 0);
     app.set_radio_view(RadioView {
         state: render::RadioState::Starting,
         ..RadioView::OFF
     })
     .unwrap();
-    assert_ne!(app.priority_banner, 0);
+    assert!(app.priority_rows.any());
     let exit = InputSample::Stable {
         matrix: 0x8000,
         ptt_pressed: false,
@@ -961,7 +1127,7 @@ fn ptt_and_menu_input_do_not_flush_lcd_and_exit_discards_old_priority_work() {
     assert_eq!(update.pressed, Some(Key::Exit));
     assert!(update.cancel_temporary);
     assert_eq!(app.status.view.screen, Screen::Home);
-    assert_eq!(app.priority_banner, 0);
+    assert!(!app.priority_rows.any());
     assert_eq!(writes.get(), before);
 }
 

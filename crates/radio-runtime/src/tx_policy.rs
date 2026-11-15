@@ -1,4 +1,4 @@
-//! General FM transmission eligibility for the current, committed A/B context.
+//! General FM transmission eligibility for the requested, committed A/B context.
 //!
 //! Unlike the historical `tx_trial`, this has no channel, frequency, tone or
 //! power allowlist. `policy::profile` owns channel permissions and RAM settings;
@@ -47,30 +47,50 @@ pub struct Authorization {
     pub source: Source,
     pub transmit: TxRequest,
     pub tx_route: u8,
+    operator_slot: Slot,
     context: Context,
     binding: SideAction,
 }
 
 impl Authorization {
     pub fn still_held(self, view: View, profile: policy::Profile, input: Input) -> bool {
-        authorize(view, profile, input) == Ok(self)
+        self.still_held_target(view, view, profile, input)
+    }
+
+    pub fn still_held_target(
+        self,
+        operator: View,
+        target: View,
+        profile: policy::Profile,
+        input: Input,
+    ) -> bool {
+        authorize_target(operator, target, profile, input) == Ok(self)
     }
 
     /// Configuration-only validation for a separately timed end-of-TX ID.
     /// This never authorizes a fresh transmission and never represents a
     /// physical PTT hold. The owner must enforce clean release, a short tail
     /// deadline, the original TOT and cancellation on every new input.
-    pub fn tail_configuration_valid(self, mut view: View, profile: policy::Profile) -> bool {
-        if view.ptt_slot.is_some() || view.ptt_down {
+    pub fn tail_configuration_valid(self, view: View, profile: policy::Profile) -> bool {
+        self.tail_configuration_valid_target(view, view, profile)
+    }
+
+    pub fn tail_configuration_valid_target(
+        self,
+        mut operator: View,
+        target: View,
+        profile: policy::Profile,
+    ) -> bool {
+        if operator.ptt_slot.is_some() || operator.ptt_down {
             return false;
         }
-        view.ptt_slot = Some(self.slot);
+        operator.ptt_slot = Some(self.slot);
         let original_source = Input {
             upper: self.source == Source::Upper,
             lower: self.source == Source::Lower,
             clean: true,
         };
-        authorize(view, profile, original_source) == Ok(self)
+        authorize_target(operator, target, profile, original_source) == Ok(self)
     }
 }
 
@@ -83,19 +103,30 @@ pub fn authorize(
     profile: policy::Profile,
     input: Input,
 ) -> Result<Authorization, Denied> {
+    authorize_target(view, view, profile, input)
+}
+
+/// The operator view supplies the UI and binding state. The target view and
+/// profile describe the requested slot's committed radio settings.
+pub fn authorize_target(
+    operator: View,
+    target: View,
+    profile: policy::Profile,
+    input: Input,
+) -> Result<Authorization, Denied> {
     if !input.clean || input.upper == input.lower {
         return Err(Denied::PhysicalInput);
     }
-    if view.screen != Screen::Home {
+    if operator.screen != Screen::Home {
         return Err(Denied::Screen);
     }
-    if view.entry.is_some() {
+    if operator.entry.is_some() {
         return Err(Denied::Entry);
     }
-    if view.locked {
+    if operator.locked {
         return Err(Denied::Locked);
     }
-    if view.scan != ScanState::Stopped {
+    if operator.scan != ScanState::Stopped {
         return Err(Denied::Scan);
     }
     let (source, index) = if input.upper {
@@ -103,14 +134,14 @@ pub fn authorize(
     } else {
         (Source::Lower, 1)
     };
-    let binding = view.side_bindings[index];
+    let binding = operator.side_bindings[index];
     let slot = match binding {
         SideAction::PttA => Slot::A,
         SideAction::PttB => Slot::B,
-        SideAction::Active => view.active_slot,
+        SideAction::Active => operator.active_slot,
         _ => return Err(Denied::Binding),
     };
-    if view.active_slot != slot || view.ptt_slot != Some(slot) {
+    if target.active_slot != slot || operator.ptt_slot != Some(slot) {
         return Err(Denied::Context);
     }
     if profile.audio.modulation != Modulation::Fm {
@@ -141,15 +172,16 @@ pub fn authorize(
         source,
         transmit,
         tx_route,
+        operator_slot: operator.active_slot,
         context: Context {
-            mode: view.mode,
-            channel: view.channel,
-            vfo_10hz: view.vfo_10hz,
-            shift_index: view.shift_index,
-            tx_tone_index: view.tx_tone_index,
-            zone: view.zone,
-            step_index: view.step_index,
-            reverse: view.reverse,
+            mode: target.mode,
+            channel: target.channel,
+            vfo_10hz: target.vfo_10hz,
+            shift_index: target.shift_index,
+            tx_tone_index: target.tx_tone_index,
+            zone: target.zone,
+            step_index: target.step_index,
+            reverse: target.reverse,
         },
         binding,
     })
@@ -366,6 +398,79 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn each_ptt_uses_its_target_record_and_operator_focus_stays_independent() {
+        let mut raw_b = record(43_897_500, 43_297_500);
+        raw_b[14..16].copy_from_slice(&0x1375u16.to_le_bytes());
+        let operator_a = View {
+            ptt_slot: Some(Slot::B),
+            side_down: [false, true],
+            ..view()
+        };
+        let b = View {
+            active_slot: Slot::B,
+            channel: Some(12),
+            ..operator_a
+        };
+        let profile_b = profile(b, &raw_b, 2);
+        let allowed = authorize_target(operator_a, b, profile_b, LOWER).unwrap();
+        assert_eq!((allowed.slot, allowed.source), (Slot::B, Source::Lower));
+        assert_eq!(allowed.transmit.frequency_10hz, 43_297_500);
+        assert_eq!(allowed.transmit.tone, 0x1375);
+        assert_eq!(allowed.transmit.power, 2);
+        assert!(allowed.still_held_target(operator_a, b, profile_b, LOWER));
+        assert!(!allowed.still_held_target(operator_a, b, profile_b, RELEASED));
+        let released = View {
+            ptt_slot: None,
+            ptt_down: false,
+            side_down: [false; 2],
+            ..operator_a
+        };
+        assert!(allowed.tail_configuration_valid_target(released, b, profile_b));
+        assert!(!allowed.tail_configuration_valid_target(operator_a, b, profile_b));
+        let selected_b = View {
+            active_slot: Slot::B,
+            ..operator_a
+        };
+        assert!(!allowed.still_held_target(selected_b, b, profile_b, LOWER));
+        let reversed_b = View { reverse: true, ..b };
+        assert!(!allowed.still_held_target(operator_a, reversed_b, profile_b, LOWER));
+
+        let mut rx_only_b = raw_b;
+        rx_only_b[1] = 1;
+        assert_eq!(
+            authorize_target(operator_a, b, profile(b, &rx_only_b, 2), LOWER),
+            Err(Denied::NoTransmit)
+        );
+
+        let operator_b = View {
+            ptt_slot: Some(Slot::A),
+            side_down: [true, false],
+            ..selected_b
+        };
+        let a = View {
+            active_slot: Slot::A,
+            channel: Some(4),
+            ..operator_b
+        };
+        let mut raw_a = record(14_550_000, 14_490_000);
+        raw_a[14..16].copy_from_slice(&0x2013u16.to_le_bytes());
+        let allowed = authorize_target(operator_b, a, profile(a, &raw_a, 1), UPPER).unwrap();
+        assert_eq!((allowed.slot, allowed.source), (Slot::A, Source::Upper));
+        assert_eq!(allowed.transmit.frequency_10hz, 14_490_000);
+        assert_eq!(allowed.transmit.tone, 0x2013);
+        assert_eq!(allowed.transmit.power, 1);
+
+        let mut follow_focus = operator_b;
+        follow_focus.side_bindings[0] = SideAction::Active;
+        assert_eq!(
+            authorize_target(follow_focus, a, profile(a, &raw_a, 1), UPPER),
+            Err(Denied::Context)
+        );
+        follow_focus.ptt_slot = Some(Slot::B);
+        assert!(authorize_target(follow_focus, b, profile_b, UPPER).is_ok());
     }
 
     #[test]

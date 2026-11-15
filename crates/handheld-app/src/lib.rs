@@ -141,9 +141,8 @@ pub struct RenderProgress {
     pub pending: bool,
 }
 
-// Only the 20-row radio/PTT banner is eligible for priority. Ordinary page
-// work receives a batch after at most eight priority rows, even under repeated
-// state changes. Telemetry never enters this queue.
+// Confirmed state banners and Home TX badges can preempt a page repaint.
+// Ordinary work receives a batch after at most eight priority rows.
 const PRIORITY_BURST_ROWS: u16 = 8;
 
 #[derive(Clone, Copy, Default)]
@@ -182,6 +181,12 @@ impl PendingRows {
             *target |= *source;
             *source = 0;
         }
+    }
+    fn without(mut self, other: &Self) -> Self {
+        for (rows, excluded) in self.0.iter_mut().zip(other.0) {
+            *rows &= !excluded;
+        }
+        self
     }
     fn has(&self, row: u16) -> bool {
         row < render::HEIGHT && self.0[row as usize / 32] & (1 << (row % 32)) != 0
@@ -244,12 +249,13 @@ pub struct App<N, L, D> {
     // Telemetry coalesces behind an in-flight pass instead of re-queuing rows
     // already painted near its beginning. Payloads always use the latest model.
     deferred_radio_rows: PendingRows,
-    priority_banner: u32,
+    priority_rows: PendingRows,
     priority_run: u16,
     row_cursor: u16,
     render_page: Option<Screen>,
     radio: RadioView,
     last_radio: RadioView,
+    battery_mv: Option<u16>,
     spectrum: Option<SpectrumSnapshot>,
     waterfall: render::Waterfall,
     shortwave_scope: render::ShortwaveScope,
@@ -296,12 +302,13 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             last_rendered: None,
             pending_rows: PendingRows::default(),
             deferred_radio_rows: PendingRows::default(),
-            priority_banner: 0,
+            priority_rows: PendingRows::default(),
             priority_run: 0,
             row_cursor: 0,
             render_page: None,
             radio: RadioView::OFF,
             last_radio: RadioView::OFF,
+            battery_mv: None,
             spectrum: None,
             waterfall: render::Waterfall::new(),
             shortwave_scope: render::ShortwaveScope::new(),
@@ -349,6 +356,8 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         view.shift_index = context.shift_index;
         view.tx_tone_index = context.tx_tone_index;
         view.reverse = context.reverse;
+        view.zone = context.zone;
+        view.step_index = context.step_index;
         let record = self.peer_record.as_ref().filter(|record| {
             context.mode == Mode::Channel && context.channel == Some(record.index as u16)
         });
@@ -366,6 +375,9 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
     }
     pub fn radio_view(&self) -> RadioView {
         self.radio
+    }
+    pub fn battery_voltage(&self) -> Option<u16> {
+        self.battery_mv
     }
     pub fn spectrum_view(&self) -> Option<SpectrumView<'_>> {
         if self.status.state == State::Ready {
@@ -703,6 +715,22 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         }
         self.radio = radio;
         self.redraw_ready()
+    }
+
+    /// Publish pack millivolts without redrawing unrelated rows or touching NOR.
+    pub fn set_battery_voltage(
+        &mut self,
+        millivolts: Option<u16>,
+    ) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.state != State::Ready {
+            return Err(Error::State);
+        }
+        if render::battery_display(self.battery_mv) != render::battery_display(millivolts) {
+            let (start, end) = render::battery_rows();
+            self.pending_rows.mark(start, end);
+        }
+        self.battery_mv = millivolts;
+        Ok(())
     }
 
     /// Physical identification of the lower side key, separate from its
@@ -1054,24 +1082,17 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         // makes the fairness batch useful even if it would otherwise land on
         // the same repeatedly invalidated banner. The normal cursor is not
         // advanced by priority work.
-        let (banner_start, banner_end) = render::radio_banner_rows(self.status.view.screen);
-        let mut ordinary = self.pending_rows;
-        for row in banner_start..banner_end {
-            if self.priority_banner & (1 << (row - banner_start)) != 0 {
-                ordinary.clear(row, row + 1);
-            }
-        }
+        let ordinary = self.pending_rows.without(&self.priority_rows);
         let normal_start = ordinary.next(self.row_cursor);
-        let priority = self.priority_banner != 0
+        let priority = self.priority_rows.any()
             && (normal_start.is_none() || self.priority_run < PRIORITY_BURST_ROWS);
         let (start, limit) = if priority {
-            let start = banner_start + self.priority_banner.trailing_zeros() as u16;
             let limit = if normal_start.is_some() {
                 max_rows.min(PRIORITY_BURST_ROWS - self.priority_run)
             } else {
                 max_rows
             };
-            (Some(start), limit)
+            (self.priority_rows.next(0), limit)
         } else {
             (normal_start, max_rows)
         };
@@ -1084,7 +1105,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         let mut end = start + 1;
         while end - start < limit
             && if priority {
-                end < banner_end && self.priority_banner & (1 << (end - banner_start)) != 0
+                self.priority_rows.has(end)
             } else {
                 ordinary.has(end)
             }
@@ -1094,16 +1115,14 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         self.status.state = State::Failed;
         self.paint_rows(start, end)?;
         self.pending_rows.clear(start, end);
-        for row in start.max(banner_start)..end.min(banner_end) {
-            self.priority_banner &= !(1 << (row - banner_start));
-        }
+        self.priority_rows.clear(start, end);
         if priority {
             self.priority_run = self.priority_run.saturating_add(end - start);
         } else {
             self.priority_run = 0;
             self.row_cursor = if end == render::HEIGHT { 0 } else { end };
         }
-        if self.priority_banner == 0 {
+        if !self.priority_rows.any() {
             self.priority_run = 0;
         }
         if !self.pending_rows.any() {
@@ -1240,24 +1259,27 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             Slot::A
         };
         let context = controller.context(slot);
-        let frequency_10hz = if context.mode == Mode::Vfo {
-            Some(context.vfo_10hz)
+        let (rx, tx) = if context.mode == Mode::Vfo {
+            let shifted = controller::vfo_tx_frequency(View {
+                vfo_10hz: context.vfo_10hz,
+                shift_index: context.shift_index,
+                ..controller.view()
+            });
+            (Some(context.vfo_10hz), shifted)
         } else {
             peer_record
                 .filter(|record| Some(record.index as u16) == context.channel)
-                .map(|record| {
+                .map_or((None, None), |record| {
                     let channel = record.view();
-                    if context.reverse {
-                        channel.tx_10hz
-                    } else {
-                        channel.rx_10hz
-                    }
+                    (Some(channel.rx_10hz), Some(channel.tx_10hz))
                 })
         };
+        let (frequency_10hz, tx_frequency_10hz) = if context.reverse { (tx, rx) } else { (rx, tx) };
         PeerView {
             slot,
             mode: context.mode,
             frequency_10hz,
+            tx_frequency_10hz,
             channel: context.channel,
             name: if context.mode == Mode::Channel {
                 peer_record
@@ -1400,7 +1422,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             // pixels forever because last_* describes the last planned model.
             // Keep that damage and paint every row from the newest model.
             self.pending_rows.merge_take(&mut self.deferred_radio_rows);
-            self.priority_banner = 0;
+            self.priority_rows = PendingRows::default();
             self.priority_run = 0;
             self.row_cursor = 0;
             self.render_page = Some(self.status.view.screen);
@@ -1410,9 +1432,10 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         }
         let defer_telemetry =
             self.pending_rows.any() && radio_controls_equal(self.last_radio, self.radio);
-        let snapshot = self
-            .diagnostic
-            .snapshot()
+        let screen = self.status.view.screen;
+        let snapshot = matches!(screen, Screen::Home | Screen::ChannelDetails)
+            .then(|| self.diagnostic.snapshot())
+            .flatten()
             .filter(|snapshot| Some(snapshot.index() as u16) == self.status.view.channel);
         let channel = snapshot.as_ref().map(|s| ChannelView {
             index: s.index(),
@@ -1425,30 +1448,43 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             bandwidth_raw: s.channel.bandwidth_raw(),
             power_raw: s.channel.power_raw(),
         });
-        let list_views: [ChannelView<'_>; 7] = core::array::from_fn(|i| self.list[i].view());
-        let zone_views = zone_views(
-            &self.zone_window,
-            &self.zone_names,
-            &self.zone_counts,
-            controller::active_count(&self.all_bitmap) as u16,
-        );
-        let peer = self.peer_view();
+        let list_views: [ChannelView<'_>; 7];
+        let list = if screen == Screen::Channels {
+            list_views = core::array::from_fn(|i| self.list[i].view());
+            &list_views[..self.list_len]
+        } else {
+            &[]
+        };
+        let zone_views;
+        let zones = if screen == Screen::Zones {
+            zone_views = zone_views_from_parts(
+                &self.zone_window,
+                &self.zone_names,
+                &self.zone_counts,
+                controller::active_count(&self.all_bitmap) as u16,
+            );
+            &zone_views[..self.zone_window_len]
+        } else {
+            &[]
+        };
+        let peer = (screen == Screen::Home).then(|| self.peer_view());
         let model = Model {
             view: self.status.view,
             channel,
-            list: &list_views[..self.list_len],
+            list,
             calibration_matches: self.status.calibration_matches_backup,
             last_key: self.status.last_pressed,
             ptt_pressed: self.status.view.ptt_down,
             input_ready: self.status.input_ready,
             radio: self.radio,
+            battery_mv: self.battery_mv,
             zone_name: self
                 .status
                 .view
                 .zone
                 .map(|zone| &self.zone_names[zone as usize][..]),
-            zones: &zone_views[..self.zone_window_len],
-            peer: Some(peer),
+            zones,
+            peer,
             spectrum: self.spectrum.as_ref().map(|snapshot| SpectrumView {
                 waterfall: Some(&self.waterfall),
                 ..snapshot.view()
@@ -1483,20 +1519,25 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
                 self.pending_rows.mark(start, end);
             }
         }
-        if self
-            .last_rendered
-            .is_some_and(|old| old.screen != self.status.view.screen)
-        {
-            self.priority_banner = 0;
+        let old_tx = self.last_radio.transmitting_slot();
+        let new_tx = self.radio.transmitting_slot();
+        let badge_changed = screen == Screen::Home && old_tx != new_tx;
+        if badge_changed {
+            for slot in [old_tx, new_tx].into_iter().flatten() {
+                self.mark_priority(render::home_ptt_badge_rows(slot));
+            }
         }
-        if self.last_radio.state != self.radio.state
-            || self
+        let off_ptt_changed = self.radio.state == render::RadioState::Off
+            && self
                 .last_rendered
-                .is_some_and(|old| old.ptt_down != self.status.view.ptt_down)
-        {
-            let (start, end) = render::radio_banner_rows(self.status.view.screen);
-            self.pending_rows.mark(start, end);
-            self.priority_banner = (1 << (end - start)) - 1;
+                .is_some_and(|old| old.ptt_down != self.status.view.ptt_down);
+        let state_changed = self.last_radio.state != self.radio.state;
+        let fault = matches!(
+            self.radio.state,
+            render::RadioState::Unavailable | render::RadioState::Failed
+        );
+        if off_ptt_changed || state_changed && (!badge_changed || fault) {
+            self.mark_priority(render::radio_banner_rows(screen));
         }
         self.last_rendered = Some(self.status.view);
         self.last_radio = self.radio;
@@ -1504,10 +1545,16 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         Ok(())
     }
 
+    fn mark_priority(&mut self, (start, end): (u16, u16)) {
+        self.pending_rows.mark(start, end);
+        self.priority_rows.mark(start, end);
+    }
+
     fn paint_rows(&mut self, start: u16, end: u16) -> Result<(), Error<N::Error, L::Error>> {
-        let snapshot = self
-            .diagnostic
-            .snapshot()
+        let screen = self.status.view.screen;
+        let snapshot = matches!(screen, Screen::Home | Screen::ChannelDetails)
+            .then(|| self.diagnostic.snapshot())
+            .flatten()
             .filter(|snapshot| Some(snapshot.index() as u16) == self.status.view.channel);
         let channel = snapshot.as_ref().map(|s| ChannelView {
             index: s.index(),
@@ -1520,34 +1567,49 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             bandwidth_raw: s.channel.bandwidth_raw(),
             power_raw: s.channel.power_raw(),
         });
-        let list_views: [ChannelView<'_>; 7] = core::array::from_fn(|i| self.list[i].view());
-        let zone_views = zone_views(
-            &self.zone_window,
-            &self.zone_names,
-            &self.zone_counts,
-            controller::active_count(&self.all_bitmap) as u16,
-        );
-        let peer = Self::peer_view_from_parts(
-            &self.controller,
-            self.peer_record.as_ref(),
-            &self.zone_names,
-        );
+        let list_views: [ChannelView<'_>; 7];
+        let list = if screen == Screen::Channels {
+            list_views = core::array::from_fn(|i| self.list[i].view());
+            &list_views[..self.list_len]
+        } else {
+            &[]
+        };
+        let zone_views;
+        let zones = if screen == Screen::Zones {
+            zone_views = zone_views_from_parts(
+                &self.zone_window,
+                &self.zone_names,
+                &self.zone_counts,
+                controller::active_count(&self.all_bitmap) as u16,
+            );
+            &zone_views[..self.zone_window_len]
+        } else {
+            &[]
+        };
+        let peer = (screen == Screen::Home).then(|| {
+            Self::peer_view_from_parts(
+                &self.controller,
+                self.peer_record.as_ref(),
+                &self.zone_names,
+            )
+        });
         let model = Model {
             view: self.status.view,
             channel,
-            list: &list_views[..self.list_len],
+            list,
             calibration_matches: self.status.calibration_matches_backup,
             last_key: self.status.last_pressed,
             ptt_pressed: self.status.view.ptt_down,
             input_ready: self.status.input_ready,
             radio: self.radio,
+            battery_mv: self.battery_mv,
             zone_name: self
                 .status
                 .view
                 .zone
                 .map(|zone| &self.zone_names[zone as usize][..]),
-            zones: &zone_views[..self.zone_window_len],
-            peer: Some(peer),
+            zones,
+            peer,
             spectrum: self.spectrum.as_ref().map(|snapshot| SpectrumView {
                 waterfall: Some(&self.waterfall),
                 ..snapshot.view()
@@ -1564,6 +1626,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
 /// and all controller/PTT events keep their normal immediate queuing semantics.
 fn radio_controls_equal(a: RadioView, b: RadioView) -> bool {
     a.state == b.state
+        && a.tx_slot == b.tx_slot
         && a.tx_trial == b.tx_trial
         && a.power == b.power
         && a.modulation == b.modulation
@@ -1618,7 +1681,7 @@ fn collect_zone_members(
     len
 }
 
-fn zone_views<'a>(
+fn zone_views_from_parts<'a>(
     window: &[Option<u8>; 7],
     names: &'a [[u8; 16]; ZONE_COUNT],
     counts: &[u16; ZONE_COUNT],

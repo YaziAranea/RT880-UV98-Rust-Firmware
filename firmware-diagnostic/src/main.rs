@@ -3,7 +3,8 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 //! Experimental executable for the related RT880/UV98 AT32F423 profile.
 //! RX by default. Explicit features select the historical EXO trial or normal
-//! FM channel/VFO TX. NOR remains read-only; lower physical PTT stays unmapped.
+//! FM channel/VFO TX. NOR remains read-only; the channel-TX profile supports
+//! both physical PTTs using the investigated board's isolated key ladder.
 //! A successful register check does not establish physical board/RF safety.
 
 mod beacon;
@@ -34,8 +35,8 @@ use uv98_display::DisplayBus;
 use uv98_handheld_app::{App, InputSample, SpectrumSnapshot, PRESERVED_CALIBRATION_SHA256};
 use uv98_handheld_ui::{
     controller::{
-        CrossbandProbe, Request, ScanState, Screen, ShortwaveStatus, Slot, SPECTRUM_INTERVALS,
-        STEP_10HZ,
+        CrossbandProbe, Request, ScanState, Screen, ShortwaveStatus, Slot, View,
+        SPECTRUM_INTERVALS, STEP_10HZ,
     },
     render,
     render::{Modulation as UiModulation, RadioRoute, RadioState, RadioView, SpectrumState},
@@ -53,7 +54,7 @@ use uv98_spectrum::compact as spectrum;
 compile_error!("Select exactly one TX profile");
 const LIVE_TX: bool = cfg!(any(feature = "upper-exo-tx-trial", feature = "channel-tx"));
 const LIVE_RELAY: bool = cfg!(feature = "channel-tx");
-const LOWER_PTT_CODE: Option<u8> = None;
+const LOWER_PTT_ENABLED: bool = cfg!(feature = "channel-tx");
 
 /// CPS may personalize only this digest, after verifying two identical stock
 /// NOR reads. Calibration itself stays in the radio and is never overwritten.
@@ -113,7 +114,7 @@ fn spectrum_error(error: scope::StartError) -> render::SpectrumError {
 pub static UV98_RELEASE_POLICY: [u32; 4] = [
     0x108,
     LIVE_TX as u32,
-    0xffff_ffff,
+    if LOWER_PTT_ENABLED { 0x16 } else { 0xffff_ffff },
     if cfg!(feature = "channel-tx") {
         0x464d_5431
     } else if LIVE_TX {
@@ -246,11 +247,12 @@ impl uv98_sidekeys_at32::PollTiming for Timing {
 
 fn tx_permitted<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
     app: &App<N, L, D>,
+    target: View,
     profile: policy::Profile,
     input: ptt::Input,
 ) -> bool {
     if cfg!(feature = "channel-tx") {
-        tx_policy::authorize(app.status().view, profile, input).is_ok()
+        tx_policy::authorize_target(app.status().view, target, profile, input).is_ok()
     } else {
         tx_trial::permits(app.status().view, profile, input)
             && app
@@ -287,6 +289,25 @@ fn profile<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
     let view = app.status().view;
     let index = if view.active_slot == Slot::A { 0 } else { 1 };
     policy::profile(view, app.selected_channel(), cfg, settings[index])
+}
+
+/// Project the requested slot without changing the editing/RX selection.
+/// The peer's immutable record and RAM settings remain distinct from the
+/// selected channel, including RX-only permission, duplex tone and power.
+fn profile_for_slot<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
+    app: &App<N, L, D>,
+    settings: &[policy::Overrides; 2],
+    slot: Slot,
+) -> Result<(View, policy::Profile), policy::Error> {
+    let operator = app.status().view;
+    let (target, channel) = if operator.active_slot == slot {
+        (operator, app.selected_channel())
+    } else {
+        app.peer_radio_selection()
+    };
+    let cfg = radio_settings(app).ok_or(policy::Error::Settings)?;
+    let profile = policy::profile(target, channel, cfg, settings[usize::from(slot == Slot::B)])?;
+    Ok((target, profile))
 }
 
 fn crossband_session<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
@@ -703,7 +724,7 @@ fn main() -> ! {
     // proves which ADC code belongs to that key.
     checked(
         &mut log,
-        app.set_lower_side_mapped(LOWER_PTT_CODE.is_some()),
+        app.set_lower_side_mapped(LOWER_PTT_ENABLED),
         0xE032,
     );
     event(
@@ -766,6 +787,7 @@ fn main() -> ! {
         unsafe {
             uv98_sidekeys_at32::hardware::SideAdc::from_prepared(
                 radio_pins.side_adc,
+                radio_pins.battery_adc,
                 p.ADC1,
                 p.ADCCOM,
                 &mut p.CRM,
@@ -847,6 +869,8 @@ fn main() -> ! {
     let mut heartbeat_at = now;
     let mut idle = Timing::new();
     let mut adc_previous = None;
+    let mut battery = uv98_sidekeys_at32::BatteryMonitor::default();
+    let mut battery_at = now.wrapping_sub(250);
     let mut ui_aux = uv98_handheld_ui::input::AuxFilter::default();
     app.enable_fast_matrix_input();
     let mut tx_tones = signaling::TransmitTones::new();
@@ -899,12 +923,12 @@ fn main() -> ! {
             tx_key_latched = false;
         }
         let upper = raw.is_some_and(|(_, p)| p);
-        let lower = LOWER_PTT_CODE == Some(adc_code);
+        let lower = LOWER_PTT_ENABLED && ptt::lower_pressed(adc.raw);
         let raw_ptt = ptt::Input {
             upper,
             lower,
             clean: raw.is_some_and(|(m, _)| m == 0 || dtmf_key.is_some())
-                && (adc_code == 0xff || lower),
+                && (ptt::side_idle(adc.raw) || lower),
         };
         if relay_active && (upper || lower) {
             stop_relay(&mut radio, &mut secondary);
@@ -942,11 +966,12 @@ fn main() -> ! {
                 0xE032,
             );
         }
-        let guarded_profile = if cfg!(feature = "channel-tx") {
-            profile(&app, &settings).ok()
+        let guarded_target = if cfg!(feature = "channel-tx") {
+            profile_for_slot(&app, &settings, tx_slot.unwrap_or(view.active_slot)).ok()
         } else {
-            current
+            current.map(|p| (view, p))
         };
+        let guarded_profile = guarded_target.map(|(_, profile)| profile);
         let now = require(time.sample(DWT::cycle_count()), 0xE016);
         // Stop on raw release/chord/source handoff before UI/NOR work.
         let physical_held = LIVE_TX
@@ -955,10 +980,11 @@ fn main() -> ! {
             && tx_slot == view.ptt_slot
             && tx_started_at.is_some_and(|start| tx_hold_within_limit(start, now))
             && !view.locked
-            && guarded_profile.is_some_and(|p| {
-                tx_permitted(&app, p, raw_ptt)
+            && guarded_target.is_some_and(|(target, p)| {
+                tx_permitted(&app, target, p, raw_ptt)
                     && (!cfg!(feature = "channel-tx")
-                        || tx_authorization.is_some_and(|a| a.still_held(view, p, raw_ptt)))
+                        || tx_authorization
+                            .is_some_and(|a| a.still_held_target(view, target, p, raw_ptt)))
             });
         let mut tail_view = view;
         tail_view.ptt_down = false;
@@ -967,10 +993,11 @@ fn main() -> ! {
             && !lower
             && matrix == Some(0)
             && uncertain_tx_since.is_none()
-            && adc_code == 0xff
+            && ptt::side_idle(adc.raw)
             && tx_started_at.is_some_and(|start| tx_hold_within_limit(start, now))
-            && guarded_profile.is_some_and(|profile| {
-                tx_authorization.is_some_and(|a| a.tail_configuration_valid(tail_view, profile))
+            && guarded_target.is_some_and(|(target, profile)| {
+                tx_authorization
+                    .is_some_and(|a| a.tail_configuration_valid_target(tail_view, target, profile))
             });
         let calibration = app.calibration_view().unwrap_or_else(|| stop(0xE050));
         let beacon_held = checked(
@@ -983,7 +1010,7 @@ fn main() -> ! {
                 view.screen == Screen::Aprs,
                 upper,
                 lower,
-                adc_code == 0xff,
+                ptt::side_idle(adc.raw),
                 matrix,
             ),
             0xE066,
@@ -1029,25 +1056,25 @@ fn main() -> ! {
             feed();
             let held = if radio.tx_active_or_starting() {
                 // This faster aggregate matrix scan only sustains an already
-                // armed upper PTT. It never creates UI events or arms TX.
+                // armed PTT source. It never creates UI events or arms TX.
                 let fresh_adc = checked(&mut log, side.sample(), 0xE055);
-                let aux = uv98_keys::stock_auxiliary_code(fresh_adc.raw);
                 let guard = keys.guard_scan();
                 let input = ptt::Input {
                     upper: guard.as_ref().is_ok_and(|s| s.ptt_pressed()),
-                    lower: LOWER_PTT_CODE == Some(aux),
+                    lower: LOWER_PTT_ENABLED && ptt::lower_pressed(fresh_adc.raw),
                     clean: guard.as_ref().is_ok_and(|s| s.matrix_clear())
-                        && (aux == 0xff || LOWER_PTT_CODE == Some(aux)),
+                        && (ptt::side_idle(fresh_adc.raw)
+                            || (LOWER_PTT_ENABLED && ptt::lower_pressed(fresh_adc.raw))),
                 };
                 let same_source = ptt_guard.observe(
                     input,
                     scanner.active() || scope.active() || receive_tool_blocks_tx,
                 );
                 let now = require(time.sample(DWT::cycle_count()), 0xE016);
-                let guarded_profile = if cfg!(feature = "channel-tx") {
-                    profile(&app, &settings).ok()
+                let guarded_target = if cfg!(feature = "channel-tx") {
+                    profile_for_slot(&app, &settings, tx_slot.unwrap_or(view.active_slot)).ok()
                 } else {
-                    current
+                    current.map(|p| (view, p))
                 };
                 LIVE_TX
                     && same_source
@@ -1055,10 +1082,11 @@ fn main() -> ! {
                     && tx_slot == view.ptt_slot
                     && tx_started_at.is_some_and(|start| tx_hold_within_limit(start, now))
                     && !view.locked
-                    && guarded_profile.is_some_and(|p| {
-                        tx_permitted(&app, p, input)
+                    && guarded_target.is_some_and(|(target, p)| {
+                        tx_permitted(&app, target, p, input)
                             && (!cfg!(feature = "channel-tx")
-                                || tx_authorization.is_some_and(|a| a.still_held(view, p, input)))
+                                || tx_authorization
+                                    .is_some_and(|a| a.still_held_target(view, target, p, input)))
                     })
             } else {
                 false
@@ -1091,7 +1119,11 @@ fn main() -> ! {
             adc_previous = Some((adc_code, upper));
         }
         let aux_now = require(time.sample(DWT::cycle_count()), 0xE016);
-        let stable_aux = ui_aux.sample(aux_now, uv98_keys::auxiliary_key(adc.raw));
+        // Broad stock Aux16 includes a top-key + lower-key chord. Only the
+        // isolated lower-key ADC window may enter the PTT event stream.
+        let auxiliary = uv98_keys::auxiliary_key(adc.raw)
+            .filter(|key| !LOWER_PTT_ENABLED || *key != uv98_keys::Key::Aux16 || lower);
+        let stable_aux = ui_aux.sample(aux_now, auxiliary);
         let sample = match raw {
             Some((matrix, ptt_pressed)) => InputSample::WithAux {
                 matrix: if tx_key_latched { 0 } else { matrix },
@@ -1137,6 +1169,9 @@ fn main() -> ! {
                 ],
             );
         }
+        // Preserve the explicitly historical trial's selected-A allowlist.
+        // The ordinary channel-TX build never changes focus for a PTT press.
+        #[cfg(feature = "upper-exo-tx-trial")]
         if update.ptt_tx_requested && ptt_guard.allow_edge() {
             if let Some(slot) = update.ptt_slot {
                 checked(&mut log, app.select_slot(slot), 0xE032);
@@ -1527,7 +1562,7 @@ fn main() -> ! {
         }
         if scanner.active()
             && (upper
-                || adc_code != 0xff
+                || !ptt::side_idle(adc.raw)
                 || matches!(
                     app.status().view.scan,
                     ScanState::Stopped | ScanState::Stopping
@@ -2100,15 +2135,19 @@ fn main() -> ! {
                     }
                 }
             }
+            let requested_tx = update
+                .ptt_slot
+                .and_then(|slot| profile_for_slot(&app, &settings, slot).ok());
             if LIVE_TX
                 && app.status().view.screen != Screen::Crossband
-                && wanted.is_some_and(|p| tx_permitted(&app, p, raw_ptt))
+                && requested_tx.is_some_and(|(target, p)| tx_permitted(&app, target, p, raw_ptt))
                 && ptt_guard.allow_edge()
                 && update.ptt_tx_requested
                 && (upper ^ lower)
-                && (adc_code == 0xff || lower)
+                && (ptt::side_idle(adc.raw) || lower)
             {
-                if let (Some(tx), Some(slot)) = (wanted.and_then(|p| p.transmit), update.ptt_slot) {
+                if let (Some((target, tx_profile)), Some(slot)) = (requested_tx, update.ptt_slot) {
+                    let tx = tx_profile.transmit.unwrap_or_else(|| stop(0xE059));
                     let calibration = match app.calibration_view() {
                         Some(c) => c,
                         None => stop(0xE050),
@@ -2124,8 +2163,14 @@ fn main() -> ! {
                         );
                         tx_slot = Some(slot);
                         tx_started_at = Some(now);
-                        tx_authorization = wanted
-                            .and_then(|p| tx_policy::authorize(app.status().view, p, raw_ptt).ok());
+                        tx_authorization = tx_policy::authorize_target(
+                            app.status().view,
+                            target,
+                            tx_profile,
+                            raw_ptt,
+                        )
+                        .ok();
+                        current = Some(tx_profile);
                         last_signal = None;
                     }
                 }
@@ -2507,6 +2552,11 @@ fn main() -> ! {
             None
         };
         let mut report = RadioView::OFF;
+        report.tx_slot = if radio.state() == RfState::Transmitting {
+            tx_slot
+        } else {
+            None
+        };
         report.tx_trial = cfg!(feature = "upper-exo-tx-trial");
         report.state = match radio.state() {
             RfState::Off if radio.initialized() => RadioState::Unavailable,
@@ -2581,6 +2631,20 @@ fn main() -> ! {
             );
         }
         checked(&mut log, app.set_radio_view(report), 0xE032);
+        // Three bounded ADC conversions; the side-key channel is restored
+        // before returning. Physical release/TOT work has already run this loop.
+        if now.wrapping_sub(battery_at) >= 250
+            && radio.state() != RfState::Configuring
+            && !beacon.active()
+        {
+            let raw_battery = checked(&mut log, side.sample_battery(), 0xE055);
+            checked(
+                &mut log,
+                app.set_battery_voltage(battery.observe(raw_battery)),
+                0xE032,
+            );
+            battery_at = now;
+        }
         if raw.is_some_and(|(matrix, ptt)| matrix != 0 || ptt) || adc_code != 0xff {
             lights.activity(now);
         }

@@ -8,7 +8,7 @@ Please write in English, German or Russian. Include the exact build; a filename 
 
 ### Version and device
 
-- Release (for example R36) and BIN SHA256:
+- Release (for example R37) and BIN SHA256:
 - Radio model and known board revision:
 - Previous stock firmware version:
 - CPS version, if relevant:

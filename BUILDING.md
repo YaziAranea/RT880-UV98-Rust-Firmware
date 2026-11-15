@@ -1,4 +1,4 @@
-# Building R36 from source
+# Building R37 from source
 
 These commands build files on the computer; they do not open a COM port or flash a radio. For installation without a compiler, use the [release package and CPS guide](docs/GETTING-STARTED.en.md).
 
@@ -27,26 +27,26 @@ $env:CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER = Join-Path $taskRustSysroot 
 
 ```powershell
 cargo build --locked --release --target thumbv7em-none-eabi -p uv98-diag-firmware --features channel-tx
-python tools/export_diagnostic_image.py target/thumbv7em-none-eabi/release/uv98-diag-firmware validation/r36-public-build/image
-python tools/check_diag_preinit.py validation/r36-public-build/image/UV98-diag-0.1.8.elf --report validation/r36-public-build/early-machine-code-check.json
-python tools/check_device_profile.py validation/r36-public-build/image/UV98-diag-0.1.8.elf --report validation/r36-public-build/device-profile-check.json
+python tools/export_diagnostic_image.py target/thumbv7em-none-eabi/release/uv98-diag-firmware validation/r37-public-build/image
+python tools/check_diag_preinit.py validation/r37-public-build/image/UV98-diag-0.1.8.elf --report validation/r37-public-build/early-machine-code-check.json
+python tools/check_device_profile.py validation/r37-public-build/image/UV98-diag-0.1.8.elf --report validation/r37-public-build/device-profile-check.json
 ```
 
 The export directory must be new. Use another directory name for a subsequent build. The exporter retains its historical filenames:
 
 ```text
-validation/r36-public-build/image/UV98-diag-0.1.8.bin
-validation/r36-public-build/image/UV98-diag-0.1.8.elf
-validation/r36-public-build/image/image-layout.json
+validation/r37-public-build/image/UV98-diag-0.1.8.bin
+validation/r37-public-build/image/UV98-diag-0.1.8.elf
+validation/r37-public-build/image/image-layout.json
 ```
 
-The BIN covers the 251904-byte application window. It excludes the bootloader prefix and external NOR. A release name such as `UV98-r36.bin` is assigned during packaging; identify the exact artifact by its SHA256, not its filename alone.
+The BIN covers the 251904-byte application window. It excludes the bootloader prefix and external NOR. A release name such as `UV98-r37.bin` is assigned during packaging; identify the exact artifact by its SHA256, not its filename alone.
 
-`channel-tx` enables the current channel transmission profile. Omitting that feature builds the default RX profile. The historical `upper-exo-tx-trial` feature is not the R36 release profile; do not combine the two TX profiles.
+`channel-tx` enables the R37 release profile, including the independent A/B PTT targets. With neither TX feature, the default profile is RX-only. Build the historical `upper-exo-tx-trial` with its own feature selection. [PTT hardware evidence](research/r37/ptt.md)
 
 The linked checks examine startup/exception code and the device profile in the actual ELF. They do not measure RF behaviour, electrical pin states or maximum stack use on physical hardware.
 
-**A self-built BIN is not automatically accepted by the released CPS.** CPS validates recognized images against its release catalog. The exporter creates a layout report, not a trusted CPS catalog. Development builds need a separately reviewed catalog and packaging pipeline; do not rename an unknown BIN or disable validation to make it look like a release. The ordinary user path prepares a personal image from the recognized R36 template in CPS.
+**A self-built BIN is not automatically accepted by the released CPS.** CPS validates recognized images against its release catalog. The exporter creates a layout report, not a trusted CPS catalog. Development builds need a separately reviewed catalog and packaging pipeline; do not rename an unknown BIN or disable validation to make it look like a release. The ordinary user path prepares a personal image from the recognized R37 template in CPS.
 
 ## Host checks without private fixtures
 
@@ -80,10 +80,10 @@ For a maintainer who already holds those originals:
 ./build-diagnostic-image.ps1 -ChannelTx -NorBackup 'D:/private-radio-backup/storage-address-space.bin' -OutputDirectory 'D:/radio-builds/uv98-next-build'
 ```
 
-Use real local paths and a new output directory. This workflow additionally needs `pyserial` for boot-log test tools, but does not access the radio. Do not invent, zero-fill or substitute a fixture to make the tests pass. Historical R35 results remain in [R35-REPORT-RU.txt](R35-REPORT-RU.txt); they are not R36 hardware acceptance evidence.
+Use real local paths and a new output directory. This workflow additionally needs `pyserial` for boot-log test tools, but does not access the radio. Do not invent, zero-fill or substitute a fixture to make the tests pass. Historical R35 results remain in [R35-REPORT-RU.txt](R35-REPORT-RU.txt); they are not R37 hardware acceptance evidence.
 
 ## Public packaging
 
 Use `--exclude-private-fixture` with `tools/package_diagnostic_image.py` when preparing a shareable source archive. The legacy packager otherwise includes the owner's fixture in `source.zip`. That switch alone is not a public-release privacy or licensing audit: inspect archive entries, logs and reports as well.
 
-The public R36 kit excludes manufacturer recovery firmware and personal calibration/NOR/codeplug files. The [getting-started guide](docs/GETTING-STARTED.en.md#where-to-get-the-stock-recovery-file) provides the separately obtained matching stock file and its hash. The older R35 kit remains a private historical artifact; its bundled recovery file must not be copied automatically into a public release.
+The public R37 kit excludes manufacturer recovery firmware and personal calibration/NOR/codeplug files. The [getting-started guide](docs/GETTING-STARTED.en.md#where-to-get-the-stock-recovery-file) provides the separately obtained matching stock file and its hash. The older R35 kit remains a private historical artifact; its bundled recovery file must not be copied automatically into a public release.

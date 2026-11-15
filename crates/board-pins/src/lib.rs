@@ -30,6 +30,8 @@ pub const DIAGNOSTIC_CONTROL_B_MASK: u16 = 1 << 11;
 pub const DIAGNOSTIC_CONTROL_C_MASK: u16 = (1 << 4) | (1 << 5) | (1 << 15);
 pub const DIAGNOSTIC_CONTROL_F_MASK: u16 = 1 << 8;
 pub const BOOT_LOG_A_MASK: u16 = 1 << 11;
+pub const SIDE_ADC_C_MASK: u16 = 1 << 2;
+pub const BATTERY_ADC_A_MASK: u16 = 1 << 7;
 /// Operational LCD/keypad lights and green/red status LEDs. The latter two
 /// consume PA13/PA14, so the operational backend cannot coexist with SWD.
 pub const RADIO_CONTROL_A_MASK: u16 = (1 << 4) | (1 << 9) | (1 << 13) | (1 << 14);
@@ -134,6 +136,10 @@ pub struct RadioControlPins {
 pub struct SideAdcPins {
     _single_context: PhantomData<*mut ()>,
 }
+/// PA7 / ADC1_IN7, LOWBATTY-DET. Shares ADC1 with the side-key input.
+pub struct BatteryAdcPins {
+    _single_context: PhantomData<*mut ()>,
+}
 pub struct ReservedAfterRadio {
     _single_context: PhantomData<*mut ()>,
 }
@@ -187,6 +193,7 @@ impl ReservedAfterRadio {
 pub struct RadioPins {
     pub control: RadioControlPins,
     pub side_adc: SideAdcPins,
+    pub battery_adc: BatteryAdcPins,
     pub reserved: ReservedAfterRadio,
 }
 impl ReservedAfterBootLog {
@@ -196,6 +203,9 @@ impl ReservedAfterBootLog {
                 _single_context: PhantomData,
             },
             side_adc: SideAdcPins {
+                _single_context: PhantomData,
+            },
+            battery_adc: BatteryAdcPins {
                 _single_context: PhantomData,
             },
             reserved: ReservedAfterRadio {
@@ -320,7 +330,23 @@ mod tests {
                     | KEYSCAN_C_MASK
                     | RF_PRIMARY_C_MASK
                     | RF_SECONDARY_C_MASK
-                    | (1 << 2)),
+                    | SIDE_ADC_C_MASK),
+            0
+        );
+    }
+    #[test]
+    fn battery_input_does_not_alias_existing_gpioa_owners() {
+        let gps_and_modem = 0x000f;
+        assert_eq!(BATTERY_ADC_A_MASK, 0x0080);
+        assert_eq!(
+            BATTERY_ADC_A_MASK
+                & (NOR_A_MASK
+                    | LCD_A_MASK
+                    | KEYSCAN_A_MASK
+                    | RF_PRIMARY_A_MASK
+                    | RADIO_CONTROL_A_MASK
+                    | BOOT_LOG_A_MASK
+                    | gps_and_modem),
             0
         );
     }

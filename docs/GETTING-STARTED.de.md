@@ -1,5 +1,7 @@
 # Zuerst sichern, dann installieren
 
+> **PRE-ALPHA — experimentelle Firmware und CPS.** Das Projekt befindet sich in einem sehr frühen Stadium, noch vor einer Alpha-Version. Funktionen können ausfallen; die Installation kann das Funkgerät unbrauchbar machen. Installation und Nutzung erfolgen vollständig auf eigenes Risiko. Die Software wird im vorliegenden Zustand ohne Gewährleistung bereitgestellt; die Autoren übernehmen nach Maßgabe der Lizenz keine Haftung für Schäden oder Verluste. Vor einer Installation die Lizenz sowie die Anleitungen zur Sicherung und Wiederherstellung lesen.
+
 [Projektstartseite](../README.de.md) · [English](GETTING-STARTED.en.md) · [Русский](GETTING-STARTED.ru.md)
 
 Diese Anleitung beschreibt die erste Vorbereitung eines UV-98 Plus / der untersuchten RT-880-Plattform. **Die Originaldaten zunächst mit installierter Originalfirmware auslesen. Erst nach der Kompatibilitätsprüfung ein Firmware-Image wählen.** Die Sicherung ist auch ohne Installation der Rust-Firmware möglich.
@@ -11,7 +13,7 @@ Diese Anleitung beschreibt die erste Vorbereitung eines UV-98 Plus / der untersu
 3. Mit der originalen CPS für das eigene Modell das Gerät auslesen und die ursprüngliche `.880dmf`- oder `.98pdmf`-Datei speichern. Eine vorhandene Originaldatei wie `999.880dmf` unverändert aufbewahren.
 4. Original-CPS, Radio Tuning Software und andere Programme schließen, die das Kabel verwenden. Vor dem ersten Auslesen mit unserer CPS das Gerät für 3 Sekunden ausschalten und wieder normal starten.
 5. Einen Ordner anlegen, etwa `Dokumente/UV98-backup-2026-11-16`. Sinnvolle Unterordner: `01-original`, `02-calibration`, `03-nor`, `04-settings`, `05-recovery`. Die ursprüngliche CPS-Datei in `01-original` ablegen.
-6. Das [Paket](https://github.com/YaziAranea/uv98-rust/releases/tag/r36) vollständig entpacken. `UV98-CPS.exe` starten und **«Резервные копии» (Sicherungen)** öffnen. Den tatsächlichen COM-Port über **«Обновить список» (Aktualisieren) → «Доступные порты» (Verfügbare Ports)** wählen. Frühere Angaben wie COM20/COM21 sind keine Vorgabe für Ihren Rechner.
+6. Das [R37-Paket mit CPS 0.6.1](https://github.com/YaziAranea/uv98-rust/releases/tag/r37) vollständig entpacken. `UV98-CPS.exe` starten und **«Резервные копии» (Sicherungen)** öffnen. Den tatsächlichen COM-Port über **«Обновить список» (Aktualisieren) → «Доступные порты» (Verfügbare Ports)** wählen. Frühere Angaben wie COM20/COM21 sind keine Vorgabe für Ihren Rechner.
 
 Die unten zitierten Schaltflächen entsprechen der derzeit russischen Windows-CPS. Modell, originale Firmwareversion und bekannte Platinenrevision in einer kurzen Textdatei bei den Sicherungen notieren.
 
@@ -75,22 +77,22 @@ Die Datei mit dem Namen `RT-880_Upgrade_V1_16_250915.bin` im Ordner `recovery` n
 
 ## 4. Kompatibilität vor dem Flashen prüfen
 
-R36 ist für das untersuchte AT32F423-Platinenprofil vorgesehen. Ein ähnliches Gehäuse oder die Aufschrift RT-880 belegt keine Kompatibilität mit einer anderen Revision. Die Vorbereitung anhand der Sicherung bindet das Image an die eigenen Kalibrierungen; sie ermittelt nicht automatisch die Hardwarekompatibilität.
+R37 ist für das untersuchte AT32F423-Platinenprofil vorgesehen. Ein ähnliches Gehäuse oder die Aufschrift RT-880 belegt keine Kompatibilität mit einer anderen Revision. Die Vorbereitung anhand der Sicherung bindet das Image an die eigenen Kalibrierungen; sie ermittelt nicht automatisch die Hardwarekompatibilität.
 
 Für eine bestätigte kompatible Platine eine persönliche BIN vorbereiten. **Ein Rust-Compiler wird dafür nicht benötigt.**
 
-1. **«Прошивка» (Firmware)** in unserer CPS öffnen. Die ursprüngliche `UV98-r36.bin` aus dem aktuellen Paket auswählen.
+1. **«Прошивка» (Firmware)** in unserer CPS öffnen. Die ursprüngliche `UV98-r37.bin` aus dem aktuellen Paket auswählen.
 2. **«Подготовить образ для моей рации…» (Image für mein Funkgerät vorbereiten)** anklicken.
 3. **`manifest.json` der vollständigen 4-MiB-NOR-Sicherung** auswählen, die mit „Einstellungsspeicher lesen (4 MiB)“ erstellt wurde. Das Manifest auswählen, nicht `storage-address-space.bin` selbst. Eine reine Kalibrierungssicherung reicht nicht aus.
 4. Einen übergeordneten Ordner für neue Images wählen, etwa `Dokumente/UV98-personal`. CPS erstellt darin ein neues Verzeichnis `UV98-personal-…`.
 5. Die erfolgreiche Vorbereitung abwarten. Es entstehen `firmware/UV98-personal.bin` und `firmware/catalog.json`; CPS wählt die neue BIN automatisch zum Flashen aus.
 6. Den gesamten neuen Ordner aufbewahren. Beim späteren Öffnen der CPS die `UV98-personal.bin` auswählen und ihren benachbarten Katalog beibehalten.
 
-CPS prüft den Status der zwei Lesevorgänge, Größen und SHA-Werte der Sicherungsdateien, die Übereinstimmung des Kalibrierungsblocks mit dem NOR-Anfang und die Markierung des ursprünglichen R36-Images. In die neue BIN wird nur der erwartete **SHA der eigenen Kalibrierungen** eingetragen, nicht die Kalibrierungsdaten selbst. Originalimage und Sicherung bleiben unverändert. Beim Start vergleicht die Firmware diesen Hash mit den tatsächlichen Kalibrierungen im Gerät.
+CPS prüft den Status der zwei Lesevorgänge, Größen und SHA-Werte der Sicherungsdateien, die Übereinstimmung des Kalibrierungsblocks mit dem NOR-Anfang sowie die Originalvorlage anhand ihres Versionskatalogs und der Kalibrierungsprofil-Markierung. In die neue BIN wird nur der erwartete **SHA der eigenen Kalibrierungen** eingetragen, nicht die Kalibrierungsdaten selbst. Originalimage und Sicherung bleiben unverändert. Beim Start vergleicht die Firmware diesen Hash mit den tatsächlichen Kalibrierungen im Gerät.
 
-Der SHA der persönlichen BIN unterscheidet sich vom SHA der ursprünglichen R36-Vorlage; das ist beabsichtigt. Zum Schreiben dient der von CPS erzeugte neue Katalog. Eine einzelne BIN nicht ohne ihren Katalog verschieben und keine Sicherung eines anderen Geräts verwenden.
+Der SHA der persönlichen BIN unterscheidet sich vom SHA der ursprünglichen R37-Vorlage; das ist beabsichtigt. Zum Schreiben dient der von CPS erzeugte neue Katalog. Eine einzelne BIN nicht ohne ihren Katalog verschieben und keine Sicherung eines anderen Geräts verwenden.
 
-Wird die Vorbereitung abgelehnt, Manifest oder Katalog nicht zum Umgehen der Prüfung bearbeiten. Prüfen, ob die eigene vollständige und erfolgreich verglichene NOR-Sicherung sowie die ursprüngliche R36 aus demselben Paket gewählt wurden. R35 und ältere Images unterstützen dieses Vorbereitungsverfahren nicht.
+Wird die Vorbereitung abgelehnt, Manifest oder Katalog nicht zum Umgehen der Prüfung bearbeiten. Prüfen, ob die eigene vollständige und erfolgreich verglichene NOR-Sicherung sowie die ursprüngliche R37 aus demselben Paket gewählt wurden.
 
 Erst nach erfolgreicher Vorbereitung, bestätigter Platinenkompatibilität und Sicherung der geprüften Daten sowie der richtigen Werks-BIN an zwei Orten fortfahren.
 
@@ -105,7 +107,9 @@ Erst nach erfolgreicher Vorbereitung, bestätigter Platinenkompatibilität und S
 
 **Anzeigesprache wählen:** MENU → СИСТЕМА / TX → ЯЗЫК / LANGUAGE → DEUTSCH. Mit ↑/↓ wählen, mit MENU bestätigen, mit EXIT abbrechen. Zur Auswahl stehen РУССКИЙ, ENGLISH und DEUTSCH. Auf Deutsch lautet der Pfad MENU → SYSTEM / TX → SPRACHE. Nach dem Ausschalten wird derzeit wieder Russisch verwendet.
 
-Bootloader-Bestätigungen belegen die Dateiübertragung. Erfolgreicher Start und Funkbetrieb werden am Gerät geprüft. Die aktuellen Rust-Einstellungen liegen im RAM; auch die Sprache bleibt nach dem Ausschalten noch nicht gespeichert.
+In der Standardbelegung fordert die obere PTT eine Sendung über A an, die untere über B. Das sendende Feld zeigt TX. Beim Senden über B kann A ausgewählt bleiben. Die Leistung liegt je VFO im RAM und steht nach dem Einschalten auf LOW. Das Akkusymbol zeigt den ungefähren Stand mit bis zu vier Balken und die Spannung in Schritten von 0,1 V (`--.-V`, wenn kein Messwert verfügbar ist). [Nachweise zur PTT](../research/r37/ptt.md)
+
+Bootloader-Bestätigungen belegen die Dateiübertragung. Start und Funkbetrieb am Gerät prüfen. R33 ist die vom Besitzer akzeptierte Ausgangsversion. Die untere PTT, die Akkuanzeige und die Anzeigegeschwindigkeit von R37 sind noch am Gerät zu prüfen. Anzeigesprache und weitere Rust-Einstellungen werden nach dem Ausschalten zurückgesetzt.
 
 ## 6. Bei Bedarf zur Originalfirmware zurückkehren
 

@@ -6,12 +6,18 @@ use uv98_sidekeys_at32::{
 
 #[derive(Default)]
 struct Model {
-    values: [u32; 11],
+    values: [u32; 12],
     writes: Vec<(Register, u32)>,
     reads: usize,
     stuck: Option<Error>,
     triggers: usize,
     raw: u32,
+    battery_raw: u32,
+    conversion_channels: Vec<u32>,
+    data_channel: u32,
+    mux_lag: bool,
+    fail_conversion: Option<usize>,
+    ignore_sequence: Option<u32>,
     waits: usize,
     fail_timing: bool,
 }
@@ -36,7 +42,11 @@ impl Registers for Bus {
         }
         if register == Register::Data {
             model.values[Register::Status as usize] &= !2;
-            return model.raw;
+            return if model.data_channel == 7 {
+                model.battery_raw
+            } else {
+                model.raw
+            };
         }
         if register == Register::Misc && model.stuck == Some(Error::Configuration) {
             return 0;
@@ -50,6 +60,9 @@ impl Registers for Bus {
             model.values[register as usize] &= value;
             return;
         }
+        if register == Register::Sequence3 && model.ignore_sequence == Some(value) {
+            return;
+        }
         model.values[register as usize] = value;
         if register == Register::Control2 && value == 1 && model.stuck != Some(Error::ReadyTimeout)
         {
@@ -57,7 +70,16 @@ impl Registers for Bus {
         }
         if register == Register::Control2 && value & (1 << 30) != 0 {
             model.triggers += 1;
-            if model.stuck != Some(Error::ConversionTimeout) {
+            let channel = model.values[Register::Sequence3 as usize];
+            model.data_channel = if model.mux_lag {
+                model.conversion_channels.last().copied().unwrap_or(12)
+            } else {
+                channel
+            };
+            model.conversion_channels.push(channel);
+            if model.stuck != Some(Error::ConversionTimeout)
+                && model.fail_conversion != Some(model.triggers)
+            {
                 model.values[Register::Status as usize] |= 2;
                 model.values[register as usize] &= !(1 << 30);
                 if model.stuck == Some(Error::Overflow) {
@@ -89,11 +111,12 @@ fn sdk_initialization_and_one_fresh_conversion_per_call() {
     let mut adc = Engine::prepare(bus, time, 8).unwrap();
     assert_eq!(adc.calibration_value(), 42);
     assert_eq!(
-        &m.borrow().writes[..8],
+        &m.borrow().writes[..9],
         &[
             (Register::Control2, 0),
             (Register::Control1, 0),
             (Register::SampleTime1, 448),
+            (Register::SampleTime2, 7 << 21),
             (Register::Sequence1, 0),
             (Register::Sequence2, 0),
             (Register::Sequence3, 12),
@@ -190,4 +213,63 @@ fn no_physical_button_guess_and_out_of_range_is_not_release() {
     assert_eq!(Sample::from_raw(3541).unwrap().key, Some(Key::Aux18));
     assert_eq!(Sample::from_raw(3542).unwrap().key, None);
     assert_eq!(Sample::from_raw(4096), Err(Error::InvalidSample));
+}
+
+#[test]
+fn battery_sampling_discards_mux_residue_and_restores_fresh_pc2() {
+    let (m, bus, time) = model();
+    let mut adc = Engine::prepare(bus, time, 8).unwrap();
+    {
+        let mut model = m.borrow_mut();
+        model.mux_lag = true;
+        model.raw = 4095;
+        model.battery_raw = 1224;
+    }
+    assert_eq!(adc.sample().unwrap().key, None);
+    assert_eq!(adc.sample_battery(), Ok(1224));
+    assert_eq!(m.borrow().values[Register::Sequence3 as usize], 12);
+    assert_eq!(adc.sample().unwrap(), Sample::from_raw(4095).unwrap());
+    m.borrow_mut().raw = 2200;
+    assert_eq!(adc.sample().unwrap().key, Some(uv98_keys::Key::Aux16));
+    m.borrow_mut().battery_raw = 0;
+    assert_eq!(adc.sample_battery(), Ok(0));
+    assert_eq!(adc.sample().unwrap().key, Some(uv98_keys::Key::Aux16));
+    assert_eq!(
+        m.borrow().conversion_channels,
+        [12, 7, 7, 12, 12, 12, 7, 7, 12, 12]
+    );
+}
+
+#[test]
+fn timeout_in_any_battery_mux_phase_disables_adc_before_restore() {
+    for phase in 1..=3 {
+        let (m, bus, time) = model();
+        let mut adc = Engine::prepare(bus, time, 4).unwrap();
+        m.borrow_mut().fail_conversion = Some(phase);
+        assert_eq!(adc.sample_battery(), Err(Error::ConversionTimeout));
+        {
+            let model = m.borrow();
+            assert_eq!(model.waits, 3);
+            assert_eq!(model.triggers, phase);
+            assert!(model
+                .writes
+                .ends_with(&[(Register::Control2, 0), (Register::Sequence3, 12)]));
+        }
+        assert_eq!(adc.sample(), Err(Error::Faulted));
+        assert_eq!(adc.sample_battery(), Err(Error::Faulted));
+        assert_eq!(m.borrow().triggers, phase);
+    }
+}
+
+#[test]
+fn mux_selection_readback_mismatch_prevents_wrong_channel_conversion() {
+    for (ignored_channel, expected_triggers) in [(7, 0), (12, 2)] {
+        let (m, bus, time) = model();
+        let mut adc = Engine::prepare(bus, time, 4).unwrap();
+        m.borrow_mut().ignore_sequence = Some(ignored_channel);
+        assert_eq!(adc.sample_battery(), Err(Error::Configuration));
+        assert_eq!(adc.sample(), Err(Error::Faulted));
+        assert_eq!(m.borrow().triggers, expected_triggers);
+        assert_eq!(m.borrow().values[Register::Control2 as usize], 0);
+    }
 }

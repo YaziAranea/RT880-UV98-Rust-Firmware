@@ -1223,9 +1223,8 @@ impl Controller {
     pub fn select_slot(&mut self, slot: Slot) -> Change {
         let before = self.view;
         self.ptt_tx_requested = false;
-        // Routing TX or switching slots ends the Step transaction as cancel,
-        // even when the requested slot is already active. Close the editor so
-        // a later EXIT cannot save a draft whose rollback was already taken.
+        // Slot selection ends a Step transaction even when selecting the
+        // current slot. Close the editor after rolling back its draft.
         if self.view.screen == Screen::Step {
             self.finish_step_cancel();
             self.view.screen = Screen::Home;
@@ -1462,6 +1461,13 @@ impl Controller {
         {
             self.view.ptt_slot = None;
             self.ptt_suppressed_until_release = true;
+        }
+        // Leave the Step editor only after validating the new TX intent.
+        // Its own rollback must not look like navigation during a PTT hold.
+        if self.ptt_tx_requested && self.view.ptt_slot.is_some() && self.view.screen == Screen::Step
+        {
+            self.finish_step_cancel();
+            self.view.screen = Screen::Home;
         }
         self.change_since(before)
     }
@@ -3277,7 +3283,7 @@ mod tests {
     }
 
     #[test]
-    fn review_ptt_slot_selection_does_not_commit_or_leak_step_draft() {
+    fn ptt_routing_does_not_commit_or_leak_step_draft() {
         let bitmap = catalog(&[0]);
         let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
         ui.view.step_index = 1;
@@ -3289,11 +3295,10 @@ mod tests {
         press(&mut ui, Key::Down, &bitmap);
         assert_ne!(ui.view().step_index, old_a);
         let update = ui.handle(InputEvent::Ptt(true), &bitmap);
-        if update.ptt_tx_requested {
-            if let Some(slot) = update.ptt_slot {
-                ui.select_slot(slot);
-            }
-        }
+        assert_eq!(update.ptt_slot, Some(Slot::B));
+        assert!(!update.slot_changed);
+        assert_eq!(ui.view().active_slot, Slot::A);
+        assert_eq!(ui.view().screen, Screen::Home);
         ui.handle(InputEvent::Ptt(false), &bitmap);
         ui.handle(InputEvent::Hold(Key::Hash), &bitmap);
         assert_eq!(
@@ -3840,6 +3845,27 @@ mod tests {
     }
 
     #[test]
+    fn default_ptts_request_their_slots_without_changing_the_selected_context() {
+        let bitmap = catalog(&[0]);
+        for (selected, down, up) in [
+            (Slot::A, InputEvent::PttB(true), InputEvent::PttB(false)),
+            (Slot::B, InputEvent::Ptt(true), InputEvent::Ptt(false)),
+        ] {
+            let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+            ui.select_slot(selected);
+            let contexts = [ui.context(Slot::A), ui.context(Slot::B)];
+            let pressed = ui.handle(down, &bitmap);
+            assert_eq!(pressed.ptt_slot, Some(selected.other()));
+            assert!(!pressed.slot_changed);
+            assert!(!ui.handle(down, &bitmap).ptt_tx_requested);
+            assert!(!ui.handle(up, &bitmap).ptt_tx_requested);
+            assert_eq!(ui.view().ptt_slot, None);
+            assert_eq!(ui.view().active_slot, selected);
+            assert_eq!([ui.context(Slot::A), ui.context(Slot::B)], contexts);
+        }
+    }
+
+    #[test]
     fn two_side_keys_and_lock_cannot_retrigger_tx_until_both_are_released() {
         let bitmap = catalog(&[0]);
         let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
@@ -4375,12 +4401,10 @@ mod tests {
         press(&mut ui, Key::Down, &bitmap);
         let update = ui.handle(InputEvent::Ptt(true), &bitmap);
         assert!(update.ptt_tx_requested);
-        ui.select_slot(update.ptt_slot.unwrap());
+        assert_eq!(update.ptt_slot, Some(Slot::A));
+        assert_eq!(ui.view.screen, Screen::Home);
         ui.handle(InputEvent::Ptt(false), &bitmap);
-        // Allow either leaving Step on cancellation or retaining a valid editor.
-        if ui.view.screen != Screen::Step {
-            press(&mut ui, Key::Hash, &bitmap);
-        }
+        press(&mut ui, Key::Hash, &bitmap);
         assert_eq!(ui.view.screen, Screen::Step);
         press(&mut ui, Key::Down, &bitmap);
         press(&mut ui, Key::Exit, &bitmap);

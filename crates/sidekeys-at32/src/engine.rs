@@ -7,6 +7,7 @@ pub enum Register {
     Control1,
     Control2,
     SampleTime1,
+    SampleTime2,
     Sequence1,
     Sequence2,
     Sequence3,
@@ -28,6 +29,11 @@ pub struct Engine<R: Registers, T: PollTiming> {
     faulted: bool,
     calibration_value: u8,
 }
+
+const SIDE_KEY_CHANNEL: u32 = 12;
+const BATTERY_CHANNEL: u32 = 7;
+const SIDE_KEY_SAMPLE_TIME: u32 = 7 << (3 * (SIDE_KEY_CHANNEL - 10));
+const BATTERY_SAMPLE_TIME: u32 = 7 << (3 * BATTERY_CHANNEL);
 
 impl<R: Registers, T: PollTiming> Engine<R, T> {
     /// ADC reset/common-clock and disjoint analog GPIO are caller prerequisites.
@@ -54,10 +60,11 @@ impl<R: Registers, T: PollTiming> Engine<R, T> {
         for (register, value) in [
             (Control2, 0),
             (Control1, 0),
-            (SampleTime1, 7 << 6),
+            (SampleTime1, SIDE_KEY_SAMPLE_TIME),
+            (SampleTime2, BATTERY_SAMPLE_TIME),
             (Sequence1, 0),
             (Sequence2, 0),
-            (Sequence3, 12),
+            (Sequence3, SIDE_KEY_CHANNEL),
             (Oversampling, 0),
             (Misc, 9),
         ] {
@@ -66,8 +73,9 @@ impl<R: Registers, T: PollTiming> Engine<R, T> {
         if self.registers.read(Control1) != 0
             || self.registers.read(Control2) != 0
             || self.registers.read(Sequence1) != 0
-            || self.registers.read(Sequence3) != 12
-            || self.registers.read(SampleTime1) != 7 << 6
+            || self.registers.read(Sequence3) != SIDE_KEY_CHANNEL
+            || self.registers.read(SampleTime1) != SIDE_KEY_SAMPLE_TIME
+            || self.registers.read(SampleTime2) != BATTERY_SAMPLE_TIME
             || self.registers.read(Misc) != 9
         {
             return Err(Error::Configuration);
@@ -114,17 +122,48 @@ impl<R: Registers, T: PollTiming> Engine<R, T> {
         if self.faulted {
             return Err(Error::Faulted);
         }
-        let result = self.sample_once();
+        let result = self.convert(SIDE_KEY_CHANNEL).and_then(Sample::from_raw);
         result.map_err(|error| self.fail(error))
     }
 
-    fn sample_once(&mut self) -> Result<Sample, Error> {
-        use Register::*;
+    /// Read PA7 and restore PC2 before returning. Discard the first conversion
+    /// after each mux switch to allow the sampling capacitor to settle.
+    pub fn sample_battery(&mut self) -> Result<u16, Error> {
+        if self.faulted {
+            return Err(Error::Faulted);
+        }
+        self.battery_once().map_err(|error| {
+            let error = self.fail(error);
+            // Re-select PC2 only after disabling ADC on an incomplete conversion.
+            self.registers.write(Register::Sequence3, SIDE_KEY_CHANNEL);
+            error
+        })
+    }
+
+    fn battery_once(&mut self) -> Result<u16, Error> {
+        self.check_conversion_state(SIDE_KEY_CHANNEL)?;
+        self.registers.write(Register::Sequence3, BATTERY_CHANNEL);
+        self.convert(BATTERY_CHANNEL)?;
+        let raw = self.convert(BATTERY_CHANNEL)?;
+        self.registers.write(Register::Sequence3, SIDE_KEY_CHANNEL);
+        self.convert(SIDE_KEY_CHANNEL)?;
+        Ok(raw)
+    }
+
+    fn check_conversion_state(&mut self, channel: u32) -> Result<(), Error> {
         // Unexpected reconfiguration, continuous conversion, DMA, trigger edge
         // or calibration-in-progress is not normalized into a fresh sample.
-        if self.registers.read(Control2) != 1 {
+        if self.registers.read(Register::Control2) != 1
+            || self.registers.read(Register::Sequence3) != channel
+        {
             return Err(Error::Configuration);
         }
+        Ok(())
+    }
+
+    fn convert(&mut self, channel: u32) -> Result<u16, Error> {
+        use Register::*;
+        self.check_conversion_state(channel)?;
         self.registers.write(Status, !0x3f);
         self.registers.write(Control2, 1 | (1 << 30));
         self.wait(Status, 1 << 1, true, Error::ConversionTimeout)?;
@@ -136,10 +175,8 @@ impl<R: Registers, T: PollTiming> Engine<R, T> {
             return Err(Error::InvalidSample);
         }
         // SDK: reading ODT clears conversion-end. Trigger must self-clear.
-        if self.registers.read(Control2) != 1 {
-            return Err(Error::Configuration);
-        }
-        Sample::from_raw(value as u16)
+        self.check_conversion_state(channel)?;
+        Ok(value as u16)
     }
 
     pub const fn calibration_value(&self) -> u8 {

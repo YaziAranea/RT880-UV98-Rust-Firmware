@@ -1,5 +1,7 @@
 # Back up first, then install
 
+> **PRE-ALPHA — experimental firmware and CPS.** This project is at a very early stage, before alpha. Features may fail; installation can leave the radio unusable. Install and use entirely at your own risk. The software is provided as is, without warranty; the authors disclaim liability for damage or loss under the terms of the license. Read the license and backup/recovery instructions before deciding to install.
+
 [Project home](../README.md) · [Deutsch](GETTING-STARTED.de.md) · [Русский](GETTING-STARTED.ru.md)
 
 This guide covers first-time preparation of a UV-98 Plus / the investigated RT-880 platform. **Read the original data while stock firmware is installed. Choose firmware only after checking compatibility.** You can complete the backup without installing Rust firmware.
@@ -11,7 +13,7 @@ This guide covers first-time preparation of a UV-98 Plus / the investigated RT-8
 3. Use the stock CPS for your model to read the radio and save its original `.880dmf` or `.98pdmf` file. Keep an existing original such as `999.880dmf` unchanged.
 4. Close the stock CPS, Radio Tuning Software and other programs using the cable. Before the first read in our CPS, power the radio off for 3 seconds, then start it normally again.
 5. Create a folder such as `Documents/UV98-backup-2026-11-16`. Suggested subfolders: `01-original`, `02-calibration`, `03-nor`, `04-settings`, `05-recovery`. Put the original CPS file in `01-original`.
-6. Extract the entire [package](https://github.com/YaziAranea/uv98-rust/releases/tag/r36). Run `UV98-CPS.exe` and open **«Резервные копии» (Backups)**. Select the actual cable COM port using **«Обновить список» (Refresh) → «Доступные порты» (Available ports)**. Old references to COM20/COM21 are not your required port number.
+6. Extract the entire [R37 package with CPS 0.6.1](https://github.com/YaziAranea/uv98-rust/releases/tag/r37). Run `UV98-CPS.exe` and open **«Резервные копии» (Backups)**. Select the actual cable COM port using **«Обновить список» (Refresh) → «Доступные порты» (Available ports)**. Old references to COM20/COM21 are not your required port number.
 
 The CPS labels below match the current Russian Windows interface. Keep a short text note beside the backups with the radio model, stock version and board revision if known.
 
@@ -75,22 +77,22 @@ Place the file named `RT-880_Upgrade_V1_16_250915.bin` in a `recovery` folder be
 
 ## 4. Check compatibility before flashing
 
-R36 targets the investigated AT32F423 board profile. A similar case or an RT-880 label does not establish compatibility with another revision. Backup-based preparation binds the image to your calibration; it does not automatically determine hardware compatibility.
+R37 targets the investigated AT32F423 board profile. A similar case or an RT-880 label does not establish compatibility with another revision. Backup-based preparation binds the image to your calibration; it does not automatically determine hardware compatibility.
 
 For a confirmed compatible board, prepare a personal BIN. **No Rust compiler is needed.**
 
-1. Open **«Прошивка» (Firmware)** in our CPS. Select the original `UV98-r36.bin` from the current package.
+1. Open **«Прошивка» (Firmware)** in our CPS. Select the original `UV98-r37.bin` from the current package.
 2. Click **«Подготовить образ для моей рации…» (Prepare image for my radio)**.
 3. Select **`manifest.json` from the full 4 MiB NOR snapshot** created by “Read settings memory (4 MiB)”. Select the manifest, not `storage-address-space.bin` itself. A calibration-only snapshot is not sufficient.
 4. Choose a parent folder for new images, for example `Documents/UV98-personal`. CPS creates a new `UV98-personal-…` directory inside it.
 5. Wait for successful preparation. The output is `firmware/UV98-personal.bin` and `firmware/catalog.json`; CPS automatically selects the new BIN for flashing.
 6. Keep the entire new folder. If you reopen CPS later, select `UV98-personal.bin` with its adjacent catalog intact.
 
-CPS checks the two-read status, snapshot sizes and SHA values, calibration equality with the start of NOR, and the original R36 marker. Only the expected **SHA of your calibration** is placed in the new BIN, not the calibration data themselves. The original image and backup remain unchanged. At boot, the firmware compares this hash with the actual calibration in the radio.
+CPS checks the two-read status, snapshot sizes and SHA values, calibration equality with the start of NOR, and the original template against its release catalog and calibration-profile marker. Only the expected **SHA of your calibration** is placed in the new BIN, not the calibration data themselves. The original image and backup remain unchanged. At boot, the firmware compares this hash with the actual calibration in the radio.
 
-The personal BIN's SHA differs from the original R36 template's SHA; that is expected. Writing uses the new catalog created by CPS. Do not move a lone BIN without its catalog or substitute a backup from another radio.
+The personal BIN's SHA differs from the original R37 template's SHA; that is expected. Writing uses the new catalog created by CPS. Do not move a lone BIN without its catalog or substitute a backup from another radio.
 
-If preparation is rejected, do not edit the manifest or catalog to bypass validation. Check that you selected your own complete, verified NOR snapshot and the original R36 from the same package. R35 and older images do not support this preparation method.
+If preparation is rejected, do not edit the manifest or catalog to bypass validation. Check that you selected your own complete, verified NOR snapshot and the original R37 from the same package.
 
 Proceed only after successful preparation, confirmation of board compatibility, and saving verified backups and the correct factory BIN in two places.
 
@@ -105,7 +107,9 @@ Proceed only after successful preparation, confirmation of board compatibility, 
 
 **Choose the display language:** MENU → СИСТЕМА / TX → ЯЗЫК / LANGUAGE → ENGLISH. Use ↑/↓, MENU to confirm and EXIT to cancel. Available choices are РУССКИЙ, ENGLISH and DEUTSCH. After changing to English, the path reads MENU → SYSTEM / TX → LANGUAGE. The selection currently resets to Russian after power-off.
 
-Loader acknowledgements confirm file transfer. A successful boot and radio operation must be checked on the device. Current Rust settings live in RAM; the selected language is not yet retained after power-off.
+With the default bindings, the upper PTT requests A and the lower PTT requests B. TX appears on the transmitting card. B can transmit while A remains selected. Each slot's current power setting is held in RAM and starts at LOW. The battery icon shows up to four approximate level bars and the numeric voltage in 0.1 V steps (`--.-V` when unavailable). [PTT hardware evidence](../research/r37/ptt.md)
+
+Loader acknowledgements confirm file transfer. Check boot and operation on the device. R33 is the owner's accepted baseline. R37's lower PTT mapping, battery readings and display performance await a radio test. UI language and other Rust settings reset after power-off.
 
 ## 6. Return to stock if needed
 

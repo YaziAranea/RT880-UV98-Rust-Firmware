@@ -3,7 +3,7 @@ name = "uv98-sidekeys-at32"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Bounded single-channel AT32F423 PC2 auxiliary-key ADC polling"
+description = "Bounded AT32F423 ADC1 polling for PC2 side keys and PA7 battery"
 
 [features]
 default = []
