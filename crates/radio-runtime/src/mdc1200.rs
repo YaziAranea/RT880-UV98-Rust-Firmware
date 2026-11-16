@@ -311,12 +311,13 @@ impl Modem {
     fn preparation(&self, index: usize) -> Option<(u8, u16)> {
         let [filters, link, _, mute, ..] = self.words;
         let control = self.control();
-        let common = [(0x30, link & !MIC_ADC), (0x50, mute & !0x8000), (0x51, 0)];
+        let common = [(0x30, link & !MIC_ADC), (0x50, mute & !0x8000)];
         let tail = [(0x02, 0), (0x3f, FSK_TX_FINISHED)];
         match self.burst {
             Burst::Mdc { packet, .. } => common
                 .into_iter()
                 .chain([
+                    (0x51, 0),
                     (0x2b, filters | 0x0005),
                     (0x58, FSK_MODE),
                     (0x72, oscillator_word(1200)),
@@ -331,6 +332,8 @@ impl Modem {
                 .chain(packet.fifo_words().map(|word| (0x5f, word)))
                 .chain(tail)
                 .nth(index),
+            // Stock Name preserves the current CTCSS/DCS encoder (REG51),
+            // so a tone-qualified peer stays open throughout the packet.
             Burst::RadioName(name) => common
                 .into_iter()
                 .chain(radio_name::PROFILE)

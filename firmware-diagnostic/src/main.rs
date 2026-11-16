@@ -938,6 +938,7 @@ fn main() -> ! {
     let mut dual_watch = None;
     let mut relay_active = false;
     let mut last_signal = None;
+    let mut release_rx_pending = false;
     let mut signal_at = now;
     let mut meter_floor = uv98_handheld_ui::meter::NoiseFloor::default();
     let mut meter_receive = None;
@@ -1026,10 +1027,8 @@ fn main() -> ! {
             app.status().view.screen,
             Screen::Shortwave | Screen::Crossband
         ) || tuner_repower_at.is_some();
-        let physical_source_held = ptt_guard.observe(
-            raw_ptt,
-            scanner.active() || scope.active() || receive_tool_blocks_tx,
-        );
+        let tx_context_blocked = scanner.active() || scope.active() || receive_tool_blocks_tx;
+        let physical_source_held = ptt_guard.observe(raw_ptt, tx_context_blocked);
         let view = app.status().view;
         if gps_configuration != (view.gps_enabled, view.gps_baud) {
             gps.configure(view.gps_enabled, view.gps_baud);
@@ -1077,7 +1076,9 @@ fn main() -> ! {
         let mut tail_view = view;
         tail_view.ptt_down = false;
         tail_view.ptt_slot = None;
-        let allow_tail = !upper
+        let allow_tail = LIVE_TX
+            && !tx_context_blocked
+            && !upper
             && !lower
             && matrix == Some(0)
             && uncertain_tx_since.is_none()
@@ -1112,125 +1113,170 @@ fn main() -> ! {
         let tx_held = if beacon.active() {
             beacon_held
         } else {
-            let mut signal_voice = physical_held;
-            let mut signal_tail = allow_tail;
-            if radio.mdc_progress().is_some() {
-                // Modem preparation/arming/voice restoration each consume a
-                // short guarded step. Never commit against a physical input
-                // sampled before GPS/UI/other foreground work in this pass.
-                let fresh_adc = checked(&mut log, side.sample(), 0xE055);
-                let guard = keys.guard_scan();
-                let input = ptt::Input {
-                    upper: guard.as_ref().is_ok_and(|s| s.ptt_pressed()),
-                    lower: LOWER_PTT_ENABLED && ptt::lower_pressed(fresh_adc.raw),
-                    clean: guard.as_ref().is_ok_and(|s| s.matrix_clear())
-                        && (ptt::side_idle(fresh_adc.raw)
-                            || (LOWER_PTT_ENABLED && ptt::lower_pressed(fresh_adc.raw))),
-                };
-                let same_source = ptt_guard.observe(
-                    input,
-                    scanner.active() || scope.active() || receive_tool_blocks_tx,
-                );
-                signal_voice &= same_source && input.clean;
-                signal_tail &=
-                    input.clean && !input.upper && !input.lower && ptt::side_idle(fresh_adc.raw);
-            }
-            let signal_now = require(time.sample(DWT::cycle_count()), 0xE016);
-            let within_limit =
-                tx_started_at.is_some_and(|start| tx_hold_within_limit(start, signal_now));
-            checked(
-                &mut log,
-                tx_tones.step(
-                    &mut radio,
-                    signal_now,
-                    signal_voice && within_limit,
-                    signal_tail && within_limit,
-                    dtmf_key,
-                    signaling::mdc_config(view, tx_slot.unwrap_or(view.active_slot)),
-                    view.roger_name(),
-                ),
-                0xE065,
-            )
+            let fresh_first = radio.mdc_progress().is_some()
+                || (radio.state() == RfState::Transmitting && allow_tail);
+            let mut tx_sample = |fresh: bool| {
+                let mut signal_voice = physical_held;
+                let mut signal_tail = allow_tail;
+                if fresh {
+                    // Each modem operation, including the arm write, needs
+                    // a sample newer than the previous operation.
+                    let fresh_adc = checked(&mut log, side.sample(), 0xE055);
+                    let guard = keys.guard_scan();
+                    let input = ptt::Input {
+                        upper: guard.as_ref().is_ok_and(|s| s.ptt_pressed()),
+                        lower: LOWER_PTT_ENABLED && ptt::lower_pressed(fresh_adc.raw),
+                        clean: guard.as_ref().is_ok_and(|s| s.matrix_clear())
+                            && (ptt::side_idle(fresh_adc.raw)
+                                || (LOWER_PTT_ENABLED && ptt::lower_pressed(fresh_adc.raw))),
+                    };
+                    let same_source = ptt_guard.observe(input, tx_context_blocked);
+                    signal_voice &= same_source && input.clean;
+                    signal_tail &=
+                        input.clean && !input.upper && !input.lower && ptt::side_idle(fresh_adc.raw);
+                }
+                let now = require(time.sample(DWT::cycle_count()), 0xE016);
+                let within_limit =
+                    tx_started_at.is_some_and(|start| tx_hold_within_limit(start, now));
+                signaling::Sample {
+                    now,
+                    voice_held: signal_voice && within_limit,
+                    allow_tail: signal_tail && within_limit,
+                }
+            };
+            let first = tx_sample(fresh_first);
+            let slice_at = DWT::cycle_count();
+            let result = tx_tones.step_pass(
+                &mut radio,
+                first,
+                dtmf_key,
+                signaling::mdc_config(view, tx_slot.unwrap_or(view.active_slot)),
+                view.roger_name(),
+                || {
+                    if DWT::cycle_count().wrapping_sub(slice_at) >= 384_000 {
+                        return None;
+                    }
+                    feed();
+                    Some(tx_sample(true))
+                },
+            );
+            checked(&mut log, result, 0xE065)
         };
         // Foreground signaling may perform bounded SPI work. Re-evaluate TOT
         // against elapsed time rather than the timestamp before that work.
         let now = require(time.sample(DWT::cycle_count()), 0xE016);
-        let mut polled = checked(&mut log, radio.tick(now, tx_held), 0xE056);
-        // RX restoration must not spend a full UI pass between a few register
-        // writes: a repeater may answer immediately after PTT release. Allow
-        // a larger RX-only batch, preserving every explicit settle delay.
-        // An active/starting transmitter retains the short batch and a fresh
-        // physical PTT check before each operation. Admission is checked before
-        // each transaction, not an interruption of synchronous bus work.
-        let restoring_rx = radio.state() == RfState::Configuring && !radio.tx_active_or_starting();
-        let burst_cycles = if restoring_rx { 384_000 } else { 96_000 };
-        let burst_steps = if restoring_rx { 63 } else { 7 };
+        let mut tx_ended = checked(&mut log, radio.tick(now, tx_held), 0xE056).tx_ended;
+        // Keep the short TX configuration slice and fresh guard per operation.
         let burst_started = DWT::cycle_count();
-        for _ in 0..burst_steps {
+        for _ in 0..7 {
             let now = require(time.sample(DWT::cycle_count()), 0xE016);
             if beacon.active()
+                || !radio.tx_active_or_starting()
                 || !radio.configuration_step_ready(now)
-                || DWT::cycle_count().wrapping_sub(burst_started) >= burst_cycles
-                || polled.tx_ended
+                || DWT::cycle_count().wrapping_sub(burst_started) >= 96_000
             {
                 break;
             }
             feed();
-            let held = if radio.tx_active_or_starting() {
-                // This faster aggregate matrix scan only sustains an already
-                // armed PTT source. It never creates UI events or arms TX.
-                let fresh_adc = checked(&mut log, side.sample(), 0xE055);
-                let guard = keys.guard_scan();
-                let input = ptt::Input {
-                    upper: guard.as_ref().is_ok_and(|s| s.ptt_pressed()),
-                    lower: LOWER_PTT_ENABLED && ptt::lower_pressed(fresh_adc.raw),
-                    clean: guard.as_ref().is_ok_and(|s| s.matrix_clear())
-                        && (ptt::side_idle(fresh_adc.raw)
-                            || (LOWER_PTT_ENABLED && ptt::lower_pressed(fresh_adc.raw))),
-                };
-                let same_source = ptt_guard.observe(
-                    input,
-                    scanner.active() || scope.active() || receive_tool_blocks_tx,
-                );
-                let now = require(time.sample(DWT::cycle_count()), 0xE016);
-                let guarded_target = if cfg!(feature = "channel-tx") {
-                    profile_for_slot(&app, &settings, tx_slot.unwrap_or(view.active_slot)).ok()
-                } else {
-                    current.map(|p| (view, p))
-                };
-                LIVE_TX
-                    && same_source
-                    && tx_slot.is_some()
-                    && tx_slot == view.ptt_slot
-                    && tx_started_at.is_some_and(|start| tx_hold_within_limit(start, now))
-                    && !view.locked
-                    && guarded_target.is_some_and(|(target, p)| {
-                        tx_permitted(&app, target, p, input)
-                            && (!cfg!(feature = "channel-tx")
-                                || tx_authorization
-                                    .is_some_and(|a| a.still_held_target(view, target, p, input)))
-                    })
-            } else {
-                false
+            let fresh_adc = checked(&mut log, side.sample(), 0xE055);
+            let guard = keys.guard_scan();
+            let input = ptt::Input {
+                upper: guard.as_ref().is_ok_and(|s| s.ptt_pressed()),
+                lower: LOWER_PTT_ENABLED && ptt::lower_pressed(fresh_adc.raw),
+                clean: guard.as_ref().is_ok_and(|s| s.matrix_clear())
+                    && (ptt::side_idle(fresh_adc.raw)
+                        || (LOWER_PTT_ENABLED && ptt::lower_pressed(fresh_adc.raw))),
             };
+            let same_source = ptt_guard.observe(input, tx_context_blocked);
             let now = require(time.sample(DWT::cycle_count()), 0xE016);
-            let next = checked(&mut log, radio.tick(now, held), 0xE056);
-            polled.changed |= next.changed;
-            polled.tx_ended |= next.tx_ended;
-            polled.tx_timed_out |= next.tx_timed_out;
-            polled.state = next.state;
+            let guarded_target = if cfg!(feature = "channel-tx") {
+                profile_for_slot(&app, &settings, tx_slot.unwrap_or(view.active_slot)).ok()
+            } else {
+                current.map(|p| (view, p))
+            };
+            let held = LIVE_TX
+                && same_source
+                && tx_slot.is_some()
+                && tx_slot == view.ptt_slot
+                && tx_started_at.is_some_and(|start| tx_hold_within_limit(start, now))
+                && !view.locked
+                && guarded_target.is_some_and(|(target, p)| {
+                    tx_permitted(&app, target, p, input)
+                        && (!cfg!(feature = "channel-tx")
+                            || tx_authorization
+                                .is_some_and(|a| a.still_held_target(view, target, p, input)))
+                });
+            let now = require(time.sample(DWT::cycle_count()), 0xE016);
+            tx_ended = checked(&mut log, radio.tick(now, held), 0xE056).tx_ended;
         }
-        if polled.tx_ended {
+        if tx_ended {
             ptt_guard.disarm();
             tx_slot = None;
             tx_started_at = None;
             tx_authorization = None;
             current = None;
+            last_signal = None;
+            release_rx_pending = false;
+            if view.screen == Screen::Home
+                && !tx_context_blocked
+                && !relay_active
+                && second_rx.is_none()
+                && !beacon.active()
+                && tuner_session.is_none()
+            {
+                if let Some(profile) = profile(&app, &settings).ok() {
+                    if let Some(rx) = profile.receive {
+                        let calibration = app.calibration_view().unwrap_or_else(|| stop(0xE050));
+                        if uv98_rf_sequence::receive(&calibration, rx).is_ok() {
+                            let now = require(time.sample(DWT::cycle_count()), 0xE016);
+                            checked(&mut log, radio.receive(&calibration, rx, now), 0xE058);
+                            current = Some(profile);
+                            release_rx_pending = true;
+                            telemetry_samples = 4;
+                        }
+                    }
+                }
+            }
+        }
+        let started_release_rx = tx_ended && release_rx_pending;
+        // A just-unkeyed receiver can execute its first non-transmitting
+        // operations in this same pass. Preserve all explicit settle waits.
+        if !beacon.active() && radio.state() == RfState::Configuring {
+            let burst_started = DWT::cycle_count();
+            let advanced = signaling::advance_receive(&mut radio, || {
+                if DWT::cycle_count().wrapping_sub(burst_started) >= 384_000 {
+                    return None;
+                }
+                feed();
+                Some(require(time.sample(DWT::cycle_count()), 0xE016))
+            });
+            checked(&mut log, advanced, 0xE056);
+        }
+        let quiet_input = raw == Some((0, false))
+            && uncertain_tx_since.is_none()
+            && !lower
+            && ptt::side_idle(adc.raw);
+        if release_rx_pending && radio.state() == RfState::Receiving {
+            if quiet_input {
+                if let Some(p) = current {
+                    let now = require(time.sample(DWT::cycle_count()), 0xE016);
+                    let tone = p.receive.map_or(0, |rx| rx.tone);
+                    let observed = if p.audio.modulation == Modulation::Fm {
+                        radio.observe_signaling_for_slot(p.audio, tone, view.active_slot)
+                    } else {
+                        radio.observe(p.audio, tone)
+                    };
+                    last_signal = Some(checked(&mut log, observed, 0xE05A));
+                    signal_at = now;
+                }
+            }
+            release_rx_pending = false;
         }
         // UART logging can block for a frame; physical TX release is handled
         // first. Side-button identities are still telemetry, not inferred PTTs.
         if !radio.tx_active_or_starting()
             && !beacon.active()
+            && !release_rx_pending
             && adc_previous != Some((adc_code, upper))
         {
             event(
@@ -1279,6 +1325,22 @@ fn main() -> ! {
         }
         scope.event(now, spectrum::Event::Ptt(side_activity));
         let update = checked(&mut log, app.sample(now, sample), 0xE032);
+        if release_rx_pending
+            && quiet_input
+            && radio.state() == RfState::Configuring
+            && update.request.is_none()
+            && !update.cancel_temporary
+            && !update.ptt_tx_requested
+            && !update.channel_changed
+            && !update.zone_changed
+            && !update.slot_changed
+        {
+            // The ordinary app still sees physical release. Let the next
+            // fresh poll service the short RF wait ahead of unrelated work.
+            idle.us(100);
+            continue;
+        }
+
         #[cfg(not(feature = "pa5-audio"))]
         {
             let (name, enabled) = app.status().view.radio_name_settings();
@@ -2322,8 +2384,9 @@ fn main() -> ! {
             if current != wanted {
                 telemetry_samples = 4;
             }
-            let retune =
-                forced_retune || policy::receive_changed(current, wanted) || polled.tx_ended;
+            let retune = forced_retune
+                || policy::receive_changed(current, wanted)
+                || (tx_ended && !started_release_rx);
             if retune && relay_active {
                 stop_relay(&mut radio, &mut secondary);
                 relay_active = false;
@@ -2337,6 +2400,7 @@ fn main() -> ! {
             }
             current = wanted;
             if retune {
+                release_rx_pending = false;
                 if radio.state() != RfState::Off {
                     checked(&mut log, radio.stop(), 0xE057);
                 }

@@ -1,7 +1,7 @@
 //! Foreground ownership of manual DTMF, MDC1200 PTT ID and stock radio names.
 //! Does not start RF. Every tone is inside the existing calibrated TX session.
 use uv98_handheld_ui::controller::{Slot, View};
-use uv98_radio_runtime::mdc1200::{self, Action, Config, Input, Mode};
+use uv98_radio_runtime::mdc1200::{self, Action, Config, Input, Mode, Progress};
 use uv98_radio_runtime::{Fault, Io, Runtime, State};
 use uv98_signaling::radio_name::RadioName;
 use uv98_signaling::tones::{self, BkToneSession, ToneRegisters};
@@ -17,6 +17,25 @@ pub fn mdc_config(view: View, slot: Slot) -> Config {
         },
         unit: settings.id.and_then(uv98_signaling::mdc1200::UnitId::new),
     }
+}
+
+/// Execute ready non-TX steps up to the caller's foreground admission
+/// budget. Delay steps and control ownership are still owned by Runtime.
+pub fn advance_receive<I: Io>(
+    radio: &mut Runtime<I>,
+    mut admit: impl FnMut() -> Option<u32>,
+) -> Result<(), Fault<I::Error>> {
+    for _ in 0..63 {
+        if radio.tx_active_or_starting() {
+            break;
+        }
+        let Some(now) = admit() else { break };
+        if !radio.configuration_step_ready(now) {
+            break;
+        }
+        radio.tick(now, false)?;
+    }
+    Ok(())
 }
 
 pub fn keypad(raw: u16) -> Option<u8> {
@@ -42,6 +61,15 @@ impl<I: Io> ToneRegisters for Registers<'_, I> {
     }
 }
 
+const MODEM_STEPS_PER_PASS: usize = 8;
+
+#[derive(Clone, Copy)]
+pub struct Sample {
+    pub now: u32,
+    pub voice_held: bool,
+    pub allow_tail: bool,
+}
+
 pub struct TransmitTones {
     generator: BkToneSession,
     key: Option<u8>,
@@ -57,6 +85,40 @@ impl TransmitTones {
             mdc: mdc1200::Session::new(),
         }
     }
+    /// Consume a bounded slice of setup/restoration before other foreground
+    /// work. The first sample has already been taken. Each extra modem
+    /// operation needs its own fresh physical and TOT guard. A gate closing
+    /// returns a negative sample, while None ends only the current slice.
+    pub fn step_pass<I: Io>(
+        &mut self,
+        radio: &mut Runtime<I>,
+        first: Sample,
+        key: Option<u8>,
+        config: Config,
+        name: Option<RadioName>,
+        mut sample: impl FnMut() -> Option<Sample>,
+    ) -> Result<bool, Fault<I::Error>> {
+        let step = |session: &mut Self, radio: &mut Runtime<I>, at: Sample| {
+            session.step(radio, at.now, at.voice_held, at.allow_tail, key, config, name)
+        };
+        let mut keep = step(self, radio, first)?;
+        for _ in 1..MODEM_STEPS_PER_PASS {
+            if !keep
+                || !matches!(
+                    radio.mdc_progress(),
+                    Some(Progress::Preparing | Progress::Restoring)
+                )
+            {
+                break;
+            }
+            let Some(at) = sample() else {
+                break;
+            };
+            keep = step(self, radio, at)?;
+        }
+        Ok(keep)
+    }
+
     /// allow_tail requires clean physical release, unchanged TX configuration,
     /// and remaining ordinary TOT. Any new key/PTT or context change cancels it.
     pub fn step<I: Io>(

@@ -1,7 +1,7 @@
 #[path = "../../../firmware-diagnostic/src/signaling.rs"]
 mod signaling;
 
-use signaling::{mdc_config, TransmitTones};
+use signaling::{mdc_config, Sample, TransmitTones};
 use std::{cell::RefCell, convert::Infallible, rc::Rc};
 use uv98_calibration::Calibration;
 use uv98_handheld_ui::controller::{Controller, MdcSettings, RadioName, Slot};
@@ -60,7 +60,7 @@ impl Io for Bus {
         self.0.borrow_mut().transactions += 1;
         Ok(match register {
             0x02 => std::mem::take(&mut self.0.borrow_mut().irq),
-            0x0c => u16::from(self.0.borrow().irq != 0),
+            0x0c => self.reg(0x0c) | u16::from(self.0.borrow().irq != 0),
             _ => self.reg(register),
         })
     }
@@ -121,6 +121,10 @@ struct Harness {
 
 impl Harness {
     fn keyed(mode: u8) -> Self {
+        Self::keyed_with_tone(mode, 0)
+    }
+
+    fn keyed_with_tone(mode: u8, tone: u16) -> Self {
         let bus = Bus::new();
         let mut h = Self {
             radio: Runtime::new(bus.clone()),
@@ -142,7 +146,7 @@ impl Harness {
                 TxRequest {
                     frequency_10hz: 14_550_000,
                     width: Width::Wide,
-                    tone: 0,
+                    tone,
                     tone_mode: 0,
                     option_nibble: 0,
                     power: 0,
@@ -412,4 +416,192 @@ fn name_tail_requires_clean_release_and_remaining_tot() {
         h.assert_off();
         assert_eq!(h.bus.fifo_words(), 0);
     }
+}
+
+#[test]
+fn foreground_release_batches_name_before_deadline_with_a_tone_qualified_peer() {
+    use uv98_handheld_ui::input::InputEvent;
+    use uv98_radio_runtime::{policy, ptt, tx_policy};
+
+    let bitmap = [0; 128];
+    let mut ui = Controller::new(&bitmap, 14_550_000);
+    ui.handle(InputEvent::Ptt(true), &bitmap);
+    let mut keyed_view = ui.view();
+    keyed_view.tx_tone_index = uv98_handheld_ui::controller::TX_CTCSS
+        .iter()
+        .position(|&tone| tone == 770)
+        .unwrap() as u8;
+    let keyed = ptt::Input { upper: true, lower: false, clean: true };
+    let released = ptt::Input { upper: false, lower: false, clean: true };
+    let profile = policy::profile(
+        keyed_view,
+        None,
+        policy::Settings {
+            squelch: 1,
+            mic_gain: 31,
+            fm_volume: [32, 7],
+            am_volume: [32, 7],
+            squelch_delay: 0,
+        },
+        policy::Overrides::default(),
+    )
+    .unwrap();
+    let permit = tx_policy::authorize(keyed_view, profile, keyed).unwrap();
+    let mut guard = ptt::Guard::new();
+    assert!(!guard.observe(released, false));
+    assert!(guard.arm(keyed));
+    assert!(guard.observe(keyed, false));
+    let mut h = Harness::keyed_with_tone(0, profile.transmit.unwrap().tone);
+    h.name = RadioName::from_payload(*b"QRST UVWXYZ 0123");
+    h.tick(1, true, false, None);
+    let css = h.bus.reg(0x51);
+    assert_ne!(css, 0);
+    let released_at = h.now;
+    let mut tail_view = keyed_view;
+    tail_view.ptt_down = false;
+    tail_view.ptt_slot = None;
+
+    // A full loop is substantially slower than individual guarded SPI
+    // work. Sample the guard before each operation within each slice.
+    let mut fresh_count = 0;
+    for _ in 0..16 {
+        h.now += 30;
+        let mut at = h.now;
+        let mut observe = |at| {
+            fresh_count += 1;
+            let same_source = guard.observe(released, false);
+            let allow_tail = permit.tail_configuration_valid_target(tail_view, keyed_view, profile)
+                && tx_policy::hold_within_limit(released_at, at);
+            Sample { now: at, voice_held: same_source, allow_tail }
+        };
+        let first = observe(at);
+        let keep = h.foreground.step_pass(
+            &mut h.radio,
+            first,
+            None,
+            h.config,
+            h.name,
+            || {
+                // A fresh guard and one operation take 1ms in this model.
+                at += 1;
+                Some(observe(at))
+            },
+        ).unwrap();
+        assert!(keep);
+        h.now = at;
+        h.radio.tick(h.now, keep).unwrap();
+        assert_eq!(h.bus.reg(0x51), css);
+        if matches!(h.radio.mdc_progress(), Some(Progress::OnAir { .. })) {
+            break;
+        }
+    }
+    let Some(Progress::OnAir { since, .. }) = h.radio.mdc_progress() else {
+        panic!("Name missed the setup deadline");
+    };
+    assert!(since - released_at < 200);
+    assert!(fresh_count >= 30);
+    assert_eq!(h.bus.reg(0x59), 0x2828);
+    assert_eq!(h.bus.fifo_words(), 8);
+    assert!(h.finish_air(167, false, true).tx_ended);
+    h.assert_off();
+}
+
+#[test]
+fn fresh_guard_inside_a_name_slice_cancels_before_modem_arm() {
+    let mut h = Harness::keyed(0);
+    h.name = RadioName::from_payload(*b"QRST UVWXYZ 0123");
+    h.tick(1, true, false, None);
+    let mut failed_guard = false;
+    for _ in 0..12 {
+        h.now += 12;
+        let first = Sample {
+            now: h.now,
+            voice_held: false,
+            allow_tail: h.bus.fifo_words() < 8,
+        };
+        let keep = h.foreground.step_pass(
+            &mut h.radio,
+            first,
+            None,
+            h.config,
+            h.name,
+            || {
+                h.now += 1;
+                let allow_tail = h.bus.fifo_words() < 8;
+                failed_guard |= !allow_tail;
+                Some(Sample { now: h.now, voice_held: false, allow_tail })
+            },
+        ).unwrap();
+        let result = h.radio.tick(h.now, keep).unwrap();
+        if result.tx_ended {
+            break;
+        }
+    }
+    assert!(failed_guard);
+    assert_eq!(h.bus.fifo_words(), 8);
+    assert!(!h.bus.0.borrow().writes.iter()
+        .any(|&(reg, value)| reg == 0x59 && value & 0x0800 != 0));
+    h.assert_off();
+}
+
+#[test]
+fn post_tx_receive_burst_can_open_a_short_tone_qualified_reply() {
+    use uv98_radio_runtime::Audio;
+    use uv98_rf_sequence::{Modulation, RxRequest};
+
+    let mut h = Harness::keyed(0);
+    let ended = h.tick(1, false, true, None);
+    assert!(ended.tx_ended);
+    h.assert_off();
+    let at = h.now;
+    let cal = Calibration::parse(include_bytes!(
+        "../../calibration/tests/fixtures/uv98-plus-stock-1.16.bin"
+    ))
+    .unwrap();
+    let tone = 0x1000 | 770;
+    let rx = RxRequest {
+        frequency_10hz: 14_550_000,
+        width: Width::Wide,
+        level: 1,
+        tone,
+        tone_mode: 0,
+        option_nibble: 0,
+        squelch_delay: 0,
+        modulation: Modulation::Fm,
+    };
+    let audio = Audio {
+        modulation: Modulation::Fm,
+        gain: 30,
+        dac: 8,
+        squelch: 1,
+        monitor: false,
+        tone_required: false,
+    };
+    h.radio.receive(&cal, rx, at).unwrap();
+    assert_eq!(h.radio.state(), State::Configuring);
+    signaling::advance_receive(&mut h.radio, || Some(at)).unwrap();
+    assert_ne!(h.bus.reg(0x30), 0xbff1);
+    let mut audible = false;
+    for elapsed in 1..48 {
+        let now = at + elapsed;
+        signaling::advance_receive(&mut h.radio, || Some(now)).unwrap();
+        if elapsed < 40 {
+            assert_eq!(h.radio.state(), State::Configuring);
+            assert!(!h.radio.audio_open());
+            continue;
+        }
+        assert_eq!(h.radio.state(), State::Receiving);
+        h.bus.0.borrow_mut().registers[0x0c] = match elapsed {
+            41 => 2,          // Carrier without the programmed tone.
+            42..=46 => 0x402, // Qualified carrier for five milliseconds.
+            _ => 0,
+        };
+        let signal = h
+            .radio
+            .observe_signaling_for_slot(audio, tone, Slot::A)
+            .unwrap();
+        assert_eq!(signal.audio_open, (42..=46).contains(&elapsed));
+        audible |= signal.audio_open;
+    }
+    assert!(audible);
 }
