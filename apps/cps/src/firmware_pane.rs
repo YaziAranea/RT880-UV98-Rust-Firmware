@@ -323,13 +323,10 @@ impl FirmwarePane {
                 "Bestätigen Sie zuerst, dass der Bootloader bereit ist."
             ));
         }
-        let image = self.image.clone().ok_or_else(|| {
-            msg!(
-                "Нет проверенного образа",
-                "No verified image selected",
-                "Kein geprüftes Image ausgewählt"
-            )
-        })?;
+        let image = self
+            .image
+            .clone()
+            .ok_or_else(|| msg!("BIN не выбран", "No BIN selected", "Keine BIN ausgewählt"))?;
         let port = self.port.trim().to_string();
         if port.is_empty() {
             return Err(msg!(
@@ -453,14 +450,6 @@ impl FirmwarePane {
                 if let Some(image) = &self.image {
                     ui.monospace(format!("SHA256  {}", image.sha256));
                     ui.small(image.provenance_label(lang));
-                    if image.is_imported() {
-                        ui.colored_label(WARNING, tr!(
-                            lang,
-                            "Происхождение и совместимость с платой не подтверждены. Используйте BIN из доверенного источника для своей ревизии.",
-                            "Source and board compatibility are unverified. Use a BIN from a source you trust for your board revision.",
-                            "Herkunft und Platinenkompatibilität sind unbestätigt. Verwenden Sie eine BIN aus vertrauenswürdiger Quelle für Ihre Platinenrevision.",
-                        ));
-                    }
                 }
                 ui.add_space(5.0);
                 if ui.add_enabled(
@@ -561,6 +550,9 @@ impl FirmwarePane {
                         "Im Bootloader-Modus bleibt der Bildschirm schwarz und die LED leuchtet grün. Lassen Sie das Kabel angeschlossen.",
                     ),
                 );
+                if let Some(warning) = self.image.as_ref().and_then(|image| image.source_warning(lang)) {
+                    ui.colored_label(WARNING, warning);
+                }
                 ui.checkbox(
                     &mut self.armed,
                     tr!(

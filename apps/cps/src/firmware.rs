@@ -14,6 +14,8 @@ use std::{
 
 pub const IMAGE_BYTES: usize = 251_904;
 pub const BLOCKS: usize = IMAGE_BYTES / 1024;
+const APPLICATION_BASE: u32 = 0x0800_2800;
+const APPLICATION_END: u32 = 0x0804_0000;
 const TIMEOUT: Duration = Duration::from_secs(5);
 const PROFILE: &str = "iradio-uv98-app-v1";
 const STOCK_SHA256: &str = "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc";
@@ -100,8 +102,22 @@ impl PreparedImage {
         }
     }
 
-    pub fn is_imported(&self) -> bool {
-        self.provenance == Provenance::Imported
+    pub fn source_warning(&self, lang: Language) -> Option<&'static str> {
+        match self.provenance {
+            Provenance::Imported => Some(tr!(
+                lang,
+                "Подлинность BIN и совместимость с платой не подтверждены. Используйте образ из доверенного источника для своей ревизии.",
+                "BIN authenticity and board compatibility are unverified. Use an image from a source you trust for your board revision.",
+                "Echtheit der BIN und Platinenkompatibilität sind unbestätigt. Verwenden Sie ein Image aus vertrauenswürdiger Quelle für Ihre Platinenrevision.",
+            )),
+            Provenance::Personal { .. } => Some(tr!(
+                lang,
+                "CPS сверила личный BIN с исходником. Подлинность исходника и совместимость с платой не подтверждены.",
+                "CPS checked the personal BIN against its source. Source authenticity and board compatibility remain unverified.",
+                "CPS hat die persönliche BIN mit ihrer Quelle verglichen. Echtheit der Quelle und Platinenkompatibilität sind unbestätigt.",
+            )),
+            Provenance::Stock | Provenance::Catalog(_) => None,
+        }
     }
 
     pub fn is_personalization_source(&self) -> bool {
@@ -211,7 +227,7 @@ fn validate_structure(data: &[u8]) -> Result<(), LocalizedText> {
         || sp > 0x2000_c000
         || sp % 8 != 0
         || reset & 1 == 0
-        || !(0x0800_2808..0x0804_0000).contains(&(reset & !1))
+        || !(APPLICATION_BASE + 8..APPLICATION_END).contains(&(reset & !1))
     {
         return Err(
             msg!(

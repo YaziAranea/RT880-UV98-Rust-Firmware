@@ -6,6 +6,7 @@ use serde_json::Value;
 use uv98_radio_read::{BLOCK_SIZE, CONNECT, END, FRAME_SIZE};
 
 pub const MAGIC: &[u8; 16] = b"UV98CALPROFILE1\0";
+const VECTOR_PREFIX_BYTES: usize = 0x2c0;
 const STORAGE_BYTES: usize = 4 * 1024 * 1024;
 const STORAGE_BLOCKS: usize = STORAGE_BYTES / BLOCK_SIZE;
 const CAL_BYTES: usize = uv98_calibration::BLOCK_LEN;
@@ -23,15 +24,26 @@ pub(super) fn digest_offset(bytes: &[u8]) -> Result<usize, LocalizedText> {
     let mut locations = bytes
         .windows(MAGIC.len())
         .enumerate()
-        .filter_map(|(offset, value)| (value == MAGIC).then_some(offset + MAGIC.len()));
-    let offset = locations.next().ok_or_else(|| {
+        .filter_map(|(offset, value)| (value == MAGIC).then_some(offset));
+    let marker = locations.next().ok_or_else(|| {
         msg!(
             "В BIN нет поддерживаемого профиля калибровок UV98CALPROFILE1.",
             "The BIN has no supported UV98CALPROFILE1 calibration profile.",
             "Die BIN enthält kein unterstütztes Kalibrierprofil UV98CALPROFILE1.",
         )
     })?;
-    if locations.next().is_some() || offset + 32 > bytes.len() {
+    let offset = marker + MAGIC.len();
+    let end = offset + 32;
+    let reset = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) & !1;
+    let reset = reset.saturating_sub(APPLICATION_BASE) as usize;
+    // Leave the vector prefix and at least the first Thumb halfword of the
+    // Reset entry outside the entire marker and digest record.
+    if locations.next().is_some()
+        || end > bytes.len()
+        || marker < VECTOR_PREFIX_BYTES
+        || reset < VECTOR_PREFIX_BYTES
+        || (reset < end && marker < reset + 2)
+    {
         return Err(msg!(
             "Профиль калибровок в BIN повреждён или неоднозначен",
             "The calibration profile in the BIN is corrupt or ambiguous",

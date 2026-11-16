@@ -24,9 +24,9 @@ impl Fixture {
         let source_catalog = root.join("catalog.json");
         let mut bytes = vec![0x33; IMAGE_BYTES];
         bytes[..4].copy_from_slice(&0x2000_c000u32.to_le_bytes());
-        bytes[4..8].copy_from_slice(&0x0800_2901u32.to_le_bytes());
-        bytes[256..272].copy_from_slice(MAGIC);
-        bytes[272..304].fill(0x44);
+        bytes[4..8].copy_from_slice(&0x0800_3001u32.to_le_bytes());
+        bytes[1024..1040].copy_from_slice(MAGIC);
+        bytes[1040..1072].fill(0x44);
         fs::write(&source_path, &bytes).unwrap();
         fs::write(&source_catalog, serde_json::to_vec(&json!({"schema":1,"profile":PROFILE,"images":[{"label":"SYNTHETIC TEST R36","sha256":hash(&bytes),"bytes":IMAGE_BYTES,"tx_sha256":wire_hash(&bytes)}]})).unwrap()).unwrap();
         let source = prepare_with_catalog(&source_path, &source_catalog).unwrap();
@@ -109,7 +109,8 @@ fn independent_source_changes_only_digest_and_reopens_without_original_files() {
     let mut fixture = Fixture::new();
     fs::remove_file(&fixture.source_catalog).unwrap();
     fixture.source = prepare_selected(&fixture.source.path, None).unwrap();
-    assert!(fixture.source.is_imported());
+    assert_eq!(fixture.source.provenance, Provenance::Imported);
+    assert!(fixture.source.source_warning(Language::English).is_some());
     let original = fixture.source.bytes.clone();
     let backup_manifest = fs::read(&fixture.manifest).unwrap();
     let output = fixture.root.join("personal");
@@ -141,6 +142,13 @@ fn independent_source_changes_only_digest_and_reopens_without_original_files() {
         }
     ));
     assert!(selected.revalidate().is_ok());
+    for (lang, expected) in [
+        (Language::Russian, "Подлинность исходника"),
+        (Language::English, "Source authenticity"),
+        (Language::German, "Echtheit der Quelle"),
+    ] {
+        assert!(selected.source_warning(lang).unwrap().contains(expected));
+    }
     assert_eq!(selected.sha256, image.sha256);
     assert_eq!(selected.tx_sha256, wire_hash(&selected.bytes));
     assert_eq!(default_image(&output).unwrap().path, image.path);
@@ -228,7 +236,7 @@ fn missing_or_multiple_profile_and_existing_output_are_refused() {
     let original = fixture.source.bytes.clone();
     let output = fixture.root.join("personal");
     let mut bytes = original.clone();
-    bytes[256] = 0;
+    bytes[1024] = 0;
     fixture.rewrite_source(&bytes);
     assert!(personalize(&fixture.source, &fixture.manifest, &output).is_err());
     bytes = original.clone();

@@ -423,7 +423,8 @@ fn standalone_import_checks_vectors_and_one_complete_calibration_profile() {
     let fixture = Fixture::new();
     let path = fixture.dir.join("future.bin");
     let mut bytes = fixture.image.bytes.clone();
-    bytes[256..272].copy_from_slice(profile::MAGIC);
+    bytes[4..8].copy_from_slice(&0x0800_3001u32.to_le_bytes());
+    bytes[1024..1040].copy_from_slice(profile::MAGIC);
     fs::write(&path, &bytes).unwrap();
     let catalog = fixture.dir.join("catalog.json");
 
@@ -439,16 +440,17 @@ fn standalone_import_checks_vectors_and_one_complete_calibration_profile() {
     fs::write(&catalog, serde_json::to_vec(&stale).unwrap()).unwrap();
     assert!(prepare_selected(&path, Some(&catalog)).is_err());
     fs::write(&catalog, b"{malformed").unwrap();
-    assert!(prepare_selected(&path, Some(&catalog))
-        .unwrap()
-        .is_imported());
+    assert_eq!(
+        prepare_selected(&path, Some(&catalog)).unwrap().provenance,
+        Provenance::Imported
+    );
 
     let mut bad_reset = bytes.clone();
     bad_reset[4] &= !1;
     let mut duplicate = bytes.clone();
-    duplicate[300..316].copy_from_slice(profile::MAGIC);
+    duplicate[1100..1116].copy_from_slice(profile::MAGIC);
     let mut truncated_profile = bytes.clone();
-    truncated_profile[256] ^= 1;
+    truncated_profile[1024] ^= 1;
     truncated_profile[IMAGE_BYTES - 16..].copy_from_slice(profile::MAGIC);
     for wrong in [
         bytes[..IMAGE_BYTES - 1].to_vec(),
@@ -463,11 +465,35 @@ fn standalone_import_checks_vectors_and_one_complete_calibration_profile() {
 }
 
 #[test]
+fn standalone_import_rejects_vector_prefix_and_reset_entry_overlaps() {
+    let fixture = Fixture::new();
+    let path = fixture.dir.join("future.bin");
+    for (marker, reset, region) in [
+        (256, 0x0800_3001u32, "marker in vector prefix"),
+        (1024, 0x0800_2abf, "reset in vector prefix"),
+        (1024, 0x0800_2c01, "reset in marker"),
+        (1024, 0x0800_2c11, "reset in digest"),
+        (
+            1025,
+            0x0800_2c01,
+            "marker overlaps second byte of reset halfword",
+        ),
+    ] {
+        let mut bytes = fixture.image.bytes.clone();
+        bytes[4..8].copy_from_slice(&reset.to_le_bytes());
+        bytes[marker..marker + profile::MAGIC.len()].copy_from_slice(profile::MAGIC);
+        fs::write(&path, bytes).unwrap();
+        assert!(prepare_selected(&path, None).is_err(), "{region}");
+    }
+}
+
+#[test]
 fn standalone_transfer_refuses_changed_selection_and_uses_immutable_bytes() {
     let fixture = Fixture::new();
     let path = fixture.dir.join("future.bin");
     let mut bytes = fixture.image.bytes.clone();
-    bytes[256..272].copy_from_slice(profile::MAGIC);
+    bytes[4..8].copy_from_slice(&0x0800_3001u32.to_le_bytes());
+    bytes[1024..1040].copy_from_slice(profile::MAGIC);
     fs::write(&path, &bytes).unwrap();
     let image = prepare_selected(&path, None).unwrap();
     let directory = fixture.dir.join("log");
@@ -522,7 +548,12 @@ fn release_catalog_real_images_match_wire_oracle_when_supplied() {
         let relative = entry["path"].as_str().unwrap();
         let path = root.join(relative);
         let image = prepare_with_catalog(&path, &catalog).unwrap();
-        if image.provenance == Provenance::Stock || profile::digest_offset(&image.bytes).is_ok() {
+        if image.provenance == Provenance::Stock
+            || image
+                .bytes
+                .windows(profile::MAGIC.len())
+                .any(|window| window == profile::MAGIC)
+        {
             let independent = prepare_selected(&path, None).unwrap();
             assert_eq!(independent.sha256, image.sha256);
             assert_eq!(independent.tx_sha256, image.tx_sha256);
