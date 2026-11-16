@@ -1006,6 +1006,54 @@ fn rapid_menu_steps_with_battery_and_rf_updates_match_full_frame() {
 }
 
 #[test]
+fn menu_prioritizes_the_latest_selection_without_starving_an_older_window() {
+    let capture = Rc::new(RefCell::new(CapturedFrame::new()));
+    let panel = Panel {
+        capture: Some(capture.clone()),
+        ..Panel::default()
+    };
+    let windows = panel.windows.clone();
+    let mut app = App::new(
+        Memory::new(),
+        panel,
+        NoDelay,
+        Timing::new(30, 600).unwrap(),
+        PRESERVED_CALIBRATION_SHA256,
+    );
+    app.start(0).unwrap();
+    event(&mut app, InputEvent::Short(Key::Menu));
+    assert_matches_complete_frame(&mut app, &capture);
+    let initial = app.status.view.menu_index;
+    app.pending_rows.mark(296, 302);
+    app.row_cursor = 296;
+    windows.borrow_mut().clear();
+    for key in [Key::Down, Key::Down, Key::Up] {
+        event(&mut app, InputEvent::Short(key));
+        let (start, _) = render::menu_item_rows(app.status.view.menu_index);
+        let mut admissions = 0;
+        let progress = app
+            .render_batch(16, || {
+                admissions += 1;
+                admissions == 1
+            })
+            .unwrap();
+        assert_eq!(progress.rows, 6);
+        assert!(progress.pending);
+        assert_eq!(admissions, 2);
+        assert_eq!(*windows.borrow().last().unwrap(), (start, start + 6));
+    }
+    assert_ne!(app.status.view.menu_index, initial);
+    assert!(app.pending_rows.has(296));
+    for turn in 0..16 {
+        let key = if turn % 2 == 0 { Key::Down } else { Key::Up };
+        event(&mut app, InputEvent::Short(key));
+        app.render_step(6).unwrap();
+    }
+    assert!(windows.borrow().contains(&(296, 302)));
+    assert_matches_complete_frame(&mut app, &capture);
+}
+
+#[test]
 fn off_focus_tx_badges_preempt_page_work_and_clear_after_tail() {
     let capture = Rc::new(RefCell::new(CapturedFrame::new()));
     let panel = Panel {

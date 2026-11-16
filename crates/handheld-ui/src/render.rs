@@ -579,6 +579,17 @@ pub fn render_rows<B: DisplayBus, D: Delay>(
     start_y: u16,
     end_y: u16,
 ) -> Result<(), RenderError<B::Error>> {
+    render_rows_cached(display, model, start_y, end_y, &mut MenuCache::new())
+}
+
+/// The caller may retain decoded menu glyphs across synchronous LCD windows.
+pub fn render_rows_cached<B: DisplayBus, D: Delay>(
+    display: &mut Display<B, D>,
+    model: &Model<'_>,
+    start_y: u16,
+    end_y: u16,
+    menu_cache: &mut MenuCache,
+) -> Result<(), RenderError<B::Error>> {
     validate(model).map_err(RenderError::Model)?;
     if start_y > end_y || end_y > HEIGHT {
         return Err(RenderError::Model(Error::InvalidRange));
@@ -590,12 +601,11 @@ pub fn render_rows<B: DisplayBus, D: Delay>(
         .begin_window(0, start_y, WIDTH as u16, end_y - start_y)
         .map_err(RenderError::Display)?;
     let mut pixels = [0u16; WIDTH];
-    let mut menu_label = None;
     for y in start_y..end_y {
         // The immutable model and complete row interval were checked before
         // begin_window. Do not walk cached lists or recheck numeric entry for
         // every row in an incremental batch.
-        render_validated_row(y, &mut pixels, model, &mut menu_label);
+        render_validated_row(y, &mut pixels, model, menu_cache);
         display
             .write_pixels(&pixels)
             .map_err(RenderError::Display)?;
@@ -704,10 +714,9 @@ pub fn dirty_ranges(model: &Model<'_>, previous: Option<View>) -> Result<DirtyRa
             if old.menu_index == new.menu_index {
                 return Ok(dirty);
             }
-            let first = menu_start(new.menu_index);
             for index in [old.menu_index, new.menu_index] {
-                let y = LIST_Y + (usize::from(index) - first) as u16 * LIST_ROW_HEIGHT;
-                dirty.push(y, y + ITEM_PAINT_HEIGHT);
+                let (start, end) = menu_item_rows(index);
+                dirty.push(start, end);
             }
             dirty.push(283, 290);
         }
@@ -1172,7 +1181,7 @@ pub fn render_row(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) -> Result
         return Err(Error::RowOutOfRange { row });
     }
     validate(model)?;
-    render_validated_row(row, out, model, &mut None);
+    render_validated_row(row, out, model, &mut MenuCache::new());
     Ok(())
 }
 
@@ -1182,7 +1191,7 @@ fn render_validated_row(
     row: u16,
     pixels: &mut [u16; WIDTH],
     model: &Model<'_>,
-    menu_label: &mut Option<MenuLabel>,
+    menu_cache: &mut MenuCache,
 ) {
     let mut row_context = Row {
         pixels,
@@ -1201,7 +1210,7 @@ fn render_validated_row(
     } else if row < 296 {
         match model.view.screen {
             Screen::Home => unreachable!(),
-            Screen::Menu => menu(row, out, model, menu_label),
+            Screen::Menu => menu(row, out, model, menu_cache),
             Screen::Channels => channels(row, out, model),
             Screen::ChannelDetails => details(row, out, model),
             Screen::Step => steps(row, out, model),
@@ -2930,6 +2939,12 @@ fn menu_start(index: u8) -> usize {
     usize::from(index) / LIST_ROWS * LIST_ROWS
 }
 
+/// Physical rows of a filled menu item within its seven-item page.
+pub fn menu_item_rows(index: u8) -> (u16, u16) {
+    let start = LIST_Y + (usize::from(index) % LIST_ROWS) as u16 * LIST_ROW_HEIGHT;
+    (start, start + ITEM_PAINT_HEIGHT)
+}
+
 fn setting_title(setting: Setting) -> &'static str {
     match setting {
         Setting::BandPreset => "\x1f069",
@@ -3215,15 +3230,72 @@ pub fn menu_group_label(group: MenuGroup) -> &'static str {
     }
 }
 
-/// Consecutive scanlines of one immutable LCD window reuse the decoded
-/// label and fitted font scale. A new window starts with an empty cache.
-struct MenuLabel {
-    index: usize,
-    message: locale::Message,
+const MENU_LABEL_X: usize = 44;
+const MENU_GLYPHS: usize = (WIDTH - MENU_LABEL_X).div_ceil(6);
+
+/// The label depends only on an item's semantic ID and current language.
+/// Store glyph rows once, independently of the selection and LCD window.
+pub struct MenuCache {
+    key: Option<(MenuEntry, Language)>,
+    glyphs: [[u8; 7]; MENU_GLYPHS],
+    len: usize,
     scale: u16,
+    #[cfg(test)]
+    resolutions: usize,
 }
 
-fn menu(row: u16, out: &mut Row<'_>, model: &Model<'_>, label: &mut Option<MenuLabel>) {
+impl MenuCache {
+    pub const fn new() -> Self {
+        Self {
+            key: None,
+            glyphs: [[0; 7]; MENU_GLYPHS],
+            len: 0,
+            scale: 1,
+            #[cfg(test)]
+            resolutions: 0,
+        }
+    }
+
+    fn paint(&mut self, entry: MenuEntry, row: u16, out: &mut Row<'_>, y: u16, ink: u16) {
+        let key = (entry, out.language);
+        if self.key != Some(key) {
+            let template = match entry {
+                MenuEntry::Item(item) => menu_label(item),
+                MenuEntry::Group(group) => menu_group_label(group),
+            };
+            let message = locale::resolve(template, out.language);
+            let text = message.as_str();
+            self.scale = fitting_scale(text, 2, WIDTH - MENU_LABEL_X);
+            self.len = 0;
+            let limit = (WIDTH - MENU_LABEL_X).div_ceil(6 * usize::from(self.scale));
+            for (glyph, ch) in self.glyphs[..limit].iter_mut().zip(text.chars()) {
+                *glyph = glyph_rows(ch);
+                self.len += 1;
+            }
+            self.key = Some(key);
+            #[cfg(test)]
+            {
+                self.resolutions += 1;
+            }
+        }
+        if row < y || row >= y + 7 * self.scale {
+            return;
+        }
+        let glyph_row = usize::from((row - y) / self.scale);
+        let scale = usize::from(self.scale);
+        for (index, glyph) in self.glyphs[..self.len].iter().enumerate() {
+            draw_glyph_row(
+                out,
+                MENU_LABEL_X + index * 6 * scale,
+                glyph[glyph_row],
+                scale,
+                ink,
+            );
+        }
+    }
+}
+
+fn menu(row: u16, out: &mut Row<'_>, model: &Model<'_>, cache: &mut MenuCache) {
     let entries = menu_entries(model.view.menu_group);
     if (LIST_Y..LIST_Y + LIST_ROWS as u16 * LIST_ROW_HEIGHT).contains(&row) {
         let offset = (row - LIST_Y) / LIST_ROW_HEIGHT;
@@ -3268,30 +3340,7 @@ fn menu(row: u16, out: &mut Row<'_>, model: &Model<'_>, label: &mut Option<MenuL
         let icon_ink = if selected { ink } else { color::ACCENT };
         symbol(row, out, 20, y + 7, glyph, icon_ink);
         if row >= y + 8 && row < y + 22 {
-            if label.as_ref().is_none_or(|cached| cached.index != index) {
-                let value = match entry {
-                    MenuEntry::Item(item) => menu_label(item),
-                    MenuEntry::Group(group) => menu_group_label(group),
-                };
-                let message = locale::resolve(value, out.language);
-                let scale = fitting_scale(message.as_str(), 2, WIDTH - 44);
-                *label = Some(MenuLabel {
-                    index,
-                    message,
-                    scale,
-                });
-            }
-            if let Some(cached) = label {
-                raw_text(
-                    row,
-                    out,
-                    44,
-                    y + 8,
-                    cached.scale,
-                    cached.message.as_str(),
-                    ink,
-                );
-            }
+            cache.paint(entry, row, out, y + 8, ink);
         }
         if matches!(entry, MenuEntry::Group(_)) {
             text(row, out, 216, y + 8, 2, ">", ink);
@@ -4379,20 +4428,30 @@ fn raw_text(row: u16, out: &mut Row<'_>, x: usize, y: u16, scale: u16, value: &s
         return;
     }
     let glyph_row = usize::from((row - y) / scale);
+    let scale = usize::from(scale);
     for (index, ch) in value.chars().enumerate() {
-        let origin = x + index * 6 * usize::from(scale);
+        let origin = x + index * 6 * scale;
         if origin >= WIDTH {
             break;
         }
-        let bits = font::glyph(ch)[glyph_row];
-        for column in 0..5 {
-            if bits & (1 << (4 - column)) == 0 {
-                continue;
-            }
-            let start = origin + column * usize::from(scale);
-            if start < WIDTH {
-                out[start..(start + usize::from(scale)).min(WIDTH)].fill(color);
-            }
+        draw_glyph_row(out, origin, glyph_rows(ch)[glyph_row], scale, color);
+    }
+}
+
+// Keep one copy of the glyph dispatch for cached and uncached text.
+#[inline(never)]
+fn glyph_rows(ch: char) -> [u8; 7] {
+    font::glyph(ch)
+}
+
+fn draw_glyph_row(out: &mut Row<'_>, origin: usize, bits: u8, scale: usize, color: u16) {
+    for column in 0..5 {
+        if bits & (1 << (4 - column)) == 0 {
+            continue;
+        }
+        let start = origin + column * scale;
+        if start < WIDTH {
+            out[start..(start + scale).min(WIDTH)].fill(color);
         }
     }
 }
@@ -4403,6 +4462,64 @@ mod tests {
     use super::*;
     use crate::controller::Entry;
     use std::{cell::RefCell, rc::Rc, vec, vec::Vec};
+
+    #[test]
+    fn menu_cache_matches_label_pixels_and_reuses_glyphs_across_windows() {
+        let mut cache = MenuCache::new();
+        let mut expected_resolutions = 0;
+        for language in [Language::Russian, Language::English, Language::German] {
+            for group in MENU_GROUPS {
+                for &entry in menu_entries(group) {
+                    if cache.key != Some((entry, language)) {
+                        expected_resolutions += 1;
+                    }
+                    let value = match entry {
+                        MenuEntry::Item(item) => menu_label(item),
+                        MenuEntry::Group(group) => menu_group_label(group),
+                    };
+                    let label = locale::resolve(value, language);
+                    let scale = fitting_scale(label.as_str(), 2, WIDTH - MENU_LABEL_X);
+                    // Start and stop in the middle of the label, as separate
+                    // LCD windows do. Color can change without new glyphs.
+                    for span in [0..4, 4..10, 10..14] {
+                        for row in span {
+                            let ink = if row < 4 {
+                                color::TEXT
+                            } else {
+                                color::BACKGROUND
+                            };
+                            let mut actual = [color::ACCENT; WIDTH];
+                            let mut expected = actual;
+                            cache.paint(
+                                entry,
+                                row,
+                                &mut Row {
+                                    pixels: &mut actual,
+                                    language,
+                                },
+                                0,
+                                ink,
+                            );
+                            raw_text(
+                                row,
+                                &mut Row {
+                                    pixels: &mut expected,
+                                    language,
+                                },
+                                MENU_LABEL_X,
+                                0,
+                                scale,
+                                label.as_str(),
+                                ink,
+                            );
+                            assert_eq!(actual, expected, "{entry:?} {language:?} row {row}");
+                        }
+                    }
+                    assert_eq!(cache.resolutions, expected_resolutions);
+                }
+            }
+        }
+    }
 
     fn view(screen: Screen) -> View {
         View {
@@ -4899,7 +5016,7 @@ mod tests {
                 (0..HEIGHT)
                     .map(|y| {
                         let mut row = [0; WIDTH];
-                        render_validated_row(y, &mut row, model, &mut None);
+                        render_validated_row(y, &mut row, model, &mut MenuCache::new());
                         row
                     })
                     .collect()

@@ -144,6 +144,7 @@ pub struct RenderProgress {
 // Confirmed state banners and Home TX badges can preempt a page repaint.
 // Ordinary work receives a batch after at most eight priority rows.
 const PRIORITY_BURST_ROWS: u16 = 8;
+const MENU_BURST_ROWS: u16 = 67;
 
 #[derive(Clone, Copy, Default)]
 struct PendingRows([u32; 10]);
@@ -254,6 +255,9 @@ pub struct App<N, L, D> {
     priority_rows: PendingRows,
     pending_outlines: u8,
     priority_run: u16,
+    menu_priority: [(u16, u16); 3],
+    menu_run: u16,
+    menu_cache: render::MenuCache,
     row_cursor: u16,
     render_page: Option<Screen>,
     radio: RadioView,
@@ -322,6 +326,9 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             priority_rows: PendingRows::default(),
             pending_outlines: 0,
             priority_run: 0,
+            menu_priority: [(0, 0); 3],
+            menu_run: 0,
+            menu_cache: render::MenuCache::new(),
             row_cursor: 0,
             render_page: None,
             radio: RadioView::OFF,
@@ -1191,6 +1198,19 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
                 return Ok(self.finish_render_step(1));
             }
         }
+        let menu = if !priority && self.menu_run < MENU_BURST_ROWS {
+            self.menu_priority.iter().find_map(|&(start, end)| {
+                if start >= end {
+                    return None;
+                }
+                ordinary
+                    .next(start)
+                    .filter(|row| (start..end).contains(row))
+                    .map(|row| (row, end - row))
+            })
+        } else {
+            None
+        };
         let (start, limit) = if priority {
             let limit = if normal_start.is_some() {
                 max_rows.min(PRIORITY_BURST_ROWS - self.priority_run)
@@ -1198,6 +1218,11 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
                 max_rows
             };
             (self.priority_rows.next(0), limit)
+        } else if let Some((start, remaining)) = menu {
+            (
+                Some(start),
+                max_rows.min(remaining).min(MENU_BURST_ROWS - self.menu_run),
+            )
         } else {
             (normal_start, max_rows)
         };
@@ -1225,7 +1250,12 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             self.priority_run = self.priority_run.saturating_add(end - start);
         } else {
             self.priority_run = 0;
-            self.row_cursor = if end == render::HEIGHT { 0 } else { end };
+            if menu.is_some() {
+                self.menu_run += end - start;
+            } else {
+                self.menu_run = 0;
+                self.row_cursor = if end == render::HEIGHT { 0 } else { end };
+            }
         }
         Ok(self.finish_render_step(end - start))
     }
@@ -1239,6 +1269,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             // pass was rendering, including a value that changed and changed back.
             self.pending_rows.merge_take(&mut self.deferred_radio_rows);
             self.render_radio = self.radio;
+            self.menu_run = 0;
         }
         self.status.state = State::Ready;
         RenderProgress {
@@ -1561,6 +1592,8 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             self.priority_rows = PendingRows::default();
             self.pending_outlines = 0;
             self.priority_run = 0;
+            self.menu_priority = [(0, 0); 3];
+            self.menu_run = 0;
             self.row_cursor = 0;
             self.render_page = Some(self.status.view.screen);
         }
@@ -1642,6 +1675,28 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         .map_err(|e| Error::Render(render::RenderError::Model(e)))?;
         for &(start, end) in damage.ranges() {
             self.pending_rows.mark(start, end);
+        }
+        if screen == Screen::Menu
+            && self.last_rendered.as_ref().is_none_or(|old| {
+                old.screen != Screen::Menu
+                    || old.menu_group != view.menu_group
+                    || old.menu_index != view.menu_index
+            })
+        {
+            let previous = self
+                .last_rendered
+                .as_ref()
+                .filter(|old| {
+                    old.screen == Screen::Menu
+                        && old.menu_group == view.menu_group
+                        && usize::from(old.menu_index) / render::LIST_ROWS
+                            == usize::from(view.menu_index) / render::LIST_ROWS
+                })
+                .map_or((0, 0), |old| render::menu_item_rows(old.menu_index));
+            // Keep the title of a new group and the latest selected item
+            // ahead of older body damage. Clear a same-page previous selection
+            // next. New input replaces the ordering, retaining all damage.
+            self.menu_priority = [(11, 18), render::menu_item_rows(view.menu_index), previous];
         }
         for &(start, end) in spectrum_damage.ranges() {
             self.pending_rows.mark(start, end);
@@ -1783,7 +1838,8 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             spectrum_error: self.spectrum_error,
             shortwave_scope: Some(&self.shortwave_scope),
         };
-        render::render_rows(&mut self.display, &model, start, end).map_err(Error::Render)
+        render::render_rows_cached(&mut self.display, &model, start, end, &mut self.menu_cache)
+            .map_err(Error::Render)
     }
 }
 
