@@ -1,8 +1,9 @@
-//! Foreground ownership of manual DTMF and MDC1200 PTT ID.
+//! Foreground ownership of manual DTMF, MDC1200 PTT ID and stock radio names.
 //! Does not start RF. Every tone is inside the existing calibrated TX session.
 use uv98_handheld_ui::controller::{Slot, View};
 use uv98_radio_runtime::mdc1200::{self, Action, Config, Input, Mode};
 use uv98_radio_runtime::{Fault, Io, Runtime, State};
+use uv98_signaling::radio_name::RadioName;
 use uv98_signaling::tones::{self, BkToneSession, ToneRegisters};
 
 pub fn mdc_config(view: View, slot: Slot) -> Config {
@@ -46,7 +47,6 @@ pub struct TransmitTones {
     key: Option<u8>,
     key_since: u32,
     mdc: mdc1200::Session,
-    mdc_config: Option<Config>,
 }
 impl TransmitTones {
     pub const fn new() -> Self {
@@ -55,7 +55,6 @@ impl TransmitTones {
             key: None,
             key_since: 0,
             mdc: mdc1200::Session::new(),
-            mdc_config: None,
         }
     }
     /// allow_tail requires clean physical release, unchanged TX configuration,
@@ -68,15 +67,14 @@ impl TransmitTones {
         allow_tail: bool,
         key: Option<u8>,
         mdc_config: Config,
+        name: Option<RadioName>,
     ) -> Result<bool, Fault<I::Error>> {
         if radio.state() != State::Transmitting {
             self.generator = BkToneSession::new();
             self.key = None;
             self.mdc = mdc1200::Session::new();
-            self.mdc_config = None;
             return Ok(voice_held);
         }
-        let latched = *self.mdc_config.get_or_insert(mdc_config);
         let input = if voice_held {
             Input::Voice
         } else if allow_tail {
@@ -84,15 +82,22 @@ impl TransmitTones {
         } else {
             Input::Abort
         };
-        match self.mdc.step(now, input, latched, radio.mdc_progress()) {
-            Action::Start(id) => {
+        match self
+            .mdc
+            .step_with_name(now, input, mdc_config, name, radio.mdc_progress())
+        {
+            action @ (Action::Start(_) | Action::StartName(_)) => {
                 // DTMF and FFSK share Tone2. Stop an active keypad tone in
                 // one verified write before the end burst takes ownership.
                 // Terminal TX cleanup restores the shared modulation state.
                 if self.generator.active() {
                     radio.signaling_write(0x70, 0)?;
                 }
-                radio.start_mdc(id)?;
+                match action {
+                    Action::Start(id) => radio.start_mdc(id)?,
+                    Action::StartName(name) => radio.start_radio_name(name)?,
+                    _ => unreachable!(),
+                }
                 return Ok(true);
             }
             Action::Keep => {

@@ -19,11 +19,10 @@ use crate::controller::{
     TX_CTCSS,
 };
 use crate::meter::{receive_segments, transmit_segments, SEGMENTS as METER_SEGMENTS};
-use crate::text_entry::InputMode;
 
-#[path = "dtmf_popup.rs"]
-mod dtmf_popup;
-pub use dtmf_popup::DtmfReception;
+#[path = "signaling_popup.rs"]
+mod signaling_popup;
+pub use signaling_popup::{DtmfReception, NameReception};
 
 #[path = "font.rs"]
 mod font;
@@ -124,6 +123,7 @@ pub struct RadioView {
     /// Confirmed receive context. Scope or relay audio has no home VFO.
     pub rx_slot: Option<Slot>,
     pub dtmf: Option<DtmfReception>,
+    pub radio_name: Option<NameReception>,
     pub rssi: Option<u16>,
     pub meter_floor: u16,
     pub squelch_open: bool,
@@ -142,6 +142,7 @@ impl RadioView {
         tx_slot: None,
         rx_slot: None,
         dtmf: None,
+        radio_name: None,
         rssi: None,
         meter_floor: 0,
         squelch_open: false,
@@ -158,6 +159,15 @@ impl RadioView {
         } else {
             None
         }
+    }
+
+    fn signaling_popup(self) -> Option<signaling_popup::Reception> {
+        if self.state != RadioState::Receiving {
+            return None;
+        }
+        self.radio_name
+            .map(signaling_popup::Reception::Name)
+            .or_else(|| self.visible_dtmf().map(signaling_popup::Reception::Dtmf))
     }
 
     pub fn receiving_slot(self) -> Option<Slot> {
@@ -428,10 +438,10 @@ pub fn render_home_outline_edge<B: DisplayBus, D: Delay>(
     // The popup is above the VFO cards. Narrow direct LCD writes must obey
     // the same composition order as the full-row painter.
     if height == 1
-        && radio.visible_dtmf().is_some()
-        && (dtmf_popup::ROWS.0..dtmf_popup::ROWS.1).contains(&y)
+        && radio.signaling_popup().is_some()
+        && (signaling_popup::ROWS.0..signaling_popup::ROWS.1).contains(&y)
     {
-        let (left, right) = dtmf_popup::COLUMNS;
+        let (left, right) = signaling_popup::COLUMNS;
         display
             .fill_rect(x, y, left - x, 1, ink)
             .map_err(RenderError::Display)?;
@@ -874,6 +884,11 @@ pub fn dirty_ranges(model: &Model<'_>, previous: Option<View>) -> Result<DirtyRa
                 dirty.push(94, 101);
             }
         }
+        Screen::RadioName => {
+            if old.radio_name_draft != new.radio_name_draft {
+                dirty.push(96, 110);
+            }
+        }
         Screen::Mdc => {
             if old.mdc_draft.is_some() != new.mdc_draft.is_some() {
                 dirty.push(48, 269);
@@ -1027,8 +1042,8 @@ pub fn radio_dirty_ranges(model: &Model<'_>, previous: RadioView) -> Result<Dirt
     validate(model)?;
     let new = model.radio;
     let mut dirty = DirtyRanges::new();
-    if previous.visible_dtmf() != new.visible_dtmf() {
-        dirty.push(dtmf_popup::ROWS.0, dtmf_popup::ROWS.1);
+    if previous.signaling_popup() != new.signaling_popup() {
+        dirty.push(signaling_popup::ROWS.0, signaling_popup::ROWS.1);
     }
     let (banner_start, banner_end) = radio_banner_rows(model.view.screen);
     let view = model.view;
@@ -1198,13 +1213,14 @@ fn render_validated_row(
             Screen::Gps | Screen::Aprs => utility_page(row, out, model),
             Screen::Cb => cb_grid(row, out, &model.view),
             Screen::Mdc => mdc_page(row, out, &model.view),
+            Screen::RadioName => radio_name_page(row, out, &model.view),
         }
         notice(row, out, model.view.notice);
     } else {
         footer(row, out, model);
     }
-    if let Some(report) = model.radio.visible_dtmf() {
-        dtmf_popup::paint(row, out, report);
+    if let Some(report) = model.radio.signaling_popup() {
+        signaling_popup::paint(row, out, report);
     }
 }
 
@@ -1212,7 +1228,7 @@ fn validate(model: &Model<'_>) -> Result<(), Error> {
     let view = model.view;
     if view.spectrum_cursor as usize >= SPECTRUM_BINS
         || (view.screen == Screen::Cb && view.cb_draft.is_none())
-        || (view.screen == Screen::Mdc && view.mdc_option > 2)
+        || (view.screen == Screen::Mdc && view.mdc_option > 1)
     {
         return Err(Error::InvalidView);
     }
@@ -1466,6 +1482,7 @@ fn page_title(view: View) -> &'static str {
         Screen::Cb => cb_label(),
         Screen::Mdc if view.active_slot == Slot::A => "MDC1200 A",
         Screen::Mdc => "MDC1200 B",
+        Screen::RadioName => "\x1f16D",
     }
 }
 
@@ -1570,8 +1587,7 @@ const fn mdc_option_top(option: u8) -> u16 {
 fn mdc_option_label(option: u8) -> &'static str {
     match option {
         0 => "\x1f163",
-        1 => "UNIT ID",
-        _ => "\x1f164",
+        _ => "UNIT ID",
     }
 }
 
@@ -1615,31 +1631,11 @@ fn mdc_page(row: u16, out: &mut Row<'_>, view: &View) {
                 text(row, out, 16, 153, 1, "\x1f169", color::MUTED);
                 text(row, out, 16, 168, 1, "\x1f16B", color::MUTED);
             }
-            MdcDraft::Alias(editor) => {
-                let _ = write!(value, "{}_", editor.value());
-                text(row, out, 16, 105, 2, value.as_str(), color::ACCENT);
-                text(
-                    row,
-                    out,
-                    16,
-                    75,
-                    1,
-                    if editor.mode() == InputMode::Russian {
-                        "RU"
-                    } else {
-                        "EN"
-                    },
-                    color::ACCENT,
-                );
-                text(row, out, 16, 138, 1, "\x1f16A", color::MUTED);
-                text(row, out, 16, 153, 1, "\x1f169", color::MUTED);
-                text(row, out, 16, 183, 1, "\x1f16C", color::MUTED);
-            }
         }
         return;
     }
     let settings = view.mdc_for_slot(view.active_slot);
-    for option in 0..3 {
+    for option in 0..2 {
         let top = mdc_option_top(option);
         if !(top..top + 37).contains(&row) {
             continue;
@@ -1662,24 +1658,30 @@ fn mdc_page(row: u16, out: &mut Row<'_>, view: &View) {
             0 => {
                 let _ = value.write_str(mdc_timing_label(settings.mode));
             }
-            1 => {
+            _ => {
                 if let Some(id) = settings.id {
                     let _ = write!(value, "{:04X}", id);
                 } else {
                     let _ = value.write_str("----");
                 }
             }
-            _ => {
-                let alias = view.mdc_alias_for_slot(view.active_slot);
-                if alias.is_empty() {
-                    let _ = value.write_str("----");
-                } else {
-                    let _ = write!(value, "{}", alias);
-                }
-            }
         }
         text(row, out, 21, top + 22, 1, value.as_str(), color::ACCENT);
     }
+}
+
+fn radio_name_page(row: u16, out: &mut Row<'_>, view: &View) {
+    let Some(editor) = view.radio_name_draft else {
+        return;
+    };
+    if (96..110).contains(&row) {
+        let mut value = Text::new();
+        let _ = write!(value, "{}_", editor.value());
+        let scale = fitting_scale(value.as_str(), 2, 208);
+        text(row, out, 16, 96, scale, value.as_str(), color::ACCENT);
+    }
+    text(row, out, 16, 138, 1, "\x1f16F", color::MUTED);
+    text(row, out, 16, 153, 1, "\x1f169", color::MUTED);
 }
 
 /// One user-visible build identity for the header and the About page.
@@ -2903,6 +2905,7 @@ fn setting_title(setting: Setting) -> &'static str {
         Setting::GpsEnable => "\x1f0E1",
         Setting::GpsBaud => "\x1f11C",
         Setting::Dtmf => "\x1f00F",
+        Setting::NameRoger => "\x1f16E",
         Setting::TopKey => "\x1f091",
         Setting::BottomKey => "\x1f092",
         Setting::Shift => "\x1f101",
@@ -2927,7 +2930,7 @@ fn setting_options(setting: Setting) -> &'static [&'static str] {
             "CB / 27.135 AM",
             "800 / 850.000 FM",
         ],
-        Setting::GpsEnable | Setting::Dtmf => &["\x1f05E", "\x1f04F"],
+        Setting::GpsEnable | Setting::Dtmf | Setting::NameRoger => &["\x1f05E", "\x1f04F"],
         Setting::GpsBaud => &[
             "4800", "9600", "14400", "19200", "38400", "56000", "57600", "115200", "128000",
             "256000",
@@ -2995,6 +2998,7 @@ fn current_setting_label(model: &Model<'_>, setting: Setting) -> &'static str {
         Setting::GpsEnable => usize::from(model.view.gps_enabled),
         Setting::GpsBaud => usize::from(model.view.gps_baud),
         Setting::Dtmf => usize::from(model.view.dtmf_enabled),
+        Setting::NameRoger => usize::from(model.view.name_roger_enabled),
         Setting::TopKey => usize::from(model.view.top_action),
         Setting::BottomKey => usize::from(model.view.bottom_action),
         Setting::Shift => usize::from(model.view.shift_index),
@@ -3124,6 +3128,8 @@ pub fn menu_label(item: MenuItem) -> &'static str {
     match item {
         MenuItem::Cb => cb_label(),
         MenuItem::Mdc => "MDC1200",
+        MenuItem::RadioName => "\x1f16D",
+        MenuItem::NameRoger => "\x1f16E",
         MenuItem::BandPreset => "\x1f069",
         MenuItem::Gps => "\x1f01B",
         MenuItem::GpsEnable => "\x1f0E1",
@@ -3868,6 +3874,7 @@ fn footer(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
             }
             Screen::Shortwave => ("\x1f028", "\x1f012"),
             Screen::Crossband => ("\x1f075", "EXIT"),
+            Screen::RadioName => ("\x1f027", "\x1f013"),
             Screen::Mdc if model.view.mdc_draft.is_some() => ("\x1f027", "\x1f013"),
             Screen::Mdc => ("\x1f01F", "\x1f012"),
             _ => ("\x1f021", "\x1f012"),
@@ -4358,7 +4365,9 @@ mod tests {
             cb: None,
             cb_draft: (screen == Screen::Cb).then(crate::cb::CbChannel::default),
             mdc: [crate::controller::MdcSettings { mode: 0, id: None }; 2],
-            mdc_alias: [crate::text_entry::TextValue::empty(); 2],
+            radio_name: None,
+            name_roger_enabled: false,
+            radio_name_draft: None,
             mdc_option: 0,
             mdc_draft: None,
             gps_enabled: false,
@@ -5159,31 +5168,32 @@ mod tests {
     }
 
     #[test]
-    fn mdc_selection_edit_and_text_language_updates_match_complete_frames() {
-        use crate::text_entry::{Editor, TextValue};
+    fn mdc_and_name_edits_match_complete_frames() {
+        use crate::text_entry::{Editor, InputMode, TextValue};
         for language in [Language::Russian, Language::English, Language::German] {
             let mut old = model(Screen::Mdc);
             old.view.language = language;
             old.view.active_slot = Slot::B;
             assert_eq!(page_title(old.view), "MDC1200 B");
             let mut new = old;
-            new.view.mdc_option = 2;
+            new.view.mdc_option = 1;
             assert_eq!(compare_incremental(old, new), WIDTH * 74);
             old = new;
-            let mut editor = Editor::new(InputMode::Russian, TextValue::empty());
-            new.view.mdc_draft = Some(MdcDraft::Alias(editor));
+            new.view.mdc_draft = Some(MdcDraft::UnitId(Editor::new(
+                InputMode::Hex,
+                TextValue::empty(),
+            )));
             compare_incremental(old, new);
-            old = new;
+
+            old = model(Screen::RadioName);
+            old.view.language = language;
+            let mut editor = Editor::new(InputMode::RadioName, TextValue::empty());
+            old.view.radio_name_draft = Some(editor);
+            new = old;
             editor.digit(2, false);
-            editor.cycle_language();
-            editor.digit(2, false);
-            new.view.mdc_draft = Some(MdcDraft::Alias(editor));
-            assert_eq!(compare_incremental(old, new), WIDTH * 44);
-            old = new;
-            new.view.mdc_draft = None;
-            new.view.mdc_alias[1] = editor.value();
-            compare_incremental(old, new);
-            compare_incremental(new, old);
+            editor.digit(3, false);
+            new.view.radio_name_draft = Some(editor);
+            assert_eq!(compare_incremental(old, new), WIDTH * 14);
         }
     }
 
@@ -5496,6 +5506,7 @@ mod tests {
             tx_slot: None,
             rx_slot: None,
             dtmf: None,
+            radio_name: None,
             tx_trial: false,
         };
         compare_radio_incremental(old, new);
@@ -5779,6 +5790,30 @@ mod tests {
     }
 
     #[test]
+    fn name_popup_updates_only_its_rows_and_yields_to_tx() {
+        use uv98_signaling::radio_name::RadioName;
+
+        let mut dtmf = model(Screen::Home);
+        dtmf.radio.state = RadioState::Receiving;
+        dtmf.radio.dtmf = DtmfReception::new(Slot::A, "1234");
+        let name = RadioName::from_payload(*b"QRST UVWXYZ 0123").unwrap();
+        let mut shown = dtmf;
+        shown.radio.radio_name = Some(NameReception::new(Slot::B, name));
+        assert_eq!(compare_radio_incremental(dtmf, shown), WIDTH * 58);
+
+        let mut changed_slot = shown;
+        changed_slot.radio.radio_name = Some(NameReception::new(Slot::A, name));
+        assert_eq!(compare_radio_incremental(shown, changed_slot), WIDTH * 58);
+        assert_eq!(compare_radio_incremental(changed_slot, dtmf), WIDTH * 58);
+
+        let mut tx = shown;
+        tx.radio.state = RadioState::Transmitting;
+        tx.radio.tx_slot = Some(Slot::A);
+        assert!(tx.radio.signaling_popup().is_none());
+        compare_radio_incremental(shown, tx);
+    }
+
+    #[test]
     fn dtmf_popup_changes_and_tx_removal_match_a_complete_frame() {
         for screen in [Screen::Home, Screen::Menu, Screen::Keys] {
             let mut before = model(screen);
@@ -5828,6 +5863,7 @@ mod tests {
                         tx_slot: None,
                         rx_slot: None,
                         dtmf: None,
+                        radio_name: None,
                         tx_trial: false,
                     };
                     let pixels = compare_radio_incremental(old, new);
@@ -6295,6 +6331,7 @@ mod tests {
                 tx_slot: None,
                 rx_slot: None,
                 dtmf: None,
+                radio_name: None,
                 tx_trial: false,
             };
             for y in 0..HEIGHT {

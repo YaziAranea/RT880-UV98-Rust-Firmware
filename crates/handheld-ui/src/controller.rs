@@ -6,6 +6,8 @@ use crate::locale::Language;
 use crate::text_entry::{Editor, InputMode, TextValue};
 use uv98_keys::Key;
 use uv98_signaling::mdc1200::UnitId;
+pub use uv98_signaling::radio_name::RadioName;
+use uv98_signaling::radio_name::NAME_BYTES;
 
 pub const CHANNEL_COUNT: usize = 1024;
 // This is an editor bound, not a claim that the radio supports every frequency.
@@ -119,6 +121,7 @@ pub enum Screen {
     Aprs,
     Cb,
     Mdc,
+    RadioName,
 }
 
 /// Menu choice pages are drafts. Only MENU commits; opening, arrows and EXIT
@@ -142,6 +145,7 @@ pub enum Setting {
     GpsEnable,
     GpsBaud,
     Dtmf,
+    NameRoger,
 }
 
 impl Setting {
@@ -202,10 +206,12 @@ pub enum MenuItem {
     Dtmf,
     Cb,
     Mdc,
+    RadioName,
+    NameRoger,
 }
 
 /// Full catalog for tooling. The visible menu uses `menu_entries`.
-pub const MENU_ITEMS: [MenuItem; 30] = [
+pub const MENU_ITEMS: [MenuItem; 32] = [
     MenuItem::Mode,
     MenuItem::Modulation,
     MenuItem::Channels,
@@ -236,6 +242,8 @@ pub const MENU_ITEMS: [MenuItem; 30] = [
     MenuItem::Dtmf,
     MenuItem::Cb,
     MenuItem::Mdc,
+    MenuItem::RadioName,
+    MenuItem::NameRoger,
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -306,6 +314,8 @@ pub const fn menu_entries(group: Option<MenuGroup>) -> &'static [MenuEntry] {
             Item(MenuItem::KeyLight),
             Item(MenuItem::About),
             Item(MenuItem::Dtmf),
+            Item(MenuItem::RadioName),
+            Item(MenuItem::NameRoger),
         ],
     }
 }
@@ -658,13 +668,12 @@ pub struct MdcSettings {
     pub id: Option<u16>,
 }
 
-pub const MDC_ALIAS_LEN: usize = 12;
+const NAME_MULTITAP_MS: u32 = 650;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MdcDraft {
     Timing(u8),
     UnitId(Editor<4>),
-    Alias(Editor<MDC_ALIAS_LEN>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -675,8 +684,9 @@ pub struct View {
     pub cb: Option<CbChannel>,
     pub cb_draft: Option<CbChannel>,
     pub mdc: [MdcSettings; 2],
-    /// Device-local labels, independent of transmitted MDC unit IDs.
-    pub mdc_alias: [TextValue<MDC_ALIAS_LEN>; 2],
+    pub radio_name: Option<RadioName>,
+    pub name_roger_enabled: bool,
+    pub radio_name_draft: Option<Editor<NAME_BYTES>>,
     pub mdc_option: u8,
     pub mdc_draft: Option<MdcDraft>,
     pub gps_enabled: bool,
@@ -784,8 +794,16 @@ impl View {
         self.mdc[slot.index()]
     }
 
-    pub const fn mdc_alias_for_slot(&self, slot: Slot) -> TextValue<MDC_ALIAS_LEN> {
-        self.mdc_alias[slot.index()]
+    pub const fn roger_name(&self) -> Option<RadioName> {
+        if self.name_roger_enabled {
+            self.radio_name
+        } else {
+            None
+        }
+    }
+
+    pub const fn radio_name_settings(&self) -> (Option<RadioName>, bool) {
+        (self.radio_name, self.name_roger_enabled)
     }
 
     pub fn shortwave_step_hz(&self, scanning: bool) -> u32 {
@@ -874,6 +892,7 @@ pub struct Controller {
     channel_order: [u16; 200],
     channel_order_len: u8,
     radio_power: Option<u8>,
+    name_last_digit_at: Option<u32>,
     radio_monitor: bool,
     radio_am: bool,
     cancel_temporary: bool,
@@ -910,7 +929,9 @@ impl Controller {
                 cb: None,
                 cb_draft: None,
                 mdc: [MdcSettings { mode: 0, id: None }; 2],
-                mdc_alias: [TextValue::empty(); 2],
+                radio_name: None,
+                name_roger_enabled: false,
+                radio_name_draft: None,
                 mdc_option: 0,
                 mdc_draft: None,
                 gps_enabled: false,
@@ -1008,6 +1029,7 @@ impl Controller {
             channel_order: [0; 200],
             channel_order_len: 0,
             radio_power: None,
+            name_last_digit_at: None,
             radio_monitor: false,
             radio_am: false,
             cancel_temporary: false,
@@ -1068,12 +1090,18 @@ impl Controller {
         self.radio_am = am;
     }
 
+    pub fn apply_radio_name_settings(&mut self, name: Option<RadioName>, enabled: bool) {
+        self.view.radio_name = name;
+        self.view.name_roger_enabled = enabled;
+    }
+
     fn open_setting(&mut self, setting: Setting) {
         self.view.setting_index = match setting {
             Setting::BandPreset => 0,
             Setting::GpsEnable => u8::from(self.view.gps_enabled),
             Setting::GpsBaud => self.view.gps_baud,
             Setting::Dtmf => u8::from(self.view.dtmf_enabled),
+            Setting::NameRoger => u8::from(self.view.name_roger_enabled),
             Setting::TopKey => {
                 self.view.top_draft = self.view.top_key;
                 self.view.top_action
@@ -1119,6 +1147,7 @@ impl Controller {
             Setting::GpsEnable => self.view.gps_enabled = selected != 0,
             Setting::GpsBaud => self.view.gps_baud = selected,
             Setting::Dtmf => self.view.dtmf_enabled = selected != 0,
+            Setting::NameRoger => self.view.name_roger_enabled = selected != 0,
             Setting::BandPreset => {
                 // Presets select frequency, modulation and step together. The
                 // RF runtime still derives its relay route from frequency.
@@ -1338,6 +1367,8 @@ impl Controller {
         self.view.entry = None;
         self.view.cb_draft = None;
         self.view.mdc_draft = None;
+        self.view.radio_name_draft = None;
+        self.name_last_digit_at = None;
         self.view.screen = Screen::Home;
         self.view.setting = None;
         self.request_scan_stop();
@@ -1497,6 +1528,26 @@ impl Controller {
         self.view.screen = Screen::SideAction;
     }
 
+    pub fn handle_at(&mut self, event: InputEvent, bitmap: &[u8; 128], now: u32) -> Change {
+        if let InputEvent::Short(key) | InputEvent::Hold(key) = event {
+            if let Some(editor) = self
+                .view
+                .radio_name_draft
+                .as_mut()
+                .filter(|_| digit(key).is_some())
+            {
+                if self
+                    .name_last_digit_at
+                    .is_some_and(|last| now.wrapping_sub(last) >= NAME_MULTITAP_MS)
+                {
+                    editor.commit_character();
+                }
+                self.name_last_digit_at = Some(now);
+            }
+        }
+        self.handle(event, bitmap)
+    }
+
     pub fn handle(&mut self, event: InputEvent, bitmap: &[u8; 128]) -> Change {
         let before = self.view;
         self.ptt_tx_requested = false;
@@ -1506,6 +1557,10 @@ impl Controller {
         }
         if self.view.screen != Screen::Mdc {
             self.view.mdc_draft = None;
+        }
+        if self.view.screen != Screen::RadioName {
+            self.view.radio_name_draft = None;
+            self.name_last_digit_at = None;
         }
         if self.view.screen != Screen::Setting {
             self.view.setting = None;
@@ -2034,10 +2089,12 @@ impl Controller {
             && self.view.screen == Screen::Spectrum
             && !self.view.spectrum_menu
             && self.view.spectrum_listening;
-        let modal_exit = matches!(self.view.screen, Screen::Cb | Screen::Mdc)
-            || (self.view.screen == Screen::Home
-                && self.selected_cb().is_some()
-                && event == InputEvent::Hold(Key::Exit));
+        let modal_exit = matches!(
+            self.view.screen,
+            Screen::Cb | Screen::Mdc | Screen::RadioName
+        ) || (self.view.screen == Screen::Home
+            && self.selected_cb().is_some()
+            && event == InputEvent::Hold(Key::Exit));
         if matches!(
             event,
             InputEvent::Short(Key::Exit) | InputEvent::Hold(Key::Exit)
@@ -2077,6 +2134,10 @@ impl Controller {
         }
         if self.view.screen == Screen::Mdc {
             self.mdc_input(event);
+            return;
+        }
+        if self.view.screen == Screen::RadioName {
+            self.radio_name_input(event);
             return;
         }
         if self.view.screen == Screen::Home
@@ -2240,6 +2301,7 @@ impl Controller {
                 | Screen::Aprs
                 | Screen::Cb
                 | Screen::Mdc
+                | Screen::RadioName
         ) {
             self.view.ptt_slot = None;
             self.ptt_suppressed_until_release = true;
@@ -2478,22 +2540,14 @@ impl Controller {
                     let settings = self.view.mdc[slot];
                     self.view.mdc_draft = Some(match self.view.mdc_option {
                         0 => MdcDraft::Timing(settings.mode),
-                        1 => MdcDraft::UnitId(Editor::new(
+                        _ => MdcDraft::UnitId(Editor::new(
                             InputMode::Hex,
                             TextValue::from_hex(settings.id),
                         )),
-                        _ => {
-                            let mode = if self.view.language() == Language::Russian {
-                                InputMode::Russian
-                            } else {
-                                InputMode::English
-                            };
-                            MdcDraft::Alias(Editor::new(mode, self.view.mdc_alias[slot]))
-                        }
                     });
                 }
                 _ if up || down => {
-                    self.view.mdc_option = adjacent_index(self.view.mdc_option, 3, down)
+                    self.view.mdc_option = adjacent_index(self.view.mdc_option, 2, down)
                 }
                 _ => {}
             }
@@ -2513,7 +2567,6 @@ impl Controller {
                         }
                         self.view.mdc[slot].id = value.map(UnitId::get);
                     }
-                    MdcDraft::Alias(editor) => self.view.mdc_alias[slot] = editor.value(),
                 }
                 return;
             }
@@ -2522,13 +2575,34 @@ impl Controller {
         match &mut draft {
             MdcDraft::Timing(mode) if up || down => *mode = adjacent_index(*mode, 4, down),
             MdcDraft::Timing(_) => {}
-            MdcDraft::UnitId(editor) => self.mdc_text_input(event, editor),
-            MdcDraft::Alias(editor) => self.mdc_text_input(event, editor),
+            MdcDraft::UnitId(editor) => self.text_input(event, editor),
         }
         self.view.mdc_draft = Some(draft);
     }
 
-    fn mdc_text_input<const N: usize>(&mut self, event: InputEvent, editor: &mut Editor<N>) {
+    fn radio_name_input(&mut self, event: InputEvent) {
+        let Some(mut editor) = self.view.radio_name_draft.take() else {
+            self.view.screen = Screen::Menu;
+            return;
+        };
+        match event {
+            InputEvent::Short(Key::Menu) => {
+                self.view.radio_name = editor
+                    .value()
+                    .ascii_bytes()
+                    .and_then(RadioName::from_payload);
+                self.view.screen = Screen::Menu;
+            }
+            InputEvent::Short(Key::Exit) => self.view.screen = Screen::Menu,
+            InputEvent::Hold(Key::Exit) => self.view.screen = Screen::Home,
+            _ => {
+                self.text_input(event, &mut editor);
+                self.view.radio_name_draft = Some(editor);
+            }
+        }
+    }
+
+    fn text_input<const N: usize>(&mut self, event: InputEvent, editor: &mut Editor<N>) {
         match event {
             InputEvent::Short(Key::Star) => editor.delete(),
             InputEvent::Short(Key::Hash) => editor.cycle_language(),
@@ -3004,6 +3078,16 @@ impl Controller {
                     MenuItem::GpsEnable => self.open_setting(Setting::GpsEnable),
                     MenuItem::GpsBaud => self.open_setting(Setting::GpsBaud),
                     MenuItem::Dtmf => self.open_setting(Setting::Dtmf),
+                    MenuItem::NameRoger => self.open_setting(Setting::NameRoger),
+                    MenuItem::RadioName => {
+                        let text = self.view.radio_name.as_ref().map_or("", RadioName::as_str);
+                        self.view.radio_name_draft = Some(Editor::new(
+                            InputMode::RadioName,
+                            TextValue::from_ascii(text),
+                        ));
+                        self.name_last_digit_at = None;
+                        self.view.screen = Screen::RadioName;
+                    }
                     MenuItem::Gps => self.view.screen = Screen::Gps,
                     MenuItem::Aprs => self.view.screen = Screen::Aprs,
                     MenuItem::Mode => self.open_setting(Setting::Mode),
@@ -3105,7 +3189,8 @@ impl Controller {
             | Screen::Gps
             | Screen::Aprs
             | Screen::Cb
-            | Screen::Mdc => {}
+            | Screen::Mdc
+            | Screen::RadioName => {}
             Screen::ChannelDetails
             | Screen::Calibration
             | Screen::Keys
@@ -3665,9 +3750,7 @@ mod tests {
     }
 
     #[test]
-    fn mdc_modes_ids_and_local_aliases_commit_per_slot_and_drafts_block_ptt() {
-        extern crate std;
-        use std::string::ToString;
+    fn mdc_modes_and_ids_commit_per_slot_and_drafts_block_ptt() {
 
         let bitmap = catalog(&[0]);
         let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
@@ -3708,50 +3791,16 @@ mod tests {
         };
         assert_eq!(ui.view.mdc_for_slot(Slot::A), a);
 
-        press(&mut ui, Key::Down, &bitmap);
         press(&mut ui, Key::Menu, &bitmap);
-        digits(&mut ui, &[Key::Digit2, Key::Digit2], &bitmap);
-        press(&mut ui, Key::Hash, &bitmap);
-        digits(&mut ui, &[Key::Digit2, Key::Digit2], &bitmap);
         let ptt = ui.handle(InputEvent::PttB(true), &bitmap);
         assert_eq!(ptt.ptt_slot, None);
         assert!(!ptt.ptt_tx_requested);
         ui.handle(InputEvent::PttB(false), &bitmap);
-        press(&mut ui, Key::Menu, &bitmap);
-        let saved_alias = ui.view.mdc_alias_for_slot(Slot::A);
-        assert_eq!(
-            saved_alias.to_string(),
-            if Language::CURRENT == Language::Russian {
-                "БB"
-            } else {
-                "BБ"
-            }
-        );
-        assert_eq!(ui.view.mdc_for_slot(Slot::A), a);
-        press(&mut ui, Key::Menu, &bitmap);
-        for index in 0..MDC_ALIAS_LEN - 2 {
-            let key = if index % 2 == 0 {
-                Key::Digit2
-            } else {
-                Key::Digit3
-            };
-            press(&mut ui, key, &bitmap);
-        }
-        press(&mut ui, Key::Digit4, &bitmap);
-        assert_eq!(ui.view.notice, Notice::EntryFull);
-        let Some(MdcDraft::Alias(editor)) = ui.view.mdc_draft else {
-            panic!("alias draft");
-        };
-        let draft = editor.value().to_string();
-        assert_eq!(draft.chars().count(), MDC_ALIAS_LEN);
-        assert!(draft.len() > MDC_ALIAS_LEN);
         press(&mut ui, Key::Exit, &bitmap);
-        assert_eq!(ui.view.mdc_alias_for_slot(Slot::A), saved_alias);
 
         ui.select_slot(Slot::B);
         assert_eq!(ui.view.mdc_for_slot(Slot::A), a);
         assert_eq!(ui.view.mdc_for_slot(Slot::B), disabled);
-        assert!(ui.view.mdc_alias_for_slot(Slot::B).is_empty());
         choose_menu(&mut ui, MenuItem::Mdc, &bitmap);
         assert_eq!(ui.view.active_slot, Slot::B);
         press(&mut ui, Key::Menu, &bitmap);
@@ -3762,6 +3811,42 @@ mod tests {
             MdcSettings { mode: 1, id: None }
         );
         assert_eq!(ui.view.mdc_for_slot(Slot::A), a);
+    }
+
+    #[test]
+    fn radio_name_multitap_commits_global_text_and_uses_separate_roger_toggle() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        choose_menu(&mut ui, MenuItem::RadioName, &bitmap);
+        for (at, key) in [
+            (0, Key::Digit2),
+            (100, Key::Digit2),
+            (800, Key::Digit2),
+            (900, Key::Digit0),
+            (1000, Key::Digit9),
+            (1100, Key::Digit9),
+        ] {
+            ui.handle_at(InputEvent::Short(key), &bitmap, at);
+        }
+        assert!(!ui.handle(InputEvent::Ptt(true), &bitmap).ptt_tx_requested);
+        ui.handle(InputEvent::Ptt(false), &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        let (name, enabled) = ui.view.radio_name_settings();
+        assert_eq!(name.unwrap().as_str(), "BA X");
+        assert!(!enabled);
+        assert_eq!(ui.view.roger_name(), None);
+        ui.select_slot(Slot::B);
+        choose_menu(&mut ui, MenuItem::RadioName, &bitmap);
+        press(&mut ui, Key::Star, &bitmap);
+        press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(ui.view.radio_name, name);
+        ui.handle(InputEvent::Hold(Key::Exit), &bitmap);
+        choose_menu(&mut ui, MenuItem::NameRoger, &bitmap);
+        press(&mut ui, Key::Down, &bitmap);
+        assert_eq!(ui.view.roger_name(), None);
+        press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(ui.view.roger_name(), name);
+        assert_eq!(ui.view.radio_name_settings(), (name, true));
     }
 
     #[test]
@@ -4579,6 +4664,8 @@ mod tests {
                 Item(MenuItem::KeyLight),
                 Item(MenuItem::About),
                 Item(MenuItem::Dtmf),
+                Item(MenuItem::RadioName),
+                Item(MenuItem::NameRoger),
             ]
         );
     }

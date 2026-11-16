@@ -1,5 +1,6 @@
-//! A temporary, nonmodal report of symbols decoded by the radio backend.
+//! A temporary, nonmodal report of signaling decoded by the radio backend.
 use super::{color, fitting_scale, rect, text, Row, Slot};
+use uv98_signaling::radio_name::RadioName;
 
 pub(super) const COLUMNS: (u16, u16) = (17, 223);
 pub(super) const ROWS: (u16, u16) = (132, 190);
@@ -34,7 +35,25 @@ impl DtmfReception {
     }
 }
 
-pub(super) fn paint(row: u16, out: &mut Row<'_>, report: DtmfReception) {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NameReception {
+    slot: Slot,
+    name: RadioName,
+}
+
+impl NameReception {
+    pub const fn new(slot: Slot, name: RadioName) -> Self {
+        Self { slot, name }
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum Reception {
+    Dtmf(DtmfReception),
+    Name(NameReception),
+}
+
+pub(super) fn paint(row: u16, out: &mut Row<'_>, report: Reception) {
     if !(ROWS.0..ROWS.1).contains(&row) {
         return;
     }
@@ -48,19 +67,23 @@ pub(super) fn paint(row: u16, out: &mut Row<'_>, report: DtmfReception) {
         ROWS.1 - ROWS.0 - 4,
         color::PANEL,
     );
-    text(
-        row,
-        out,
-        26,
-        140,
-        1,
-        match report.slot {
-            Slot::A => "DTMF A",
-            Slot::B => "DTMF B",
-        },
-        color::ACCENT,
-    );
-    let value = report.text();
+    let (label, value) = match &report {
+        Reception::Dtmf(dtmf) => (
+            match dtmf.slot {
+                Slot::A => "DTMF A",
+                Slot::B => "DTMF B",
+            },
+            dtmf.text(),
+        ),
+        Reception::Name(name) => (
+            match name.slot {
+                Slot::A => "\x1f170 A",
+                Slot::B => "\x1f170 B",
+            },
+            name.name.as_str(),
+        ),
+    };
+    text(row, out, 26, 140, 1, label, color::ACCENT);
     let scale = fitting_scale(value, 2, 190);
     text(row, out, 26, 160, scale, value, color::TEXT);
 }

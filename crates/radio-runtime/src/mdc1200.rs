@@ -5,8 +5,9 @@
 //! https://github.com/OneOfEleven/uv-k5-firmware-custom/blob/main/driver/bk4819.c
 //! Hardware timing and deviation require bench validation.
 
-use crate::{Error, Fault, Io, Runtime, State, MIC_ADC};
+use crate::{radio_name, Error, Fault, Io, Runtime, State, MIC_ADC};
 use uv98_signaling::mdc1200::{Edge, Packet, PttId, UnitId};
+use uv98_signaling::radio_name::RadioName;
 use uv98_signaling::tones::oscillator_word;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -57,23 +58,51 @@ pub enum Action {
     /// Let the ordinary voice/DTMF path run.
     Idle,
     Start(PttId),
+    StartName(RadioName),
     Keep,
     RestoreVoice,
     StopTx,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Signal {
+    Mdc(PttId),
+    RadioName(RadioName),
+}
+
+impl Signal {
+    fn begin(self) -> bool {
+        matches!(
+            self,
+            Self::Mdc(PttId {
+                edge: Edge::Begin,
+                ..
+            })
+        )
+    }
+
+    fn timeout_ms(self) -> u32 {
+        match self {
+            Self::Mdc(id) => timeout_ms(id.edge),
+            // 3 preamble + 4 sync + 16 payload bytes + hardware CRC.
+            // Allow IRQ polling margin after the nominal FFSK duration.
+            Self::RadioName(_) => 220,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
     Initial,
-    Voice(Option<UnitId>),
+    Voice(Option<Signal>),
     Sending {
-        id: PttId,
+        signal: Signal,
         at: u32,
-        end: Option<UnitId>,
+        end: Option<Signal>,
     },
     Restoring {
         at: u32,
-        end: Option<UnitId>,
+        end: Option<Signal>,
     },
     Terminal,
 }
@@ -96,6 +125,19 @@ impl Session {
         config: Config,
         progress: Option<Progress>,
     ) -> Action {
+        self.step_with_name(now, input, config, None, progress)
+    }
+
+    /// Latch optional stock name at the first keyed voice step. It takes
+    /// the single end-burst slot, while a configured MDC begin still runs.
+    pub fn step_with_name(
+        &mut self,
+        now: u32,
+        input: Input,
+        config: Config,
+        name: Option<RadioName>,
+        progress: Option<Progress>,
+    ) -> Action {
         match input {
             Input::Inactive => {
                 self.phase = Phase::Initial;
@@ -106,13 +148,20 @@ impl Session {
         }
         match self.phase {
             Phase::Initial if input == Input::Voice => {
-                let end = config.end();
+                let end = name.map(Signal::RadioName).or_else(|| {
+                    config.end().map(|unit| {
+                        Signal::Mdc(PttId {
+                            unit,
+                            edge: Edge::End,
+                        })
+                    })
+                });
                 if let Some(unit) = config.begin() {
                     self.start(
-                        PttId {
+                        Signal::Mdc(PttId {
                             unit,
                             edge: Edge::Begin,
-                        },
+                        }),
                         now,
                         end,
                     )
@@ -122,19 +171,13 @@ impl Session {
                 }
             }
             Phase::Initial | Phase::Terminal => self.stop(),
-            Phase::Voice(Some(unit)) if input == Input::Released => self.start(
-                PttId {
-                    unit,
-                    edge: Edge::End,
-                },
-                now,
-                None,
-            ),
+            Phase::Voice(Some(signal)) if input == Input::Released => self.start(signal, now, None),
             Phase::Voice(_) => Action::Idle,
-            Phase::Sending { id, at, end } => {
-                let expected = match id.edge {
-                    Edge::Begin => Input::Voice,
-                    Edge::End => Input::Released,
+            Phase::Sending { signal, at, end } => {
+                let expected = if signal.begin() {
+                    Input::Voice
+                } else {
+                    Input::Released
                 };
                 if input != expected {
                     return self.stop();
@@ -144,11 +187,11 @@ impl Session {
                         Action::Keep
                     }
                     Some(Progress::OnAir { since, finished })
-                        if now.wrapping_sub(since) < timeout_ms(id.edge) =>
+                        if now.wrapping_sub(since) < signal.timeout_ms() =>
                     {
                         if !finished {
                             Action::Keep
-                        } else if id.edge == Edge::Begin {
+                        } else if signal.begin() {
                             self.phase = Phase::Restoring { at: now, end };
                             Action::RestoreVoice
                         } else {
@@ -174,9 +217,12 @@ impl Session {
         }
     }
 
-    fn start(&mut self, id: PttId, at: u32, end: Option<UnitId>) -> Action {
-        self.phase = Phase::Sending { id, at, end };
-        Action::Start(id)
+    fn start(&mut self, signal: Signal, at: u32, end: Option<Signal>) -> Action {
+        self.phase = Phase::Sending { signal, at, end };
+        match signal {
+            Signal::Mdc(id) => Action::Start(id),
+            Signal::RadioName(name) => Action::StartName(name),
+        }
     }
 
     fn stop(&mut self) -> Action {
@@ -229,45 +275,70 @@ enum ModemPhase {
     Restore(usize),
 }
 
+enum Burst {
+    Mdc { packet: Packet, edge: Edge },
+    RadioName(RadioName),
+}
+
 pub(super) struct Modem {
     words: [u16; SAVED_REGISTERS.len()],
-    packet: Packet,
-    edge: Edge,
+    burst: Burst,
     phase: ModemPhase,
 }
 
 impl Modem {
     fn control(&self) -> u16 {
-        let preamble = match self.edge {
-            Edge::Begin => 15,
-            Edge::End => 3,
-        };
-        (preamble << 4) | (1 << 3)
+        match self.burst {
+            Burst::Mdc {
+                edge: Edge::Begin, ..
+            } => 0xf8,
+            Burst::Mdc {
+                edge: Edge::End, ..
+            } => 0x38,
+            Burst::RadioName(_) => radio_name::CONTROL,
+        }
+    }
+
+    fn arm_control(&self) -> u16 {
+        FSK_TX
+            | self.control()
+            | match self.burst {
+                Burst::Mdc { .. } => 0,
+                Burst::RadioName(_) => radio_name::SCRAMBLE,
+            }
     }
 
     fn preparation(&self, index: usize) -> Option<(u8, u16)> {
         let [filters, link, _, mute, ..] = self.words;
         let control = self.control();
-        let setup = [
-            (0x30, link & !MIC_ADC),
-            (0x50, mute & !0x8000),
-            (0x51, 0),
-            (0x2b, filters | 0x0005),
-            (0x58, FSK_MODE),
-            (0x72, oscillator_word(1200)),
-            (0x70, 0x00e0),
-            (0x5d, Packet::length_word()),
-            (0x5a, 0),
-            (0x5b, 0),
-            (0x5c, 0x5625),
-            (0x59, FIFO_CLEAR | control),
-            (0x59, control),
-        ];
-        setup
-            .into_iter()
-            .chain(self.packet.fifo_words().map(|word| (0x5f, word)))
-            .chain([(0x02, 0), (0x3f, FSK_TX_FINISHED)])
-            .nth(index)
+        let common = [(0x30, link & !MIC_ADC), (0x50, mute & !0x8000), (0x51, 0)];
+        let tail = [(0x02, 0), (0x3f, FSK_TX_FINISHED)];
+        match self.burst {
+            Burst::Mdc { packet, .. } => common
+                .into_iter()
+                .chain([
+                    (0x2b, filters | 0x0005),
+                    (0x58, FSK_MODE),
+                    (0x72, oscillator_word(1200)),
+                    (0x70, 0x00e0),
+                    (0x5d, Packet::length_word()),
+                    (0x5a, 0),
+                    (0x5b, 0),
+                    (0x5c, 0x5625),
+                    (0x59, FIFO_CLEAR | control),
+                    (0x59, control),
+                ])
+                .chain(packet.fifo_words().map(|word| (0x5f, word)))
+                .chain(tail)
+                .nth(index),
+            Burst::RadioName(name) => common
+                .into_iter()
+                .chain(radio_name::PROFILE)
+                .chain([(0x59, 0x8000 | control), (0x59, control)])
+                .chain(name.fifo_words().map(|word| (0x5f, word)))
+                .chain(tail)
+                .nth(index),
+        }
     }
 
     fn restoration(&self, terminal: bool) -> [(u8, u16); RESTORE_WRITES] {
@@ -296,13 +367,24 @@ impl<I: Io> Runtime<I> {
     /// Stage an FFSK burst for the current authorized TX without touching
     /// hardware. The caller must requalify PTT and TOT before each step.
     pub fn start_mdc(&mut self, id: PttId) -> Result<(), Fault<I::Error>> {
+        self.start_fsk(Burst::Mdc {
+            packet: Packet::encode(id),
+            edge: id.edge,
+        })
+    }
+
+    /// A stock-name tail can only use the already-keyed calibrated TX route.
+    pub fn start_radio_name(&mut self, name: RadioName) -> Result<(), Fault<I::Error>> {
+        self.start_fsk(Burst::RadioName(name))
+    }
+
+    fn start_fsk(&mut self, burst: Burst) -> Result<(), Fault<I::Error>> {
         if self.state != State::Transmitting || self.mdc_modem.is_some() {
             return Err(self.reject(Error::State));
         }
         self.mdc_modem = Some(Modem {
             words: [0; SAVED_REGISTERS.len()],
-            packet: Packet::encode(id),
-            edge: id.edge,
+            burst,
             phase: ModemPhase::Capture(0),
         });
         Ok(())
@@ -332,7 +414,13 @@ impl<I: Io> Runtime<I> {
         };
         if self.state != State::Transmitting
             || !matches!(modem.phase, ModemPhase::Finished(_))
-            || modem.edge != Edge::Begin
+            || !matches!(
+                modem.burst,
+                Burst::Mdc {
+                    edge: Edge::Begin,
+                    ..
+                }
+            )
         {
             return Err(self.reject(Error::State));
         }
@@ -378,8 +466,8 @@ impl<I: Io> Runtime<I> {
                 }
             }
             ModemPhase::Arm => {
-                let control = self.mdc_modem.as_ref().unwrap().control();
-                self.write(0x59, FSK_TX | control)?;
+                let control = self.mdc_modem.as_ref().unwrap().arm_control();
+                self.write(0x59, control)?;
                 ModemPhase::OnAir {
                     since: now,
                     acknowledge_irq: false,

@@ -14,6 +14,7 @@ pub mod lighting;
 pub mod mdc1200;
 pub mod policy;
 pub mod ptt;
+mod radio_name;
 pub mod scan;
 pub mod scope;
 pub mod shortwave;
@@ -121,6 +122,12 @@ pub struct Audio {
     pub tone_required: bool,
 }
 
+#[derive(Default)]
+struct SignalingInterrupts {
+    dtmf: Option<dtmf_rx::Detected>,
+    name_crc: Option<bool>,
+}
+
 pub struct Runtime<I: Io> {
     io: I,
     state: State,
@@ -143,6 +150,7 @@ pub struct Runtime<I: Io> {
     backlight_state: Option<(bool, bool)>,
     signaling_baseline: Option<(u16, u16)>,
     dtmf_rx: dtmf_rx::Receiver,
+    name_rx: radio_name::Receiver,
     mdc_modem: Option<mdc1200::Modem>,
 }
 
@@ -170,6 +178,7 @@ impl<I: Io> Runtime<I> {
             backlight_state: None,
             signaling_baseline: None,
             dtmf_rx: dtmf_rx::Receiver::default(),
+            name_rx: radio_name::Receiver::default(),
             mdc_modem: None,
         }
     }
@@ -275,6 +284,9 @@ impl<I: Io> Runtime<I> {
         }
         if self.cleanup_mdc() {
             // Bit7 groups independent modulation cleanup requests.
+            errors |= 1 << 7;
+        }
+        if self.restore_name_rx().is_err() {
             errors |= 1 << 7;
         }
         if self.restore_dtmf_rx().is_err() {
@@ -423,7 +435,7 @@ impl<I: Io> Runtime<I> {
             return Err(self.reject(Error::State));
         }
         self.advance_clock(now)?;
-        self.stop_dtmf_rx()?;
+        self.stop_rx_signaling()?;
         self.state = State::Configuring;
         self.target = target;
         self.plan = Some(plan);
@@ -622,6 +634,12 @@ impl<I: Io> Runtime<I> {
             tx_timed_out: false,
         })
     }
+    fn stop_rx_signaling(&mut self) -> Result<(), Fault<I::Error>> {
+        // Name RX is armed after DTMF and preserves its live IRQ mask.
+        self.stop_name_rx()?;
+        self.stop_dtmf_rx()
+    }
+
     /// tone_detected is an independently observed decoder state. Unknown never
     /// opens a tone-gated channel; explicit monitor bypasses both SQL and tones.
     pub fn signal(
@@ -630,33 +648,45 @@ impl<I: Io> Runtime<I> {
         tone_detected: Option<bool>,
     ) -> Result<Signal, Fault<I::Error>> {
         if self.state == State::Receiving {
-            self.stop_dtmf_rx()?;
+            self.stop_rx_signaling()?;
         }
-        let (status, _) = self.receive_status(false)?;
+        let (status, _) = self.receive_status(false, false)?;
         self.signal_at(audio, tone_detected, status)
     }
+
     fn receive_status(
         &mut self,
         capture_dtmf: bool,
-    ) -> Result<(u16, Option<dtmf_rx::Detected>), Fault<I::Error>> {
+        capture_name: bool,
+    ) -> Result<(u16, SignalingInterrupts), Fault<I::Error>> {
         if self.state != State::Receiving {
             return Err(self.reject(Error::State));
         }
         let mut status = self.read(0x0c)?;
-        let mut detected = None;
+        let mut detected = SignalingInterrupts::default();
         if status & 1 != 0 {
-            if !capture_dtmf {
-                // Stock acknowledgement for the ordinary analog RX path.
-                let _ = self.read(0x0b)?;
-            }
+            // Stock samples the FSK CRC result before acknowledgement.
+            let flags = if capture_name || !capture_dtmf {
+                self.read(0x0b)?
+            } else {
+                0
+            };
             self.write(0x02, 0)?;
-            if capture_dtmf && self.read(0x02)? & dtmf_rx::DTMF_IRQ != 0 {
+            let causes = if capture_dtmf || capture_name {
+                self.read(0x02)?
+            } else {
+                0
+            };
+            if capture_dtmf && causes & dtmf_rx::DTMF_IRQ != 0 {
                 // REG0B can retain the last code across unrelated IRQs.
                 // Read its payload only for the documented REG02 cause.
-                detected = Some(dtmf_rx::Detected {
+                detected.dtmf = Some(dtmf_rx::Detected {
                     code: ((self.read(0x0b)? >> 8) & 0xf) as u8,
                     carrier_before_ack: status & 2 != 0,
                 });
+            }
+            if capture_name && causes & radio_name::RX_FINISHED_IRQ != 0 {
+                detected.name_crc = Some(flags & radio_name::CRC_PASS != 0);
             }
             // Still-pending IRQs cannot qualify the subaudible tone gate.
             status = self.read(0x0c)?;
@@ -668,7 +698,7 @@ impl<I: Io> Runtime<I> {
     /// than 1ms after the preceding observation. No catch-up burst. Stock's
     /// gain hold counts calls, not wall-clock milliseconds.
     pub fn observe(&mut self, audio: Audio, raw_tone: u16) -> Result<Signal, Fault<I::Error>> {
-        self.observe_inner(audio, raw_tone, false)
+        self.observe_inner(audio, raw_tone, false, false)
     }
 
     /// Observe ordinary primary BK4819 FM receive with DTMF digit capture.
@@ -677,7 +707,7 @@ impl<I: Io> Runtime<I> {
     /// capture for future samples. Preparation runs after the audio update.
     /// Call `observe` for modes where the decoder should be inactive.
     pub fn observe_dtmf(&mut self, audio: Audio, raw_tone: u16) -> Result<Signal, Fault<I::Error>> {
-        self.observe_inner(audio, raw_tone, audio.modulation == Modulation::Fm)
+        self.observe_inner(audio, raw_tone, audio.modulation == Modulation::Fm, false)
     }
 
     fn observe_inner(
@@ -685,16 +715,21 @@ impl<I: Io> Runtime<I> {
         mut audio: Audio,
         raw_tone: u16,
         dtmf: bool,
+        name: bool,
     ) -> Result<Signal, Fault<I::Error>> {
         if self.state != State::Receiving {
             return Err(self.reject(Error::State));
+        }
+        if !name {
+            self.stop_name_rx()?;
         }
         if !dtmf {
             self.stop_dtmf_rx()?;
         }
         let capture = dtmf && self.dtmf_rx.armed();
+        let capture_name = name && self.name_rx.armed();
         let previously_open = self.audio_open;
-        let (status, detected) = self.receive_status(capture)?;
+        let (status, detected) = self.receive_status(capture, capture_name)?;
         audio.tone_required = raw_tone != 0;
         let mut result = self.signal_at(
             audio,
@@ -706,7 +741,7 @@ impl<I: Io> Runtime<I> {
                 self.prepare_dtmf_rx()?;
             } else if let Some(now) = self.last_now {
                 self.dtmf_rx.text.expire(now);
-                if let Some(symbol) = detected {
+                if let Some(symbol) = detected.dtmf {
                     // The last digit may arrive just before carrier loss.
                     // Require a fresh carrier sample even if audio was open.
                     let qualified = if status & 2 != 0 {
@@ -719,6 +754,11 @@ impl<I: Io> Runtime<I> {
                     }
                 }
             }
+        }
+        if let Some(crc_ok) = detected.name_crc {
+            self.finish_name_rx(crc_ok)?;
+        } else if name && !capture_name && self.dtmf_rx.armed() {
+            self.prepare_name_rx()?;
         }
         if audio.modulation == Modulation::Am && result.audio_open {
             // Count elapsed time during the hold even if LCD or NOR work

@@ -13,14 +13,12 @@ use uv98_handheld_app::{App, InputSample, SpectrumSnapshot, State, Update};
 use uv98_handheld_ui::cb::CbGrid;
 use uv98_handheld_ui::controller::{
     menu_entries, menu_location, LightMode, MdcDraft, MenuEntry, MenuGroup, MenuItem, Mode, Notice,
-    Request, ScanState, Screen, Setting, ShortcutAction, SideAction, Slot, MDC_ALIAS_LEN,
-    SHORTCUT_ACTIONS,
+    Request, ScanState, Screen, Setting, ShortcutAction, SideAction, Slot, SHORTCUT_ACTIONS,
 };
 use uv98_handheld_ui::locale::Language;
 use uv98_handheld_ui::render::{
     Modulation, RadioRoute, RadioState, RadioView, SpectrumError, SpectrumState, HEIGHT, WIDTH,
 };
-use uv98_handheld_ui::text_entry::InputMode;
 use uv98_keys::{Key, Timing};
 use uv98_nor_read::Bus;
 
@@ -317,7 +315,7 @@ fn tap_request(app: &mut SimApp, now: &mut u32, key: Key) -> Option<Request> {
                 || view.shortwave_scan
                 || view.shortwave_entry.is_some()
                 || view.shortwave_band_draft.is_some()))
-        || matches!(view.screen, Screen::Cb | Screen::Mdc);
+        || matches!(view.screen, Screen::Cb | Screen::Mdc | Screen::RadioName);
     for (bits, down) in [
         (0, false),
         (0, false),
@@ -622,39 +620,6 @@ fn capture_r38_public(
     tap(app, now, Key::Menu);
     assert_eq!(app.status().view.mdc_for_slot(Slot::B).id, Some(0x01a2));
 
-    tap(app, now, Key::Down);
-    tap(app, now, Key::Menu);
-    let Some(MdcDraft::Alias(editor)) = app.status().view.mdc_draft else {
-        panic!("local alias editor");
-    };
-    for _ in editor.value().to_string().chars() {
-        tap(app, now, Key::Star);
-    }
-    if editor.mode() != InputMode::Russian {
-        tap(app, now, Key::Hash);
-    }
-    digits(app, now, "6277749999");
-    let alias_ru = capture(
-        app,
-        panel,
-        output,
-        &format!("{code}-mdc-alias-ru.png"),
-        modeled_delay_ms,
-    )?;
-    tap(app, now, Key::Hash);
-    digits(app, now, "02");
-    tap(app, now, Key::Up);
-    digits(app, now, "22");
-    let alias_en = capture(
-        app,
-        panel,
-        output,
-        &format!("{code}-mdc-alias-en.png"),
-        modeled_delay_ms,
-    )?;
-    tap(app, now, Key::Menu);
-    let saved = app.status().view.mdc_alias_for_slot(Slot::B);
-    assert_eq!(saved.to_string(), "РАЦИЯ AB");
     let mdc = capture(
         app,
         panel,
@@ -662,22 +627,51 @@ fn capture_r38_public(
         &format!("{code}-mdc.png"),
         modeled_delay_ms,
     )?;
-
+    home(app, now);
+    menu(app, now, MenuItem::RadioName);
+    if let Some(editor) = app.status().view.radio_name_draft {
+        for _ in editor.value().to_string().chars() {
+            tap(app, now, Key::Star);
+        }
+    }
+    digits(app, now, "22099");
+    let name_editor = capture(
+        app,
+        panel,
+        output,
+        &format!("{code}-radio-name.png"),
+        modeled_delay_ms,
+    )?;
     tap(app, now, Key::Menu);
-    digits(app, now, "34567");
-    assert_eq!(app.status().view.notice, Notice::EntryFull);
-    let Some(MdcDraft::Alias(editor)) = app.status().view.mdc_draft else {
-        panic!("local alias draft");
-    };
-    let draft = editor.value().to_string();
-    assert_eq!(draft.chars().count(), MDC_ALIAS_LEN);
-    assert!(draft.len() > MDC_ALIAS_LEN); // UTF-8 bytes are distinct from character capacity.
-    tap(app, now, Key::Exit);
-    assert_eq!(app.status().view.mdc_alias_for_slot(Slot::B), saved);
-    assert!(app.status().view.mdc_alias_for_slot(Slot::A).is_empty());
+    let name = app.status().view.radio_name.unwrap();
+    assert_eq!(name.as_str(), "B X");
+    home(app, now);
+    menu(app, now, MenuItem::NameRoger);
+    if !app.status().view.name_roger_enabled {
+        tap(app, now, Key::Down);
+    }
+    tap(app, now, Key::Menu);
+    assert_eq!(app.status().view.roger_name(), Some(name));
     home(app, now);
     app.select_slot(Slot::A).unwrap();
-    Ok([cb_grid, tx_a, mdc, alias_ru, alias_en])
+    assert_eq!(app.status().view.roger_name(), Some(name));
+
+    let before_name = app.radio_view();
+    app.set_radio_view(RadioView {
+        state: RadioState::Receiving,
+        radio_name: Some(uv98_handheld_ui::render::NameReception::new(Slot::A, name)),
+        ..before_name
+    })
+    .unwrap();
+    let name_popup = capture(
+        app,
+        panel,
+        output,
+        &format!("{code}-radio-name-rx.png"),
+        modeled_delay_ms,
+    )?;
+    app.set_radio_view(before_name).unwrap();
+    Ok([cb_grid, tx_a, mdc, name_editor, name_popup])
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -1289,6 +1283,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         state: RadioState::Receiving,
         tx_slot: None,
         dtmf: None,
+        radio_name: None,
         rx_slot: Some(app.status().view.active_slot),
         rssi: Some(245),
         meter_floor: 0,
@@ -2837,7 +2832,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "localization":{"languages":["ru","en","de"],"default":"ru","firmware_runtime_setting":false,"simulator_locale_override":true,
             "gallery_uses_empty_channel_catalog":true,"gallery_rf_values_are_simulated":true,
             "files_per_language":["home","menu","spectrum","hf","tx-b","battery-low",
-                "cb-grid","cb-tx-a","mdc","mdc-alias-ru","mdc-alias-en"]},
+                "cb-grid","cb-tx-a","mdc","radio-name","radio-name-rx"]},
         "reads":memory.reads,"render_work":performance,"frame_count":frame_count,"frames":frames,
         "acceptance":["first/adjacent active channels", "channel list choice", "explicit numeric channel confirm",
             "invalid channel does not navigate", "cancel does not commit", "VFO entry commits only on MENU", "six-digit MHz entry pads right",
@@ -2856,7 +2851,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "long digit opens the CB grid and the saved A context is recovered after CB",
             "simulated upper TX lights a red A frame while focus remains B",
             "MDC timing and hexadecimal ID are committed only to the chosen slot",
-            "local alias mixes Cyrillic and Latin within bounded character capacity; cancel preserves saved text"],
+            "radio-name editor sends Latin multi-tap text as the global end-of-PTT name; RX popup shows that name"],
         "limitations":["synthetic host input/timestamps, not GPIO or MCU execution",
             "panel interpreter checks protocol/window bounds, not physical SPI timing/orientation/colors",
             "radio statuses and RSSI are explicitly injected mock data, not physical tuning/reception/transmission evidence",

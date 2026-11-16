@@ -1,6 +1,6 @@
 extern crate std;
 use super::*;
-use std::vec::Vec;
+use std::{collections::VecDeque, vec::Vec};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Event {
@@ -20,6 +20,7 @@ struct Mock {
     mismatch: Option<u8>,
     ack_clears_irq: bool,
     pending_irq_cause: u16,
+    fifo: VecDeque<u16>,
     drop_carrier_on_ack: bool,
     muted: bool,
     hf: bool,
@@ -36,6 +37,7 @@ impl Mock {
             mismatch: None,
             ack_clears_irq: false,
             pending_irq_cause: 0,
+            fifo: VecDeque::new(),
             drop_carrier_on_ack: false,
             muted: true,
             hf: false,
@@ -59,6 +61,9 @@ impl Io for Mock {
     type Error = &'static str;
     fn read(&mut self, r: u8) -> Result<u16, Self::Error> {
         self.event(Event::Read(r))?;
+        if r == 0x5f {
+            return self.fifo.pop_front().ok_or("RX FIFO underflow");
+        }
         Ok(self.words[r as usize] ^ u16::from(self.mismatch == Some(r)))
     }
     fn write(&mut self, r: u8, v: u16) -> Result<(), Self::Error> {
@@ -187,6 +192,68 @@ fn dtmf_ready() -> (Runtime<Mock>, u32) {
     assert_eq!(r.io.words[0x24], 0x8b7e);
     assert_eq!(r.io.words[0x3f], 0x0840);
     (r, now)
+}
+
+#[test]
+fn stock_name_rx_uses_one_finished_crc_packet_and_keeps_dtmf_live() {
+    use uv98_handheld_ui::controller::Slot;
+
+    let (mut radio, mut now) = dtmf_ready();
+    let original_mode = radio.io.words[0x58];
+    let original_sync = radio.io.words[0x5a];
+    radio.io.words[0x0c] = 2;
+    while !radio.name_rx.armed() {
+        now += 1;
+        radio.tick(now, false).unwrap();
+        radio
+            .observe_signaling_for_slot(audio(), 0, Slot::B)
+            .unwrap();
+        assert!(now - radio.started < 1000);
+    }
+    assert_eq!(radio.io.words[0x3f] & 0x2800, 0x2800);
+    assert_eq!(radio.io.words[0x59], 0x3028);
+    radio.io.ack_clears_irq = true;
+    radio.io.words[0x0c] = 3;
+    radio.io.words[0x0b] = 0x0110; // Valid-looking stale CRC plus DTMF 1.
+    radio.io.pending_irq_cause = dtmf_rx::DTMF_IRQ;
+    radio
+        .observe_signaling_for_slot(audio(), 0, Slot::B)
+        .unwrap();
+    assert_eq!(radio.received_dtmf(now), "1");
+    assert_eq!(radio.received_radio_name(now), None);
+
+    radio.io.words[0x0c] = 3;
+    radio.io.words[0x0b] = 0; // FSK finished, but invalid CRC.
+    radio.io.pending_irq_cause = radio_name::RX_FINISHED_IRQ;
+    radio
+        .observe_signaling_for_slot(audio(), 0, Slot::B)
+        .unwrap();
+    assert_eq!(radio.received_radio_name(now), None);
+    assert_eq!(radio.io.words[0x59], 0x3028);
+
+    radio.io.words[0x0c] = 1; // Carrier can already have ended.
+    radio.io.words[0x0b] = radio_name::CRC_PASS;
+    radio.io.pending_irq_cause = radio_name::RX_FINISHED_IRQ;
+    radio.io.fifo = VecDeque::from([
+        0x415a, 0x2051, 0x5820, 0x5230, 0x4142, 0x43ff, 0xffff, 0xffff,
+    ]);
+    radio
+        .observe_signaling_for_slot(audio(), 0, Slot::B)
+        .unwrap();
+    let (slot, name) = radio.received_radio_name(now).unwrap();
+    assert_eq!(slot, Slot::B);
+    assert_eq!(name.as_str(), "AZ QX R0ABC");
+    assert!(radio.io.fifo.is_empty());
+    assert_eq!(radio.received_radio_name(now + 2999), Some((Slot::B, name)));
+    assert_eq!(radio.received_radio_name(now + 3000), None);
+
+    radio
+        .observe_signaling_for_slot(audio(), 0, Slot::A)
+        .unwrap();
+    assert_eq!(radio.io.words[0x3f] & 0x2000, 0);
+    assert_eq!(radio.io.words[0x58], original_mode);
+    assert_eq!(radio.io.words[0x5a], original_sync);
+    assert_eq!(radio.received_radio_name(now), None);
 }
 
 #[test]

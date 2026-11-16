@@ -1090,6 +1090,7 @@ fn main() -> ! {
                     signal_tail && within_limit,
                     dtmf_key,
                     signaling::mdc_config(view, tx_slot.unwrap_or(view.active_slot)),
+                    view.roger_name(),
                 ),
                 0xE065,
             )
@@ -2294,7 +2295,7 @@ fn main() -> ! {
                         let slot = watch_receive
                             .map(|(slot, _)| slot)
                             .unwrap_or(view.active_slot);
-                        radio.observe_dtmf_for_slot(
+                        radio.observe_signaling_for_slot(
                             p.audio,
                             p.receive.map(|r| r.tone).unwrap_or(0),
                             slot,
@@ -2748,6 +2749,9 @@ fn main() -> ! {
                 report.dtmf = radio.received_dtmf_slot().and_then(|slot| {
                     uv98_handheld_ui::render::DtmfReception::new(slot, radio.received_dtmf(now))
                 });
+                report.radio_name = radio
+                    .received_radio_name(now)
+                    .map(|(slot, name)| uv98_handheld_ui::render::NameReception::new(slot, name));
             }
             if watch_receive.is_some() && watch_rx.is_none() {
                 report.rssi = None;

@@ -60,11 +60,31 @@ impl<I: Io> Runtime<I> {
         raw_tone: u16,
         slot: uv98_handheld_ui::controller::Slot,
     ) -> Result<crate::Signal, Fault<I::Error>> {
+        self.bind_signaling_slot(slot)?;
+        self.observe_dtmf(audio, raw_tone)
+    }
+
+    /// Capture DTMF and stock name packets on the same primary FM receiver.
+    pub fn observe_signaling_for_slot(
+        &mut self,
+        audio: crate::Audio,
+        raw_tone: u16,
+        slot: uv98_handheld_ui::controller::Slot,
+    ) -> Result<crate::Signal, Fault<I::Error>> {
+        self.bind_signaling_slot(slot)?;
+        let fm = audio.modulation == crate::Modulation::Fm;
+        self.observe_inner(audio, raw_tone, fm, fm)
+    }
+
+    fn bind_signaling_slot(
+        &mut self,
+        slot: uv98_handheld_ui::controller::Slot,
+    ) -> Result<(), Fault<I::Error>> {
         if self.dtmf_rx.slot != Some(slot) {
-            self.stop_dtmf_rx()?;
+            self.stop_rx_signaling()?;
             self.dtmf_rx.slot = Some(slot);
         }
-        self.observe_dtmf(audio, raw_tone)
+        Ok(())
     }
 
     pub fn received_dtmf_slot(&self) -> Option<uv98_handheld_ui::controller::Slot> {

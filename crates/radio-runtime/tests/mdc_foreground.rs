@@ -4,7 +4,7 @@ mod signaling;
 use signaling::{mdc_config, TransmitTones};
 use std::{cell::RefCell, convert::Infallible, rc::Rc};
 use uv98_calibration::Calibration;
-use uv98_handheld_ui::controller::{Controller, MdcSettings, Slot};
+use uv98_handheld_ui::controller::{Controller, MdcSettings, RadioName, Slot};
 use uv98_radio_runtime::{
     mdc1200::{Config, Progress},
     Io, Poll, Runtime, State, TX_TIMEOUT_MS,
@@ -115,6 +115,7 @@ struct Harness {
     bus: Bus,
     foreground: TransmitTones,
     config: Config,
+    name: Option<RadioName>,
     now: u32,
 }
 
@@ -126,6 +127,7 @@ impl Harness {
             bus,
             foreground: TransmitTones::new(),
             config: config(mode),
+            name: None,
             now: 0,
         };
         let cal = Calibration::parse(include_bytes!(
@@ -177,6 +179,7 @@ impl Harness {
                 allow_tail,
                 key,
                 self.config,
+                self.name,
             )
             .unwrap();
         self.radio.tick(self.now, keep).unwrap()
@@ -338,4 +341,75 @@ fn mdc_off_releases_active_dtmf_without_an_end_burst() {
         .any(|&(reg, word)| reg == 0x30 && word & MIC_ADC != 0));
     assert_eq!(h.bus.fifo_words(), 0);
     h.assert_off();
+}
+
+#[test]
+fn stock_name_tail_sends_the_original_fifo_words_once_after_clean_release() {
+    let name = RadioName::from_payload(*b"AZ QX R0ABC\xFF\xFF\xFF\xFF\xFF").unwrap();
+    // Numeric PTT-ID end is configured too. The name takes that end slot.
+    let mut h = Harness::keyed(2);
+    h.name = Some(name);
+    h.tick(1, true, false, None);
+    assert_eq!(h.bus.fifo_words(), 0);
+    assert_eq!(h.bus.reg(0x30) & MIC_ADC, MIC_ADC);
+
+    // The accepted name belongs to this voice session, even if UI changes.
+    h.name = None;
+    h.tick(1, false, true, None);
+    h.advance_until_air(false, true);
+    for (reg, word) in [
+        (0x58, 0x37c3),
+        (0x59, 0x2828),
+        (0x5a, 0x85cf),
+        (0x5b, 0xab45),
+        (0x5c, 0x5665),
+        (0x5d, 0x0f00),
+        (0x70, 0x00e0),
+        (0x72, 0x3065),
+    ] {
+        assert_eq!(h.bus.reg(reg), word, "register {reg:#x}");
+    }
+    assert_eq!(h.bus.reg(0x30) & MIC_ADC, 0);
+    let words: Vec<_> = h
+        .bus
+        .0
+        .borrow()
+        .writes
+        .iter()
+        .filter_map(|&(reg, word)| (reg == 0x5f).then_some(word))
+        .collect();
+    assert_eq!(
+        words,
+        [0x415a, 0x2051, 0x5820, 0x5230, 0x4142, 0x43ff, 0xffff, 0xffff]
+    );
+
+    assert!(h.finish_air(167, false, true).tx_ended);
+    h.assert_off();
+    h.tick(1, false, true, None);
+    assert_eq!(h.bus.fifo_words(), 8);
+}
+
+#[test]
+fn name_tail_aborts_on_renewed_ptt_or_missing_completion() {
+    for (elapsed, held, tail) in [(1, true, false), (220, false, true)] {
+        let mut h = Harness::keyed(0);
+        h.name = RadioName::from_payload(*b"QRST UVWXYZ 0123");
+        h.tick(1, true, false, None);
+        h.tick(1, false, true, None);
+        h.advance_until_air(false, true);
+        assert!(h.tick(elapsed, held, tail, None).tx_ended);
+        h.assert_off();
+    }
+}
+
+#[test]
+fn name_tail_requires_clean_release_and_remaining_tot() {
+    for elapsed in [1, TX_TIMEOUT_MS] {
+        let mut h = Harness::keyed(0);
+        h.name = RadioName::from_payload(*b"QRST UVWXYZ 0123");
+        h.tick(1, true, false, None);
+        assert!(h.tick(elapsed, false, false, None).tx_ended);
+        h.assert_off();
+        assert_eq!(h.bus.fifo_words(), 0);
+    }
 }

@@ -1,4 +1,4 @@
-//! Bounded keypad editor for volatile text and four-digit hexadecimal fields.
+//! Bounded multi-tap and hexadecimal keypad editor.
 
 use core::fmt::{self, Write};
 
@@ -14,6 +14,25 @@ impl<const N: usize> TextValue<N> {
             chars: [' '; N],
             len: 0,
         }
+    }
+
+    pub fn from_ascii(value: &str) -> Self {
+        let mut text = Self::empty();
+        for byte in value.bytes().take(N) {
+            text.append(char::from(byte));
+        }
+        text
+    }
+
+    pub fn ascii_bytes(self) -> Option<[u8; N]> {
+        let mut bytes = [0; N];
+        for (byte, &ch) in bytes.iter_mut().zip(&self.chars[..self.len]) {
+            if !ch.is_ascii() {
+                return None;
+            }
+            *byte = ch as u8;
+        }
+        Some(bytes)
     }
 
     pub const fn is_empty(self) -> bool {
@@ -73,6 +92,7 @@ pub enum InputMode {
     English,
     Russian,
     Hex,
+    RadioName,
 }
 
 impl InputMode {
@@ -80,13 +100,13 @@ impl InputMode {
         match self {
             Self::English => Self::Russian,
             Self::Russian => Self::English,
-            Self::Hex => Self::Hex,
+            Self::Hex | Self::RadioName => self,
         }
     }
 
     fn choices(self, digit: u8) -> &'static str {
         let alphabet = match self {
-            Self::English => &[
+            Self::English | Self::RadioName => &[
                 " 0", ".,-_/1", "ABC2", "DEF3", "GHI4", "JKL5", "MNO6", "PQRS7", "TUV8", "WXYZ9",
             ],
             Self::Russian => &[

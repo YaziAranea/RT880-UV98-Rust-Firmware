@@ -434,6 +434,15 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         }
         Ok(())
     }
+    pub fn apply_radio_name_settings(
+        &mut self,
+        name: Option<uv98_handheld_ui::controller::RadioName>,
+        enabled: bool,
+    ) {
+        self.controller.apply_radio_name_settings(name, enabled);
+        self.status.view = self.controller.view();
+    }
+
     pub fn set_aprs_identity(&mut self, call: [u8; 6], ssid: u8) {
         self.controller.set_aprs_identity(call, ssid);
         self.status.view = self.controller.view();
@@ -1041,7 +1050,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
                 }
             }
         }
-        let change = self.controller.handle(event, &self.bitmap);
+        let change = self.controller.handle_at(event, &self.bitmap, now_ms);
         self.apply_change(change, pressed)
     }
 
