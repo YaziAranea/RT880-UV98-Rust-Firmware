@@ -431,8 +431,16 @@ fn foreground_release_batches_name_before_deadline_with_a_tone_qualified_peer() 
         .iter()
         .position(|&tone| tone == 770)
         .unwrap() as u8;
-    let keyed = ptt::Input { upper: true, lower: false, clean: true };
-    let released = ptt::Input { upper: false, lower: false, clean: true };
+    let keyed = ptt::Input {
+        upper: true,
+        lower: false,
+        clean: true,
+    };
+    let released = ptt::Input {
+        upper: false,
+        lower: false,
+        clean: true,
+    };
     let profile = policy::profile(
         keyed_view,
         None,
@@ -472,21 +480,21 @@ fn foreground_release_batches_name_before_deadline_with_a_tone_qualified_peer() 
             let same_source = guard.observe(released, false);
             let allow_tail = permit.tail_configuration_valid_target(tail_view, keyed_view, profile)
                 && tx_policy::hold_within_limit(released_at, at);
-            Sample { now: at, voice_held: same_source, allow_tail }
+            Sample {
+                now: at,
+                voice_held: same_source,
+                allow_tail,
+            }
         };
         let first = observe(at);
-        let keep = h.foreground.step_pass(
-            &mut h.radio,
-            first,
-            None,
-            h.config,
-            h.name,
-            || {
+        let keep = h
+            .foreground
+            .step_pass(&mut h.radio, first, None, h.config, h.name, || {
                 // A fresh guard and one operation take 1ms in this model.
                 at += 1;
                 Some(observe(at))
-            },
-        ).unwrap();
+            })
+            .unwrap();
         assert!(keep);
         h.now = at;
         h.radio.tick(h.now, keep).unwrap();
@@ -519,19 +527,19 @@ fn fresh_guard_inside_a_name_slice_cancels_before_modem_arm() {
             voice_held: false,
             allow_tail: h.bus.fifo_words() < 8,
         };
-        let keep = h.foreground.step_pass(
-            &mut h.radio,
-            first,
-            None,
-            h.config,
-            h.name,
-            || {
+        let keep = h
+            .foreground
+            .step_pass(&mut h.radio, first, None, h.config, h.name, || {
                 h.now += 1;
                 let allow_tail = h.bus.fifo_words() < 8;
                 failed_guard |= !allow_tail;
-                Some(Sample { now: h.now, voice_held: false, allow_tail })
-            },
-        ).unwrap();
+                Some(Sample {
+                    now: h.now,
+                    voice_held: false,
+                    allow_tail,
+                })
+            })
+            .unwrap();
         let result = h.radio.tick(h.now, keep).unwrap();
         if result.tx_ended {
             break;
@@ -539,7 +547,12 @@ fn fresh_guard_inside_a_name_slice_cancels_before_modem_arm() {
     }
     assert!(failed_guard);
     assert_eq!(h.bus.fifo_words(), 8);
-    assert!(!h.bus.0.borrow().writes.iter()
+    assert!(!h
+        .bus
+        .0
+        .borrow()
+        .writes
+        .iter()
         .any(|&(reg, value)| reg == 0x59 && value & 0x0800 != 0));
     h.assert_off();
 }

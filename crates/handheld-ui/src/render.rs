@@ -1727,12 +1727,12 @@ fn radio_name_page(row: u16, out: &mut Row<'_>, view: &View) {
 
 /// One user-visible build identity for the header and the About page.
 #[cfg(not(feature = "pa5-audio"))]
-pub const VERSION: &str = "0.1.8-r41";
+pub const VERSION: &str = "0.1.8-r42";
 #[cfg(feature = "pa5-audio")]
-pub const VERSION: &str = "R41-PA5";
+pub const VERSION: &str = "R42-PA5";
 /// Header has a fixed 42 px slot; About shows the full string.
 #[cfg(not(feature = "pa5-audio"))]
-pub const VERSION_SHORT: &str = "R41";
+pub const VERSION_SHORT: &str = "R42";
 #[cfg(feature = "pa5-audio")]
 pub const VERSION_SHORT: &str = "PA5";
 
@@ -4469,7 +4469,15 @@ mod tests {
         let mut cache = MenuCache::new();
         let mut expected_resolutions = 0;
         for language in [Language::Russian, Language::English, Language::German] {
-            for group in MENU_GROUPS {
+            for group in
+                core::iter::once(None).chain(menu_entries(None).iter().filter_map(|entry| {
+                    if let MenuEntry::Group(group) = entry {
+                        Some(Some(*group))
+                    } else {
+                        None
+                    }
+                }))
+            {
                 for &entry in menu_entries(group) {
                     if cache.key != Some((entry, language)) {
                         expected_resolutions += 1;

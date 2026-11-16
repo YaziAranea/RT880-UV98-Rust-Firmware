@@ -99,7 +99,15 @@ impl TransmitTones {
         mut sample: impl FnMut() -> Option<Sample>,
     ) -> Result<bool, Fault<I::Error>> {
         let step = |session: &mut Self, radio: &mut Runtime<I>, at: Sample| {
-            session.step(radio, at.now, at.voice_held, at.allow_tail, key, config, name)
+            session.step(
+                radio,
+                at.now,
+                at.voice_held,
+                at.allow_tail,
+                key,
+                config,
+                name,
+            )
         };
         let mut keep = step(self, radio, first)?;
         for _ in 1..MODEM_STEPS_PER_PASS {

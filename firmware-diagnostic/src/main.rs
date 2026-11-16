@@ -835,7 +835,11 @@ fn main() -> ! {
     let mut stock_roger = [0u8; 1];
     let _ = app.read_auxiliary_config(76, &mut stock_name);
     let _ = app.read_auxiliary_config(166, &mut stock_roger);
-    let stock_microphone_gain = app.radio_config().map_or(16, |cfg| cfg.mic_gain);
+    let stock_microphone_gain = app
+        .radio_config()
+        .map(|cfg| cfg.mic_gain)
+        .filter(|&gain| gain <= 31)
+        .unwrap_or(16);
     app.apply_microphone_gain(stock_microphone_gain);
     #[cfg(not(feature = "pa5-audio"))]
     let mut name_store = match unsafe { uv98_settings_store::hardware::FlashStore::new(p.FLASH) } {
@@ -1132,8 +1136,10 @@ fn main() -> ! {
                     };
                     let same_source = ptt_guard.observe(input, tx_context_blocked);
                     signal_voice &= same_source && input.clean;
-                    signal_tail &=
-                        input.clean && !input.upper && !input.lower && ptt::side_idle(fresh_adc.raw);
+                    signal_tail &= input.clean
+                        && !input.upper
+                        && !input.lower
+                        && ptt::side_idle(fresh_adc.raw);
                 }
                 let now = require(time.sample(DWT::cycle_count()), 0xE016);
                 let within_limit =
@@ -2214,7 +2220,11 @@ fn main() -> ! {
             soft_mute: tuner_view.shortwave_soft_mute,
         };
         tuner_sweep.set_processing(tuner_processing);
-        let requested_tuning = tuner_sweep.request(tuning, scope_enabled);
+        let scope_window = uv98_radio_runtime::shortwave_scope::Window::around(
+            tuning,
+            tuner_view.shortwave_scope_points,
+        );
+        let requested_tuning = tuner_sweep.request(tuning, scope_enabled.then_some(scope_window));
         if scope_enabled {
             checked(&mut log, radio.shortwave_audio(false), 0xE05D);
         }
@@ -2258,7 +2268,7 @@ fn main() -> ! {
                 tuner_function = tuner_mode.tuner_function();
             }
             let session = tuner_session.as_mut().unwrap();
-            session.set_sweep_mode(scope_enabled);
+            session.set_sweep_mode(scope_enabled, now);
             session.set_processing(
                 tuner_processing,
                 matches!(
@@ -2272,12 +2282,13 @@ fn main() -> ! {
                 });
             if let Ok(Some(update)) = tuner_result {
                 if let Some(sample) = tuner_sweep.observe(requested_tuning, update) {
-                    let window = uv98_radio_runtime::shortwave_scope::Window::around(tuning);
+                    let window = scope_window;
                     checked(
                         &mut log,
                         app.shortwave_scope_sample(
                             window.first_khz * 1000,
                             u32::from(window.step_khz) * 1000,
+                            window.points(),
                             sample.bin,
                             sample.rssi,
                             sample.snr,
@@ -3003,6 +3014,14 @@ fn main() -> ! {
             || current.is_some_and(|profile| profile.audio.modulation == Modulation::Am)
         {
             (4, LCD_BATCH_ADMISSION_CYCLES)
+        } else if app.status().view.screen == Screen::Menu
+            && raw.is_some_and(|(_, ptt)| !ptt)
+            && ptt::side_idle(adc.raw)
+        {
+            // Complete the two changed menu rows together when possible. Fresh
+            // matrix/PTT/side samples between every <=6-row window stop the
+            // batch on input changes; the main loop then handles that input.
+            (67, LCD_BATCH_ADMISSION_CYCLES * 12)
         } else if raw.is_some() && ptt::side_idle(adc.raw) {
             // A longer RX-only batch amortizes the keypad and RF work. Each
             // LCD window is still bounded. Either physical PTT source keeps
@@ -3014,6 +3033,19 @@ fn main() -> ! {
         let drawn = checked(
             &mut log,
             app.render_batch(row_budget, || {
+                if DWT::cycle_count().wrapping_sub(render_start) >= admission_cycles {
+                    return false;
+                }
+                if row_budget == 67 {
+                    let fresh = keys
+                        .scan_idle_or_full()
+                        .ok()
+                        .map(|scan| (scan.matrix_raw(), scan.ptt_pressed()));
+                    let side_idle = side.sample().is_ok_and(|sample| ptt::side_idle(sample.raw));
+                    if fresh != raw || !side_idle {
+                        return false;
+                    }
+                }
                 DWT::cycle_count().wrapping_sub(render_start) < admission_cycles
             }),
             0xE032,
