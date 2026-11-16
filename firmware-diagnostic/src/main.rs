@@ -1079,16 +1079,22 @@ fn main() -> ! {
         // against elapsed time rather than the timestamp before that work.
         let now = require(time.sample(DWT::cycle_count()), 0xE016);
         let mut polled = checked(&mut log, radio.tick(now, tx_held), 0xE056);
-        // Drain a small amount of configuration work without LCD/NOR/UART or
-        // idle work between register operations. The 2ms admission budget is
-        // checked before each operation; a single synchronous operation may
-        // finish later. This is not a measured RF stop-latency claim.
+        // RX restoration must not spend a full UI pass between a few register
+        // writes: a repeater may answer immediately after PTT release. Allow
+        // a larger RX-only batch, preserving every explicit settle delay.
+        // An active/starting transmitter retains the short batch and a fresh
+        // physical PTT check before each operation. Admission is checked before
+        // each transaction, not an interruption of synchronous bus work.
+        let restoring_rx = radio.state() == RfState::Configuring
+            && !radio.tx_active_or_starting();
+        let burst_cycles = if restoring_rx { 384_000 } else { 96_000 };
+        let burst_steps = if restoring_rx { 63 } else { 7 };
         let burst_started = DWT::cycle_count();
-        for _ in 0..7 {
+        for _ in 0..burst_steps {
             let now = require(time.sample(DWT::cycle_count()), 0xE016);
             if beacon.active()
                 || !radio.configuration_step_ready(now)
-                || DWT::cycle_count().wrapping_sub(burst_started) >= 96_000
+                || DWT::cycle_count().wrapping_sub(burst_started) >= burst_cycles
                 || polled.tx_ended
             {
                 break;
