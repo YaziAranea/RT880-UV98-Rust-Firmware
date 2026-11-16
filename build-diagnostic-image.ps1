@@ -59,7 +59,7 @@ try {
     }
     $runner = if (Get-Command rtk -ErrorAction SilentlyContinue) { 'rtk' } else { 'cargo' }
     [string[]]$prefix = if ($runner -eq 'rtk') { @('cargo') } else { @() }
-    $packages = @('uv98-signaling', 'uv98-gps-at32', 'uv98-spectrum', 'uv98-gps-nmea', 'uv98-radio-runtime', 'uv98-rf-sequence', 'uv98-sidekeys-at32', 'uv98-handheld-ui', 'uv98-handheld-app', 'uv98-handheld-image-sim', 'uv98-boot-log', 'uv98-diag-startup', 'uv98-diag-quiesce', 'uv98-diag-app',
+    $packages = @('uv98-settings-store', 'uv98-signaling', 'uv98-gps-at32', 'uv98-spectrum', 'uv98-gps-nmea', 'uv98-radio-runtime', 'uv98-rf-sequence', 'uv98-sidekeys-at32', 'uv98-handheld-ui', 'uv98-handheld-app', 'uv98-handheld-image-sim', 'uv98-boot-log', 'uv98-diag-startup', 'uv98-diag-quiesce', 'uv98-diag-app',
         'uv98-board-pins', 'uv98-rf-at32', 'uv98-diagnostic', 'uv98-display',
         'uv98-keys', 'uv98-keyscan-at32', 'uv98-rf-bus', 'uv98-nor-read',
         'uv98-board-at32', 'uv98-lcd-at32', 'uv98-clock-profile', 'uv98-board-diagnostic',
@@ -70,11 +70,17 @@ try {
     Invoke-Checked 'python' @('tools/check_oracles.py')
     Invoke-Checked 'python' @('tools/check_board_oracles.py')
     Invoke-Checked $runner ($prefix + @('test', '--locked', '--offline', '--target', $hostTriple) + $packageArgs)
-    foreach ($test in @('test_check_elf.py', 'test_export_diagnostic_image.py', 'test_package_diagnostic_image.py')) {
+    foreach ($test in @('test_check_elf.py', 'test_check_settings_journal.py', 'test_export_diagnostic_image.py', 'test_package_diagnostic_image.py')) {
         Invoke-Checked 'python' @('-m', 'unittest', 'discover', '-s', 'tools', '-p', $test, '-v')
     }
     Invoke-Checked 'python' @('-m', 'unittest', 'discover', '-s', 'research/recovery', '-p', 'test_image_preflight.py', '-q')
     Invoke-Checked 'python' @('-m', 'unittest', 'discover', '-s', $captureTools, '-p', 'test_capture_boot_log.py', '-v')
+    if ($Pa5Audio) {
+        Invoke-Checked $runner ($prefix + @('test', '--locked', '--offline', '--target', $hostTriple,
+            '-p', 'uv98-handheld-ui', '-p', 'uv98-handheld-app', '-p', 'uv98-boot-log',
+            '--features', 'uv98-handheld-app/pa5-audio,uv98-boot-log/pa5-audio'))
+        Invoke-Checked 'python' @('tools/pa5-audio/test_decode_pa5.py')
+    }
     [string[]]$firmwareFeatures = @()
     [string[]]$featureArgs = @()
     if ($ChannelTx) { $firmwareFeatures = @('channel-tx') }
@@ -88,6 +94,15 @@ try {
     Invoke-Checked 'python' @('tools/export_diagnostic_image.py', 'target/thumbv7em-none-eabi/release/uv98-diag-firmware', $imageDirectory)
     Invoke-Checked 'python' @('tools/pack_ui_locales.py', '--check', '--image', (Join-Path $imageDirectory 'UV98-diag-0.1.8.bin'), '--language', $firmwareLanguage)
     Invoke-Checked 'python' @('tools/check_diag_preinit.py', (Join-Path $imageDirectory 'UV98-diag-0.1.8.elf'), '--report', (Join-Path $imageDirectory 'early-machine-code-check.json'))
+    [string[]]$journalArgs = @('tools/check_settings_journal.py',
+        (Join-Path $imageDirectory 'UV98-diag-0.1.8.elf'), (Join-Path $imageDirectory 'UV98-diag-0.1.8.bin'))
+    if ($Pa5Audio) { $journalArgs += '--diagnostic' }
+    $journalReport = & python @journalArgs
+    if ($LASTEXITCODE -ne 0) { throw 'Settings journal ELF/BIN validation failed' }
+    $journalReport | Set-Content -LiteralPath (Join-Path $imageDirectory 'settings-journal-check.json') -Encoding utf8
+    if (-not $Pa5Audio) {
+        Invoke-Checked 'python' @('crates/settings-store/tests/flash_arm.py', (Join-Path $imageDirectory 'UV98-diag-0.1.8.elf'))
+    }
     Invoke-Checked 'python' @('tools/check_device_profile.py', (Join-Path $imageDirectory 'UV98-diag-0.1.8.elf'), '--report', (Join-Path $imageDirectory 'device-profile-check.json'))
     Invoke-Checked 'python' @((Join-Path $captureTools 'verify_boot_log_emulation.py'), '--report', (Join-Path $imageDirectory 'early-machine-code-check.json'), '--output', (Join-Path $destination 'boot-log-emulation-decode'))
     $preflight = & python research/recovery/image_preflight.py (Join-Path $imageDirectory 'UV98-diag-0.1.8.bin')

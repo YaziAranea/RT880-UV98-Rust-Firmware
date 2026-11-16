@@ -2837,6 +2837,7 @@ dependencies = [
  "uv98-rf-at32",
  "uv98-rf-bus",
  "uv98-rf-sequence",
+ "uv98-settings-store",
  "uv98-sidekeys-at32",
  "uv98-signaling",
  "uv98-spectrum",
@@ -3074,6 +3075,13 @@ dependencies = [
  "uv98-calibration",
  "uv98-receive",
  "uv98-stock-model",
+]
+
+[[package]]
+name = "uv98-settings-store"
+version = "0.1.0"
+dependencies = [
+ "at32f4xx-pac",
 ]
 
 [[package]]

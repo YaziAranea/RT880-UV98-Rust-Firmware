@@ -17,7 +17,6 @@ const SRAM_START: usize = 0x2000_0000;
 const SRAM_END: usize = 0x2000_c000;
 const FLASH_SIZE_KIB: *const u16 = 0x1fff_f7e0 as *const u16;
 const DWT_CTRL: *const u32 = 0xe000_1000 as *const u32;
-const DWT_CYCCNT: *const u32 = 0xe000_1004 as *const u32;
 const ERASE_DEADLINE_CYCLES: u32 = 48_000 * 50; // 50 ms, DS max 16 ms.
 const PROGRAM_DEADLINE_CYCLES: u32 = 48_000 * 2; // 2 ms, DS max 42 us.
 

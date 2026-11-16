@@ -12,8 +12,8 @@ use uv98_display::{Delay, DisplayBus};
 use uv98_handheld_app::{App, InputSample, SpectrumSnapshot, State, Update};
 use uv98_handheld_ui::cb::CbGrid;
 use uv98_handheld_ui::controller::{
-    menu_entries, menu_location, LightMode, MdcDraft, MenuEntry, MenuGroup, MenuItem, Mode, Request,
-    ScanState, Screen, Setting, ShortcutAction, SideAction, Slot, SHORTCUT_ACTIONS,
+    menu_entries, menu_location, LightMode, MdcDraft, MenuEntry, MenuGroup, MenuItem, Mode,
+    Request, ScanState, Screen, Setting, ShortcutAction, SideAction, Slot, SHORTCUT_ACTIONS,
 };
 use uv98_handheld_ui::locale::Language;
 use uv98_handheld_ui::render::{

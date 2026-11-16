@@ -442,6 +442,11 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         self.controller.apply_radio_name_settings(name, enabled);
         self.status.view = self.controller.view();
     }
+    pub fn report_name_save(&mut self, confirmed: bool) -> Result<(), Error<N::Error, L::Error>> {
+        self.controller.report_name_save(confirmed);
+        self.status.view = self.controller.view();
+        self.redraw_ready()
+    }
 
     pub fn set_aprs_identity(&mut self, call: [u8; 6], ssid: u8) {
         self.controller.set_aprs_identity(call, ssid);

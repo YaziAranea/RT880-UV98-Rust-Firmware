@@ -829,6 +829,54 @@ fn main() -> ! {
         unsafe { startup::arm_independent_watchdog() },
         0xE053,
     );
+    // Load the stock name only; never write the external NOR/configuration.
+    // The isolated internal journal supersedes it after an explicit menu save.
+    let mut stock_name = [0xff; 16];
+    let mut stock_roger = [0u8; 1];
+    let _ = app.read_auxiliary_config(76, &mut stock_name);
+    let _ = app.read_auxiliary_config(166, &mut stock_roger);
+    #[cfg(not(feature = "pa5-audio"))]
+    let mut name_store = match unsafe { uv98_settings_store::hardware::FlashStore::new(p.FLASH) } {
+        Err(uv98_settings_store::Error::Protection) => None,
+        result => Some(checked(&mut log, result, 0xE060)),
+    };
+    #[cfg(not(feature = "pa5-audio"))]
+    let mut saved_name_settings = {
+        let loaded = name_store.as_mut().map_or(Ok(None), |store| store.load());
+        // An ambiguous or protected journal cannot be repaired automatically.
+        // Keep the radio usable, but disable all journal writes for this boot.
+        let stored = match loaded {
+            Err(uv98_settings_store::Error::Conflict) => {
+                name_store = None;
+                None
+            }
+            result => checked(&mut log, result, 0xE061),
+        };
+        stored.unwrap_or(uv98_settings_store::Settings {
+            name: stock_name,
+            roger_enabled: stock_roger[0] == 3,
+        })
+    };
+    #[cfg(not(feature = "pa5-audio"))]
+    {
+        app.apply_radio_name_settings(
+            uv98_signaling::radio_name::RadioName::from_payload(saved_name_settings.name),
+            saved_name_settings.roger_enabled,
+        );
+        // Unsupported stock encodings remain untouched in NOR, and are not
+        // accidentally persisted as a change by the ASCII editor at boot.
+        saved_name_settings.name = app
+            .status()
+            .view
+            .radio_name_settings()
+            .0
+            .map_or([0xff; 16], |name| name.payload());
+    }
+    #[cfg(feature = "pa5-audio")]
+    app.apply_radio_name_settings(
+        uv98_signaling::radio_name::RadioName::from_payload(stock_name),
+        stock_roger[0] == 3,
+    );
     let mut radio = Runtime::new(uv98_radio_runtime::hardware::RadioIo::new(
         primary,
         radio_control,
@@ -1222,6 +1270,67 @@ fn main() -> ! {
         }
         scope.event(now, spectrum::Event::Ptt(side_activity));
         let update = checked(&mut log, app.sample(now, sample), 0xE032);
+        #[cfg(not(feature = "pa5-audio"))]
+        {
+            let (name, enabled) = app.status().view.radio_name_settings();
+            let desired = uv98_settings_store::Settings {
+                name: name.map_or([0xff; 16], |name| name.payload()),
+                roger_enabled: enabled,
+            };
+            if desired != saved_name_settings
+                && radio.initialized()
+                && matches!(radio.state(), RfState::Receiving | RfState::Off)
+                && raw.is_some_and(|(_, pressed)| !pressed)
+                && !lower
+                && ptt::side_idle(adc.raw)
+                && !scope.active()
+                && !scanner.active()
+                && !relay_active
+                && second_rx.is_none()
+                && !beacon.active()
+                && tuner_session.is_none()
+                && update.request.is_none()
+                && !update.cancel_temporary
+                && !update.ptt_tx_requested
+            {
+                // Saving never overlaps RF transmission or a shared bus owner.
+                // Stop includes readback of PA/gate registers. Resume RX on the
+                // next foreground pass, with a fresh clock and input sample.
+                if name_store.is_some() {
+                    checked(&mut log, radio.stop(), 0xE057);
+                }
+                feed();
+                let confirmed = name_store
+                    .as_mut()
+                    .is_some_and(|store| store.save(desired).is_ok());
+                feed();
+                if confirmed {
+                    saved_name_settings = desired;
+                } else {
+                    // A failing final readback may follow a durable commit.
+                    // Reconcile from the journal but never report a confirmed save.
+                    if let Some(Ok(Some(stored))) = name_store.as_mut().map(|store| store.load()) {
+                        saved_name_settings = stored;
+                    }
+                    app.apply_radio_name_settings(
+                        uv98_signaling::radio_name::RadioName::from_payload(
+                            saved_name_settings.name,
+                        ),
+                        saved_name_settings.roger_enabled,
+                    );
+                    saved_name_settings.name = app
+                        .status()
+                        .view
+                        .radio_name_settings()
+                        .0
+                        .map_or([0xff; 16], |name| name.payload());
+                }
+                checked(&mut log, app.report_name_save(confirmed), 0xE032);
+                current = None;
+                last_signal = None;
+                continue;
+            }
+        }
         #[cfg(feature = "pa5-audio")]
         {
             let allowed = app.status().view.screen == Screen::About

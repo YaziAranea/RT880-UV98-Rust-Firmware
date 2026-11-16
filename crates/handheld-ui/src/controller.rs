@@ -520,6 +520,8 @@ pub enum Notice {
     SpectrumUnavailable,
     InvalidCbChannel,
     InvalidMdcId,
+    NameSaved,
+    NameSaveUnconfirmed,
 }
 
 pub const SW_MIN_KHZ: u16 = 1_700;
@@ -1093,6 +1095,14 @@ impl Controller {
     pub fn apply_radio_name_settings(&mut self, name: Option<RadioName>, enabled: bool) {
         self.view.radio_name = name;
         self.view.name_roger_enabled = enabled;
+    }
+    /// Firmware calls this only after the persistent store has returned.
+    pub fn report_name_save(&mut self, confirmed: bool) {
+        self.view.notice = if confirmed {
+            Notice::NameSaved
+        } else {
+            Notice::NameSaveUnconfirmed
+        };
     }
 
     fn open_setting(&mut self, setting: Setting) {
@@ -3751,7 +3761,6 @@ mod tests {
 
     #[test]
     fn mdc_modes_and_ids_commit_per_slot_and_drafts_block_ptt() {
-
         let bitmap = catalog(&[0]);
         let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
         let disabled = MdcSettings { mode: 0, id: None };

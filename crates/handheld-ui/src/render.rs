@@ -3857,6 +3857,8 @@ fn notice_label(value: Notice) -> Option<&'static str> {
         Notice::InvalidChannel => "\x1f0C1",
         Notice::InvalidCbChannel => "\x1f161",
         Notice::InvalidMdcId => "\x1f16B",
+        Notice::NameSaved => "\x1f172",
+        Notice::NameSaveUnconfirmed => "\x1f173",
         Notice::InactiveChannel => "\x1f049",
         Notice::InvalidFrequency => "\x1f139",
         Notice::EntryFull => "\x1f098",

@@ -6,8 +6,15 @@ Requires Unicorn 2. This test maps only emulated memory.
 
 import argparse
 import struct
+import sys
 import unittest
 from pathlib import Path
+
+# Reuse the optional offline research dependencies, as the startup audit does.
+# A normal installed Unicorn package remains supported for public source builds.
+PROJECT = Path(__file__).resolve().parents[3]
+sys.path[:0] = [str(PROJECT.parent / "calibration-analysis" / "deps"),
+               str(PROJECT.parent / "hardware_readback" / "deps")]
 
 from unicorn import (
     UC_ARCH_ARM,
