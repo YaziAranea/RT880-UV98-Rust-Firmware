@@ -324,14 +324,18 @@ fn unsafe_release_and_tot_terminate_without_an_end_id() {
 }
 
 #[test]
-fn off_uses_existing_select_v_without_an_fsk_burst() {
+fn mdc_off_releases_active_dtmf_without_an_end_burst() {
     let mut h = Harness::keyed(0);
     assert_eq!(signaling::keypad(0), None);
-    h.tick(1, true, false, None);
-    h.tick(1, false, true, None);
-    assert!(h.foreground.tail_active());
-    assert_eq!(h.bus.reg(0x70), 0xd300);
-    assert!(h.tick(350, false, true, None).tx_ended);
+    h.tick(1, true, false, Some(b'5'));
+    h.tick(12, true, false, Some(b'5'));
+    assert_eq!(h.bus.reg(0x70), 0xd3d3);
+    let before = h.bus.0.borrow().writes.len();
+    assert!(h.tick(1, false, true, None).tx_ended);
+    assert_eq!(h.bus.reg(0x70) & 0x8080, 0);
+    assert!(!h.bus.0.borrow().writes[before..]
+        .iter()
+        .any(|&(reg, word)| reg == 0x30 && word & MIC_ADC != 0));
     assert_eq!(h.bus.fifo_words(), 0);
     h.assert_off();
 }
