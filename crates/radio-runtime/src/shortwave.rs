@@ -219,7 +219,17 @@ impl Session {
     /// A sweep polls the documented STC completion flag sooner instead of
     /// unconditionally sleeping 85 ms at every bin. This does not select FAST
     /// (invalidated tuning), bypass CTS/STC, or shorten the 300 ms deadline.
-    pub fn set_sweep_mode(&mut self, enabled: bool) {
+    pub fn set_sweep_mode(&mut self, enabled: bool, now: u32) {
+        // A new grid can start on the current tune, as can leaving the
+        // scope on its centre bin. Request fresh quality without the usual
+        // listening interval. In-flight tune, CTS retry and property timings
+        // still own their deadlines.
+        if (enabled || self.sweep_mode)
+            && matches!(self.phase, Phase::Ready)
+            && self.cts_wait_started.is_none()
+        {
+            self.at = now;
+        }
         self.sweep_mode = enabled;
     }
 
@@ -681,7 +691,7 @@ mod tests {
         assert_eq!(session.tick(&mut bus, 0, tuning, |_, _| false), Ok(None));
 
         let next = am(6075);
-        session.set_sweep_mode(true);
+        session.set_sweep_mode(true, 1);
         session.set_processing(
             Processing {
                 filter: AmFilter::Narrow1k,
@@ -737,12 +747,77 @@ mod tests {
     }
 
     #[test]
+    fn scope_request_polls_same_frequency_without_restarting_tune_or_waiting_for_refresh() {
+        let tuning = am(7100);
+        let mut session = Session::new(0);
+        session.phase = Phase::Ready;
+        session.tuned = Some(tuning);
+        session.at = 750;
+        let mut bus = Mock {
+            reply: [0x80, 0, 0, 0, 40, 12, 0, 0, 0],
+            ..Mock::default()
+        };
+        assert_eq!(session.tick(&mut bus, 3, tuning, |_, _| false), Ok(None));
+        assert!(bus.writes.is_empty());
+
+        for (enabled, now) in [(true, 10), (true, 70), (false, 100)] {
+            session.set_sweep_mode(enabled, now);
+            assert_eq!(session.tick(&mut bus, now, tuning, |_, _| false), Ok(None));
+            assert_eq!(bus.writes.last().unwrap(), &[0x43, 0]);
+            assert_eq!(
+                session.tick(&mut bus, now + 2, tuning, |_, _| false),
+                Ok(None)
+            );
+            assert_eq!(
+                session.tick(&mut bus, now + 3, tuning, |_, _| false),
+                Ok(Some(Update::Quality {
+                    part: 0,
+                    rssi: 40,
+                    snr: 12,
+                }))
+            );
+        }
+        assert_eq!(
+            bus.writes,
+            [std::vec![0x43, 0], std::vec![0x43, 0], std::vec![0x43, 0]]
+        );
+        assert_eq!(session.tick(&mut bus, 106, tuning, |_, _| false), Ok(None));
+        assert_eq!(bus.writes.len(), 3);
+    }
+
+    #[test]
+    fn scope_change_preserves_a_pending_cts_retry_deadline() {
+        let old = am(7100);
+        let requested = am(7101);
+        let mut session = Session::new(0);
+        session.phase = Phase::Ready;
+        session.tuned = Some(old);
+        let mut bus = Mock {
+            read_error: Some(CTS_PENDING),
+            ..Mock::default()
+        };
+        session.set_sweep_mode(true, 10);
+        assert_eq!(
+            session.tick(&mut bus, 10, requested, |_, _| false),
+            Ok(None)
+        );
+        assert_eq!(session.at, 14);
+        session.set_sweep_mode(false, 11);
+        assert_eq!(
+            session.tick(&mut bus, 11, requested, |_, _| false),
+            Ok(None)
+        );
+        assert_eq!(bus.reads.len(), 1);
+        assert!(bus.writes.is_empty());
+    }
+
+    #[test]
     fn sweep_polls_early_but_never_publishes_before_stc_or_bypasses_timeout() {
         let tuning = am(7100);
         let mut session = Session::new(0);
         session.phase = Phase::Tune;
         session.at = 0;
-        session.set_sweep_mode(true);
+        session.set_sweep_mode(true, 0);
         let mut bus = Mock::default();
         assert_eq!(
             session.tick(&mut bus, 0, tuning, |_, _| false),
@@ -770,7 +845,7 @@ mod tests {
             }))
         );
         // Returning to ordinary listening retains its conservative schedule.
-        session.set_sweep_mode(false);
+        session.set_sweep_mode(false, 31);
         assert_eq!(
             session.tick(&mut bus, 31, am(7101), |_, _| false),
             Ok(Some(Update::Tuning))
@@ -780,7 +855,7 @@ mod tests {
         let mut stuck = Session::new(0);
         stuck.phase = Phase::Tune;
         stuck.at = 0;
-        stuck.set_sweep_mode(true);
+        stuck.set_sweep_mode(true, 0);
         bus.reply[0] = 0x80;
         stuck.tick(&mut bus, 0, tuning, |_, _| false).unwrap();
         stuck.tick(&mut bus, 10, tuning, |_, _| false).unwrap();
@@ -793,7 +868,7 @@ mod tests {
         for phase in [Phase::ReadTune, Phase::ReadQuality] {
             let mut session = Session::new(0);
             session.phase = phase;
-            session.set_sweep_mode(true);
+            session.set_sweep_mode(true, 0);
             session.at = 0;
             session.tuned = Some(tuning);
             session.configured_filter = Some(0);
