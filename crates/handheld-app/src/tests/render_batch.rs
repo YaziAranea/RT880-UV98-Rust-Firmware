@@ -246,7 +246,7 @@ fn incoming_name_interrupts_pending_paint_and_yields_to_tx_badge() {
     };
     app.set_radio_view(received).unwrap();
     assert_eq!(app.render_radio, received);
-    let (popup_first, _) = render::SIGNALING_POPUP_ROWS;
+    let (popup_first, _) = render::NAME_POPUP_PRIORITY_ROWS;
     assert_eq!(app.render_step(4).unwrap().rows, 4);
     assert_eq!(
         windows.borrow().last(),
@@ -265,6 +265,9 @@ fn incoming_name_interrupts_pending_paint_and_yields_to_tx_badge() {
     assert!(!app.priority_rows.has(popup_first + 8));
     let tx_row = render::home_slot_rows(Slot::B).0;
     assert!(app.priority_rows.has(tx_row));
+    assert_eq!(app.priority_run, PRIORITY_BURST_ROWS);
+    assert_eq!(app.render_step(2).unwrap().rows, 2);
+    assert_eq!(app.priority_run, 0); // One ordinary fairness slice.
     assert_eq!(app.render_step(2).unwrap().rows, 2);
     assert_eq!(windows.borrow().last(), Some(&(tx_row, tx_row + 2)));
     assert_matches_complete_frame(&mut app, &capture);

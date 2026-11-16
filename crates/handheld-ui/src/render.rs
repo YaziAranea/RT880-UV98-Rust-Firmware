@@ -23,7 +23,7 @@ use crate::meter::{receive_segments, transmit_segments, SEGMENTS as METER_SEGMEN
 #[path = "signaling_popup.rs"]
 mod signaling_popup;
 pub use signaling_popup::{DtmfReception, NameReception};
-pub const SIGNALING_POPUP_ROWS: (u16, u16) = signaling_popup::ROWS;
+pub const NAME_POPUP_PRIORITY_ROWS: (u16, u16) = signaling_popup::NAME_PRIORITY_ROWS;
 
 #[path = "font.rs"]
 mod font;
@@ -172,7 +172,7 @@ impl RadioView {
     }
 
     pub fn signaling_popup_damage(self, previous: Self) -> Option<(u16, u16)> {
-        (self.signaling_popup() != previous.signaling_popup()).then_some(SIGNALING_POPUP_ROWS)
+        (self.signaling_popup() != previous.signaling_popup()).then_some(signaling_popup::ROWS)
     }
 
     pub fn receiving_slot(self) -> Option<Slot> {

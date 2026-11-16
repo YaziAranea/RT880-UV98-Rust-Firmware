@@ -1651,15 +1651,16 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             }
         }
         if self.radio.state == render::RadioState::Receiving {
-            if self.last_radio.radio_name != self.radio.radio_name {
-                if let Some(rows) = self.radio.signaling_popup_damage(self.last_radio) {
-                    self.mark_priority(rows);
-                }
+            if self.last_radio.radio_name != self.radio.radio_name
+                && self.radio.signaling_popup_damage(self.last_radio).is_some()
+            {
+                self.mark_priority(render::NAME_POPUP_PRIORITY_ROWS);
             }
         } else if self.last_radio.state == render::RadioState::Receiving {
-            let (start, end) = render::SIGNALING_POPUP_ROWS;
+            // Remaining popup damage stays in the ordinary queue. Preserve
+            // the shared fairness budget when radio states change rapidly.
+            let (start, end) = render::NAME_POPUP_PRIORITY_ROWS;
             self.priority_rows.clear(start, end);
-            self.priority_run = 0;
         }
         let old_tx = self.last_radio.transmitting_slot();
         let new_tx = self.radio.transmitting_slot();

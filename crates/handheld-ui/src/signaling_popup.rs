@@ -4,6 +4,10 @@ use uv98_signaling::radio_name::RadioName;
 
 pub(super) const COLUMNS: (u16, u16) = (17, 223);
 pub(super) const ROWS: (u16, u16) = (132, 190);
+const VALUE_ROW: u16 = 160;
+const MAX_VALUE_SCALE: u16 = 2;
+// Prioritize text and its background without overlapping either TX badge.
+pub(super) const NAME_PRIORITY_ROWS: (u16, u16) = (ROWS.0, VALUE_ROW + 7 * MAX_VALUE_SCALE);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DtmfReception {
@@ -84,8 +88,8 @@ pub(super) fn paint(row: u16, out: &mut Row<'_>, report: Reception) {
         ),
     };
     text(row, out, 26, 140, 1, label, color::ACCENT);
-    let scale = fitting_scale(value, 2, 190);
-    text(row, out, 26, 160, scale, value, color::TEXT);
+    let scale = fitting_scale(value, MAX_VALUE_SCALE, 190);
+    text(row, out, 26, VALUE_ROW, scale, value, color::TEXT);
 }
 
 #[cfg(test)]
