@@ -1068,8 +1068,6 @@ fn main() -> ! {
                     signal_voice && within_limit,
                     signal_tail && within_limit,
                     dtmf_key,
-                    view.tx_tail,
-                    view.tx_id,
                     signaling::mdc_config(view, tx_slot.unwrap_or(view.active_slot)),
                 ),
                 0xE065,
@@ -2239,7 +2237,13 @@ fn main() -> ! {
             if let Some(p) = current {
                 last_signal = Some(checked(
                     &mut log,
-                    radio.observe(p.audio, p.receive.map(|r| r.tone).unwrap_or(0)),
+                    if p.audio.modulation == Modulation::Fm
+                        && !scope.active() && !tuner_open && !crossband_open
+                    {
+                        radio.observe_dtmf(p.audio, p.receive.map(|r| r.tone).unwrap_or(0))
+                    } else {
+                        radio.observe(p.audio, p.receive.map(|r| r.tone).unwrap_or(0))
+                    },
                     0xE05A,
                 ));
                 signal_at = now;
@@ -2666,7 +2670,11 @@ fn main() -> ! {
                 report.meter_floor = report.meter_floor.max(report.rssi.unwrap_or(0));
             }
             report.squelch_open = last_signal.is_some_and(|s| s.audio_open);
-            report.rx_slot = if watch_receive.is_some() {
+            let carrier = now.wrapping_sub(signal_at) < 100
+                && last_signal.is_some_and(|s| s.audio_open && s.status_0c & 2 != 0);
+            report.rx_slot = if !carrier {
+                None
+            } else if watch_receive.is_some() {
                 watch_rx
             } else if !scope.active() && !tuner_open && !crossband_open
                 && current.is_some() && current == operator_profile
@@ -2675,6 +2683,11 @@ fn main() -> ! {
             } else {
                 None
             };
+            if !scope.active() && !tuner_open && !crossband_open {
+                let slot = watch_receive.map(|(slot, _)| slot).unwrap_or(view.active_slot);
+                report.dtmf = uv98_handheld_ui::render::DtmfReception::new(
+                    slot, radio.received_dtmf(now));
+            }
             if watch_receive.is_some() && watch_rx.is_none() {
                 report.rssi = None;
                 report.meter_floor = 0;

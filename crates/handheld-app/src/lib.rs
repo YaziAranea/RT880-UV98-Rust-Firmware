@@ -1730,6 +1730,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
 /// and all controller/PTT events keep their normal immediate queuing semantics.
 fn radio_controls_equal(a: RadioView, b: RadioView) -> bool {
     a.state == b.state
+        && a.visible_dtmf() == b.visible_dtmf()
         && a.tx_slot == b.tx_slot
         && a.receiving_slot() == b.receiving_slot()
         && a.tx_trial == b.tx_trial

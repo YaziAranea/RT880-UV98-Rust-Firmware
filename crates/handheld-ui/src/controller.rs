@@ -670,7 +670,7 @@ pub enum MdcDraft {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct View {
     #[cfg(any(test, feature = "locale-all"))]
-    pub(crate) language: Language,
+    pub language: Language,
     /// Committed channel grid context for slot A, independent of edit focus.
     pub cb: Option<CbChannel>,
     pub cb_draft: Option<CbChannel>,
@@ -4579,8 +4579,6 @@ mod tests {
                 Item(MenuItem::KeyLight),
                 Item(MenuItem::About),
                 Item(MenuItem::Dtmf),
-                Item(MenuItem::TxTail),
-                Item(MenuItem::TxId),
             ]
         );
     }

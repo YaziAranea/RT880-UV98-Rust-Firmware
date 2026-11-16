@@ -21,6 +21,10 @@ use crate::controller::{
 use crate::meter::{receive_segments, transmit_segments, SEGMENTS as METER_SEGMENTS};
 use crate::text_entry::InputMode;
 
+#[path = "dtmf_popup.rs"]
+mod dtmf_popup;
+pub use dtmf_popup::DtmfReception;
+
 #[path = "font.rs"]
 mod font;
 #[path = "utility.rs"]
@@ -114,6 +118,7 @@ pub struct RadioView {
     pub tx_slot: Option<Slot>,
     /// Confirmed receive context. Scope or relay audio has no home VFO.
     pub rx_slot: Option<Slot>,
+    pub dtmf: Option<DtmfReception>,
     pub rssi: Option<u16>,
     pub meter_floor: u16,
     pub squelch_open: bool,
@@ -131,6 +136,7 @@ impl RadioView {
         state: RadioState::Off,
         tx_slot: None,
         rx_slot: None,
+        dtmf: None,
         rssi: None,
         meter_floor: 0,
         squelch_open: false,
@@ -140,6 +146,10 @@ impl RadioView {
         route: None,
         tx_trial: false,
     };
+
+    pub fn visible_dtmf(self) -> Option<DtmfReception> {
+        if self.state == RadioState::Receiving { self.dtmf } else { None }
+    }
 
     pub fn receiving_slot(self) -> Option<Slot> {
         if self.state == RadioState::Receiving && self.squelch_open {
@@ -988,6 +998,9 @@ pub fn radio_dirty_ranges(model: &Model<'_>, previous: RadioView) -> Result<Dirt
     validate(model)?;
     let new = model.radio;
     let mut dirty = DirtyRanges::new();
+    if previous.visible_dtmf() != new.visible_dtmf() {
+        dirty.push(dtmf_popup::ROWS.0, dtmf_popup::ROWS.1);
+    }
     let (banner_start, banner_end) = radio_banner_rows(model.view.screen);
     let view = model.view;
     if view.screen == Screen::Home {
@@ -1161,6 +1174,9 @@ fn render_validated_row(
         notice(row, out, model.view.notice);
     } else {
         footer(row, out, model);
+    }
+    if let Some(report) = model.radio.visible_dtmf() {
+        dtmf_popup::paint(row, out, report);
     }
 }
 
@@ -5429,6 +5445,7 @@ mod tests {
             route: Some(RadioRoute::Hf),
             tx_slot: None,
             rx_slot: None,
+        dtmf: None,
             tx_trial: false,
         };
         compare_radio_incremental(old, new);
@@ -5682,6 +5699,27 @@ mod tests {
     }
 
     #[test]
+    fn dtmf_popup_changes_and_tx_removal_match_a_complete_frame() {
+        for screen in [Screen::Home, Screen::Menu, Screen::Keys] {
+            let mut before = model(screen);
+            before.radio.state = RadioState::Receiving;
+            let mut shown = before;
+            shown.radio.dtmf = DtmfReception::new(Slot::B, "0011ABCD*#");
+            assert_eq!(compare_radio_incremental(before, shown), WIDTH * 58);
+            let mut changed = shown;
+            changed.radio.dtmf = DtmfReception::new(Slot::B, "0011ABCD*#22");
+            assert_eq!(compare_radio_incremental(shown, changed), WIDTH * 58);
+            assert_eq!(compare_radio_incremental(changed, before), WIDTH * 58);
+            let mut tx = shown;
+            tx.radio.state = RadioState::Transmitting;
+            tx.radio.tx_slot = Some(Slot::A);
+            assert!(tx.radio.visible_dtmf().is_none());
+            compare_radio_incremental(shown, tx);
+            compare_radio_incremental(tx, shown);
+        }
+    }
+
+    #[test]
     fn radio_state_transitions_only_repaint_visible_radio_regions() {
         let states = [
             RadioState::Off,
@@ -5709,6 +5747,7 @@ mod tests {
                         route: Some(RadioRoute::Hf),
                         tx_slot: None,
                         rx_slot: None,
+        dtmf: None,
                         tx_trial: false,
                     };
                     let pixels = compare_radio_incremental(old, new);
@@ -6175,6 +6214,7 @@ mod tests {
                 route: Some(RadioRoute::Hf),
                 tx_slot: None,
             rx_slot: None,
+        dtmf: None,
                 tx_trial: false,
             };
             for y in 0..HEIGHT {

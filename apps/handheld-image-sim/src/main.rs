@@ -1288,6 +1288,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let simulated_rx = RadioView {
         state: RadioState::Receiving,
         tx_slot: None,
+        dtmf: None,
         rx_slot: Some(app.status().view.active_slot),
         rssi: Some(245),
         meter_floor: 0,
