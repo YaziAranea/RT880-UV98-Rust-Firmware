@@ -107,10 +107,10 @@ def validate_source(text, manifest, profile):
     features = manifest.get("features", {})
     expected = {"default": [], TRIAL_FEATURE: [], CHANNEL_TX_FEATURE: []}
     legacy = {"default": [], TRIAL_FEATURE: []}
-    # A disabled diagnostics-only feature is allowed; TX/default aliases remain
+    # Disabled diagnostics-only features are allowed; TX/default aliases remain
     # exact, and validate_inputs still checks the actual selected build features.
     diagnostic = {**expected, "verbose-faults": []}
-    if features not in (expected, diagnostic) and not (not dual and features in ({"default": []}, legacy)):
+    if features not in (expected, diagnostic, {**diagnostic, "verbose-runtime": []}) and not (not dual and features in ({"default": []}, legacy)):
         raise ValueError("Firmware feature declarations must be exact, empty, and RX by default")
     if expression == old_gate and TRIAL_FEATURE not in features:
         raise ValueError("Trial feature declaration is missing")

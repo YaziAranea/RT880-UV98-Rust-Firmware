@@ -2128,3 +2128,5 @@ LCD, radio.observe, основные RF-события, ошибки и PTT/TOT 
 flash_performed=false; hardware_qualified=false. CPS0.7.0 EXE прежний.
 Архив/исходник/хеши — release-manifest.json и verification/build-provenance.json;
 публикация — outputs/R39-publication-verification.json нового workspace.
+Упаковщик учитывает пустой выключенный verbose-runtime; 17 проверок упаковки
+PASS, включая запрет TX-алиасов, включения по умолчанию и лишних build features.

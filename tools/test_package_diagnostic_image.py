@@ -310,14 +310,30 @@ class PackageTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "feature declarations"):
                     packaging.validate_inputs(self.folder, self.root, "channel-tx")
 
-    def test_disabled_verbose_faults_does_not_change_tx_policy(self):
+    def test_disabled_diagnostics_do_not_change_tx_policy(self):
         self.prepare_channel()
         original = self.manifest.read_text()
-        self.manifest.write_text(original + 'verbose-faults = []\n')
-        packaging.validate_inputs(self.folder, self.root, "channel-tx")
-        self.manifest.write_text(original + 'verbose-faults = ["channel-tx"]\n')
-        with self.assertRaisesRegex(ValueError, "feature declarations"):
-            packaging.validate_inputs(self.folder, self.root, "channel-tx")
+        for diagnostics in ('verbose-faults = []\n',
+                            'verbose-faults = []\nverbose-runtime = []\n'):
+            with self.subTest(diagnostics=diagnostics):
+                valid = original + diagnostics
+                self.manifest.write_text(valid)
+                packaging.validate_inputs(self.folder, self.root, "channel-tx")
+                for feature in ('verbose-faults', 'verbose-runtime'):
+                    if feature not in diagnostics:
+                        continue
+                    for invalid in (
+                            valid.replace(f'{feature} = []', f'{feature} = ["channel-tx"]'),
+                            valid.replace('default = []', f'default = ["{feature}"]')):
+                        self.manifest.write_text(invalid)
+                        with self.assertRaisesRegex(ValueError, "feature declarations"):
+                            packaging.validate_inputs(self.folder, self.root, "channel-tx")
+                self.manifest.write_text(valid)
+                self.mutate_json("verification.json", firmware_features=[
+                    packaging.CHANNEL_TX_FEATURE, "verbose-runtime"])
+                with self.assertRaisesRegex(ValueError, "feature evidence"):
+                    packaging.validate_inputs(self.folder, self.root, "channel-tx")
+                self.mutate_json("verification.json", firmware_features=[packaging.CHANNEL_TX_FEATURE])
 
     def test_channel_package_retains_no_overwrite_and_private_calibration_exclusion(self):
         self.prepare_channel()
