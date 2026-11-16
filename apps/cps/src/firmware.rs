@@ -1,6 +1,6 @@
 //! Application-only iRadio writer, ported from the locally proven pinned writer.
 //! No read probe exists in this loader: the first command starts erase.
-//! Images must match the release catalog; no padding, relocation, END or retries.
+//! Writes complete application images without padding, relocation, END or retries.
 use crate::i18n::{Language, LocalizedText};
 use serde_json::json;
 pub mod profile;
@@ -16,32 +16,142 @@ pub const IMAGE_BYTES: usize = 251_904;
 pub const BLOCKS: usize = IMAGE_BYTES / 1024;
 const TIMEOUT: Duration = Duration::from_secs(5);
 const PROFILE: &str = "iradio-uv98-app-v1";
-const PERSONAL_LABEL_SUFFIX: &str = " · личный профиль";
+const STOCK_SHA256: &str = "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Provenance {
+    Stock,
+    Catalog(PathBuf),
+    Imported,
+    Personal {
+        sidecar_sha256: String,
+        legacy_catalog: Option<PathBuf>,
+    },
+}
+
+impl Provenance {
+    fn journal_value(&self) -> &'static str {
+        match self {
+            Self::Stock => "pinned_stock_sha256",
+            Self::Catalog(_) => "bundle_catalog",
+            Self::Imported => "structural_import",
+            Self::Personal { .. } => "personal_profile",
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct PreparedImage {
     pub path: PathBuf,
     label: String,
-    personalized: bool,
     pub sha256: String,
     pub bytes_len: usize,
     bytes: Vec<u8>,
     tx_sha256: String,
-    catalog: PathBuf,
+    provenance: Provenance,
 }
 impl PreparedImage {
-    pub fn display_label(&self, lang: Language) -> String {
-        if self.personalized {
-            if let Some(source_label) = self.label.strip_suffix(PERSONAL_LABEL_SUFFIX) {
-                return trf!(
-                    lang,
-                    "{source_label} · личный профиль",
-                    "{source_label} · personal profile",
-                    "{source_label} · persönliches Profil",
-                );
-            }
+    fn new(path: &Path, bytes: Vec<u8>, provenance: Provenance) -> Self {
+        Self {
+            path: path.to_path_buf(),
+            label: path
+                .file_name()
+                .unwrap_or(path.as_os_str())
+                .to_string_lossy()
+                .into_owned(),
+            sha256: hash(&bytes),
+            bytes_len: bytes.len(),
+            tx_sha256: wire_hash(&bytes),
+            bytes,
+            provenance,
         }
-        self.label.clone()
+    }
+
+    pub fn display_label(&self) -> &str {
+        &self.label
+    }
+
+    pub fn provenance_label(&self, lang: Language) -> &'static str {
+        match self.provenance {
+            Provenance::Stock => tr!(
+                lang,
+                "Заводской BIN · SHA256 подтверждён",
+                "Stock BIN · SHA256 verified",
+                "Werks-BIN · SHA256 geprüft"
+            ),
+            Provenance::Catalog(_) => tr!(
+                lang,
+                "Проверен по каталогу комплекта",
+                "Matched the bundle catalog",
+                "Stimmt mit dem Paketkatalog überein"
+            ),
+            Provenance::Imported => tr!(
+                lang,
+                "Импорт BIN · проверена структура",
+                "Imported BIN · structure checked",
+                "Importierte BIN · Struktur geprüft"
+            ),
+            Provenance::Personal { .. } => tr!(
+                lang,
+                "Личный профиль калибровок",
+                "Personal calibration profile",
+                "Persönliches Kalibrierprofil"
+            ),
+        }
+    }
+
+    pub fn is_imported(&self) -> bool {
+        self.provenance == Provenance::Imported
+    }
+
+    pub fn is_personalization_source(&self) -> bool {
+        matches!(
+            self.provenance,
+            Provenance::Catalog(_) | Provenance::Imported
+        )
+    }
+
+    // Read the selected file again. Validation uses these exact bytes and the
+    // writer keeps the immutable bytes confirmed at selection.
+    fn revalidate(&self) -> Result<(), LocalizedText> {
+        let bytes = bounded_read(&self.path, IMAGE_BYTES)?;
+        if bytes != self.bytes || hash(&bytes) != self.sha256 || wire_hash(&bytes) != self.tx_sha256
+        {
+            return Err(msg!(
+                "BIN изменился после выбора; выберите его заново",
+                "The BIN changed after selection. Select it again.",
+                "Die BIN wurde nach der Auswahl verändert. Wählen Sie sie erneut aus."
+            ));
+        }
+        match &self.provenance {
+            Provenance::Catalog(path) => {
+                let data = read_catalog(path)?;
+                bundle_entry(&data, &self.sha256, &self.tx_sha256)?;
+            }
+            Provenance::Personal {
+                sidecar_sha256,
+                legacy_catalog,
+            } => {
+                let sidecar = profile::read_sidecar(&self.path)?;
+                if hash(&sidecar) != *sidecar_sha256 {
+                    return Err(msg!(
+                        "Каталог личного BIN изменился после выбора; выберите BIN заново",
+                        "The personal BIN catalog changed after selection. Select the BIN again.",
+                        "Der Katalog der persönlichen BIN wurde nach der Auswahl verändert. Wählen Sie die BIN erneut aus."
+                    ));
+                }
+                profile::verify_saved(
+                    &self.path,
+                    &bytes,
+                    &self.sha256,
+                    &self.tx_sha256,
+                    &parse_catalog(&sidecar)?,
+                    legacy_catalog.as_deref(),
+                )?;
+            }
+            Provenance::Stock | Provenance::Imported => {}
+        }
+        Ok(())
     }
 }
 
@@ -114,7 +224,6 @@ fn validate_structure(data: &[u8]) -> Result<(), LocalizedText> {
     Ok(())
 }
 pub fn export_stock(destination: &Path) -> Result<(), LocalizedText> {
-    const STOCK_SHA256: &str = "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc";
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
     let source = exe
         .parent()
@@ -155,38 +264,45 @@ pub fn export_stock(destination: &Path) -> Result<(), LocalizedText> {
 }
 
 pub fn prepare(path: &Path) -> Result<PreparedImage, LocalizedText> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let catalog = exe
-        .parent()
-        .ok_or_else(|| {
-            msg!(
-                "Нет каталога CPS",
-                "CPS directory not found",
-                "CPS-Verzeichnis fehlt"
-            )
-        })?
-        .join("firmware/catalog.json");
-    prepare_with_catalog(path, &catalog).or_else(|original_error| {
-        if path
-            .parent()
-            .is_some_and(|parent| parent.join("catalog.json").is_file())
-        {
-            profile::prepare_saved(path, &catalog)
-        } else {
-            Err(original_error)
-        }
-    })
+    let catalog = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|base| base.join("firmware/catalog.json")));
+    prepare_selected(path, catalog.as_deref())
 }
 
-/// The release manifest chooses the image, so an older hardcoded filename can
-/// never silently become the default of a newer portable CPS bundle.
-pub fn default_image(base: &Path) -> Option<PathBuf> {
-    let catalog = base.join("firmware/catalog.json");
-    let data: serde_json::Value =
-        serde_json::from_slice(&bounded_read(&catalog, 65536).ok()?).ok()?;
-    if data["schema"] != 1 || data["profile"] != PROFILE {
-        return None;
+fn read_image(path: &Path) -> Result<PreparedImage, LocalizedText> {
+    let bytes = bounded_read(path, IMAGE_BYTES)?;
+    validate_structure(&bytes)?;
+    Ok(PreparedImage::new(path, bytes, Provenance::Imported))
+}
+
+fn prepare_selected(path: &Path, catalog: Option<&Path>) -> Result<PreparedImage, LocalizedText> {
+    let mut image = read_image(path)?;
+    if image.sha256 == STOCK_SHA256 {
+        image.provenance = Provenance::Stock;
+        return Ok(image);
     }
+    if let Some((sidecar, data)) = profile::saved_sidecar(&image)? {
+        return profile::prepare_saved(image, &sidecar, &data, catalog);
+    }
+    if let Some(catalog) = catalog {
+        if let Ok(data) = read_catalog(catalog) {
+            if data["personalization"].is_null() && catalog_entry(&data, &image.sha256).is_some() {
+                return bind_bundle_entry(image, &data, catalog);
+            }
+        }
+    }
+    // A marker and Cortex-M vectors only establish the supported layout.
+    // They cannot authenticate the author or prove hardware compatibility.
+    profile::digest_offset(&image.bytes)?;
+    Ok(image)
+}
+
+/// Only a catalog match can select a bundled image automatically.
+pub fn default_image(base: &Path) -> Option<PreparedImage> {
+    let catalog = base.join("firmware/catalog.json");
+    let encoded = bounded_read(&catalog, 65536).ok()?;
+    let data = parse_catalog(&encoded).ok()?;
     let relative = Path::new(data["default_image"].as_str()?);
     if relative.is_absolute()
         || relative
@@ -195,66 +311,109 @@ pub fn default_image(base: &Path) -> Option<PathBuf> {
     {
         return None;
     }
-    let path = base.join(relative);
-    prepare_with_catalog(&path, &catalog).ok()?;
-    Some(path)
+    let image = read_image(&base.join(relative)).ok()?;
+    if !data["personalization"].is_null() {
+        return profile::prepare_saved(image, &encoded, &data, None).ok();
+    }
+    bind_bundle_entry(image, &data, &catalog).ok()
 }
-pub fn prepare_with_catalog(path: &Path, catalog: &Path) -> Result<PreparedImage, LocalizedText> {
-    let bytes = bounded_read(path, IMAGE_BYTES)?;
-    validate_structure(&bytes)?;
-    let sha256 = hash(&bytes);
-    let catalog_data: serde_json::Value = serde_json::from_slice(&bounded_read(catalog, 65536)?)
-        .map_err(|e| {
-            msgf!(
-                "Каталог образов: {e}",
-                "Image catalog: {e}",
-                "Image-Katalog: {e}"
-            )
-        })?;
-    if catalog_data["schema"] != 1 || catalog_data["profile"] != PROFILE {
+
+fn parse_catalog(encoded: &[u8]) -> Result<serde_json::Value, LocalizedText> {
+    let data: serde_json::Value = serde_json::from_slice(encoded).map_err(|e| {
+        msgf!(
+            "Каталог образов: {e}",
+            "Image catalog: {e}",
+            "Image-Katalog: {e}"
+        )
+    })?;
+    if data["schema"] != 1 || data["profile"] != PROFILE || !data["images"].is_array() {
         return Err(msg!(
             "Неподдерживаемый каталог образов CPS",
             "Unsupported CPS image catalog",
             "CPS-Image-Katalog wird nicht unterstützt"
         ));
     }
-    let entries = catalog_data["images"].as_array().ok_or_else(|| {
+    Ok(data)
+}
+
+fn read_catalog(path: &Path) -> Result<serde_json::Value, LocalizedText> {
+    parse_catalog(&bounded_read(path, 65536)?)
+}
+
+fn catalog_entry<'a>(
+    catalog: &'a serde_json::Value,
+    sha256: &str,
+) -> Option<&'a serde_json::Value> {
+    catalog["images"]
+        .as_array()?
+        .iter()
+        .find(|entry| entry["sha256"].as_str() == Some(sha256))
+}
+
+fn verify_entry<'a>(
+    catalog: &'a serde_json::Value,
+    sha256: &str,
+    tx_sha256: &str,
+) -> Result<&'a serde_json::Value, LocalizedText> {
+    let entry = catalog_entry(catalog, sha256).ok_or_else(|| {
         msg!(
-            "В каталоге нет images",
-            "The catalog is missing images",
-            "Im Katalog fehlt images"
+            "SHA256 BIN отсутствует в каталоге",
+            "The BIN SHA256 is missing from the catalog",
+            "Die SHA256-Prüfsumme der BIN fehlt im Katalog"
         )
     })?;
-    let found = entries.iter().find(|entry| entry["sha256"].as_str() == Some(&sha256)).ok_or_else(|| msg!(
-        "Этот BIN отсутствует в проверенном каталоге комплекта. Выберите образ из папки firmware или recovery.",
-        "This BIN is missing from the verified bundle catalog. Select an image from the firmware or recovery folder.",
-        "Diese BIN fehlt im geprüften Paketkatalog. Wählen Sie ein Image aus dem Ordner firmware oder recovery.",
-    ))?;
-    if found["bytes"].as_u64() != Some(IMAGE_BYTES as u64) {
+    if entry["bytes"].as_u64() != Some(IMAGE_BYTES as u64) {
         return Err(msg!(
             "Размер в каталоге не совпадает",
             "Size does not match the catalog",
             "Größe stimmt nicht mit dem Katalog überein"
         ));
     }
-    let tx_sha256 = wire_hash(&bytes);
-    if found["tx_sha256"].as_str() != Some(&tx_sha256) {
+    if entry["tx_sha256"].as_str() != Some(tx_sha256) {
         return Err(msg!(
             "Контрольная сумма протокольного потока не совпадает с каталогом",
             "The protocol stream checksum does not match the catalog",
             "Die Prüfsumme des Protokolldatenstroms stimmt nicht mit dem Katalog überein"
         ));
     }
-    Ok(PreparedImage {
-        path: path.to_path_buf(),
-        label: found["label"].as_str().unwrap_or("UV98").to_string(),
-        personalized: false,
-        sha256,
-        bytes_len: bytes.len(),
-        bytes,
-        tx_sha256,
-        catalog: catalog.to_path_buf(),
-    })
+    Ok(entry)
+}
+
+fn bundle_entry<'a>(
+    catalog: &'a serde_json::Value,
+    sha256: &str,
+    tx_sha256: &str,
+) -> Result<&'a serde_json::Value, LocalizedText> {
+    if !catalog["personalization"].is_null() {
+        return Err(msg!(
+            "Личный каталог не является каталогом выпуска",
+            "A personal catalog cannot serve as a release catalog",
+            "Ein persönlicher Katalog ist kein Versionskatalog"
+        ));
+    }
+    verify_entry(catalog, sha256, tx_sha256)
+}
+
+fn bind_bundle_entry(
+    mut image: PreparedImage,
+    data: &serde_json::Value,
+    catalog: &Path,
+) -> Result<PreparedImage, LocalizedText> {
+    let entry = bundle_entry(data, &image.sha256, &image.tx_sha256)?;
+    if let Some(label) = entry["label"].as_str() {
+        image.label = label.to_string();
+    }
+    image.provenance = if image.sha256 == STOCK_SHA256 {
+        Provenance::Stock
+    } else {
+        Provenance::Catalog(catalog.to_path_buf())
+    };
+    Ok(image)
+}
+
+#[cfg(test)]
+fn prepare_with_catalog(path: &Path, catalog: &Path) -> Result<PreparedImage, LocalizedText> {
+    bind_bundle_entry(read_image(path)?, &read_catalog(catalog)?, catalog)
 }
 
 fn frame(kind: u8, offset: usize, payload: &[u8]) -> Vec<u8> {
@@ -357,19 +516,7 @@ fn run<T: Transport>(
     factory: impl FnOnce(&str) -> Result<T, TransferError>,
     mut progress: impl FnMut(Progress),
 ) -> Result<FlashReport, LocalizedText> {
-    // Revalidate the selected file and catalog immediately before creating the
-    // journal/opening a port. Flash this immutable byte vector, not a file handle.
-    let checked = prepare_with_catalog(&image.path, &image.catalog)?;
-    if checked.sha256 != image.sha256
-        || checked.bytes != image.bytes
-        || checked.tx_sha256 != image.tx_sha256
-    {
-        return Err(msg!(
-            "BIN изменился после выбора; выберите его заново",
-            "The BIN changed after selection. Select it again.",
-            "Die BIN wurde nach der Auswahl verändert. Wählen Sie sie erneut aus."
-        ));
-    }
+    image.revalidate()?;
     if let Some(parent) = directory.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -380,7 +527,7 @@ fn run<T: Transport>(
             "Neues Protokollverzeichnis: {e}"
         )
     })?;
-    let started = json!({"schema":1,"status":"incomplete","started_unix_ms":ms(),"port":port,"image_sha256":image.sha256,"image_bytes":IMAGE_BYTES,"tx_sha256":image.tx_sha256,"profile":PROFILE,"application_base":"0x08002800","application_end":"0x08040000","automatic_retries":0,"serial":{"baud":115200,"data_bits":8,"parity":"N","stop_bits":1,"dtr":false,"rts":false,"flow_control":false},"hardware_boot_verified":false,"mcu_readback_verified":false,"calibration_after_boot_verified":false});
+    let started = json!({"schema":1,"status":"incomplete","started_unix_ms":ms(),"port":port,"image_sha256":image.sha256,"image_provenance":image.provenance.journal_value(),"image_bytes":IMAGE_BYTES,"tx_sha256":image.tx_sha256,"profile":PROFILE,"application_base":"0x08002800","application_end":"0x08040000","automatic_retries":0,"serial":{"baud":115200,"data_bits":8,"parity":"N","stop_bits":1,"dtr":false,"rts":false,"flow_control":false},"hardware_boot_verified":false,"mcu_readback_verified":false,"calibration_after_boot_verified":false});
     write_json(&directory.join("started.json"), &started)?;
     let mut tx = new_file(&directory.join("tx-attempted.bin"))?;
     let mut rx = new_file(&directory.join("rx.bin"))?;
@@ -523,7 +670,7 @@ fn run<T: Transport>(
     let error = outcome.as_ref().err().map(TransferError::diagnostic);
     write_json(
         &directory.join("manifest.json"),
-        &json!({"schema":1,"status":if outcome.is_ok(){"transfer_acknowledged"}else{"failed"},"finished_unix_ms":ms(),"port":port,"image_sha256":image.sha256,"last_stage":stage.as_str(Language::Russian),"erase_sequence_attempted":destructive,"acked_blocks":acknowledged,"ack_count":ack_count,"final_ack_received":final_ack,"port_closed":closed,"error":error,"close_error":close_error,"automatic_retries":0,"hardware_boot_verified":false,"mcu_readback_verified":false,"calibration_after_boot_verified":false}),
+        &json!({"schema":1,"status":if outcome.is_ok(){"transfer_acknowledged"}else{"failed"},"finished_unix_ms":ms(),"port":port,"image_sha256":image.sha256,"image_provenance":image.provenance.journal_value(),"last_stage":stage.as_str(Language::Russian),"erase_sequence_attempted":destructive,"acked_blocks":acknowledged,"ack_count":ack_count,"final_ack_received":final_ack,"port_closed":closed,"error":error,"close_error":close_error,"automatic_retries":0,"hardware_boot_verified":false,"mcu_readback_verified":false,"calibration_after_boot_verified":false}),
     )?;
     outcome.map_err(|error| error.notice)?;
     Ok(FlashReport {

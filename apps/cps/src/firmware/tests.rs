@@ -17,10 +17,10 @@ fn release_default_requires_catalog_match_and_stays_inside_bundle() {
     fs::copy(&fixture.image.path, &path).unwrap();
     let catalog = folder.join("catalog.json");
     let mut data: serde_json::Value =
-        serde_json::from_slice(&fs::read(&fixture.image.catalog).unwrap()).unwrap();
+        serde_json::from_slice(&fs::read(fixture.dir.join("catalog.json")).unwrap()).unwrap();
     data["default_image"] = json!("firmware/UV98-r35.bin");
     fs::write(&catalog, serde_json::to_vec(&data).unwrap()).unwrap();
-    assert_eq!(default_image(&fixture.dir), Some(path.clone()));
+    assert_eq!(default_image(&fixture.dir).unwrap().path, path);
     data["default_image"] = json!("../app.bin");
     fs::write(&catalog, serde_json::to_vec(&data).unwrap()).unwrap();
     assert!(default_image(&fixture.dir).is_none());
@@ -353,7 +353,7 @@ fn changed_image_and_catalog_fail_before_port_open() {
     for change_catalog in [false, true] {
         let f = Fixture::new();
         if change_catalog {
-            fs::write(&f.image.catalog, b"{}").unwrap();
+            fs::write(&f.dir.join("catalog.json"), b"{}").unwrap();
         } else {
             let mut b = f.image.bytes.clone();
             b[1024] ^= 1;
@@ -415,7 +415,96 @@ fn malformed_size_vectors_and_unlisted_image_refused() {
     let mut b = f.image.bytes.clone();
     b[512] ^= 1;
     fs::write(&f.image.path, &b).unwrap();
-    assert!(prepare_with_catalog(&f.image.path, &f.image.catalog).is_err());
+    assert!(prepare_with_catalog(&f.image.path, &f.dir.join("catalog.json")).is_err());
+}
+
+#[test]
+fn standalone_import_checks_vectors_and_one_complete_calibration_profile() {
+    let fixture = Fixture::new();
+    let path = fixture.dir.join("future.bin");
+    let mut bytes = fixture.image.bytes.clone();
+    bytes[256..272].copy_from_slice(profile::MAGIC);
+    fs::write(&path, &bytes).unwrap();
+    let catalog = fixture.dir.join("catalog.json");
+
+    for optional_catalog in [None, Some(catalog.as_path())] {
+        let image = prepare_selected(&path, optional_catalog).unwrap();
+        assert_eq!(image.provenance, Provenance::Imported);
+        assert_eq!(image.bytes, bytes);
+    }
+    let mut stale: serde_json::Value =
+        serde_json::from_slice(&fs::read(&catalog).unwrap()).unwrap();
+    stale["images"][0]["sha256"] = json!(hash(&bytes));
+    // A matching catalog entry with the wrong wire checksum is inconsistent.
+    fs::write(&catalog, serde_json::to_vec(&stale).unwrap()).unwrap();
+    assert!(prepare_selected(&path, Some(&catalog)).is_err());
+    fs::write(&catalog, b"{malformed").unwrap();
+    assert!(prepare_selected(&path, Some(&catalog))
+        .unwrap()
+        .is_imported());
+
+    let mut bad_reset = bytes.clone();
+    bad_reset[4] &= !1;
+    let mut duplicate = bytes.clone();
+    duplicate[300..316].copy_from_slice(profile::MAGIC);
+    let mut truncated_profile = bytes.clone();
+    truncated_profile[256] ^= 1;
+    truncated_profile[IMAGE_BYTES - 16..].copy_from_slice(profile::MAGIC);
+    for wrong in [
+        bytes[..IMAGE_BYTES - 1].to_vec(),
+        bad_reset,
+        duplicate,
+        truncated_profile,
+        fixture.image.bytes.clone(),
+    ] {
+        fs::write(&path, wrong).unwrap();
+        assert!(prepare_selected(&path, None).is_err());
+    }
+}
+
+#[test]
+fn standalone_transfer_refuses_changed_selection_and_uses_immutable_bytes() {
+    let fixture = Fixture::new();
+    let path = fixture.dir.join("future.bin");
+    let mut bytes = fixture.image.bytes.clone();
+    bytes[256..272].copy_from_slice(profile::MAGIC);
+    fs::write(&path, &bytes).unwrap();
+    let image = prepare_selected(&path, None).unwrap();
+    let directory = fixture.dir.join("log");
+    let mut changed = bytes.clone();
+    changed[1024] ^= 1;
+    fs::write(&path, &changed).unwrap();
+    assert!(run::<Fake>(
+        image.clone(),
+        "FAKE",
+        &directory,
+        |_| panic!("opened port"),
+        |_| {},
+    )
+    .is_err());
+    assert!(!directory.exists());
+
+    fs::write(&path, &bytes).unwrap();
+    let state = Rc::new(RefCell::new(FakeState::default()));
+    run(
+        image,
+        "FAKE",
+        &directory,
+        |_| {
+            // A replacement after preflight must never enter the wire stream.
+            fs::write(&path, &changed).unwrap();
+            Ok(Fake(state.clone()))
+        },
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read(directory.join("tx-attempted.bin")).unwrap(),
+        packets(&bytes).flatten().collect::<Vec<_>>()
+    );
+    let started: serde_json::Value =
+        serde_json::from_slice(&fs::read(directory.join("started.json")).unwrap()).unwrap();
+    assert_eq!(started["image_provenance"], "structural_import");
 }
 
 /// Optional independent acceptance against the bundled real files; never opens COM.
@@ -431,7 +520,21 @@ fn release_catalog_real_images_match_wire_oracle_when_supplied() {
     assert!(!images.is_empty());
     for entry in images {
         let relative = entry["path"].as_str().unwrap();
-        let image = prepare_with_catalog(&root.join(relative), &catalog).unwrap();
+        let path = root.join(relative);
+        let image = prepare_with_catalog(&path, &catalog).unwrap();
+        if image.provenance == Provenance::Stock || profile::digest_offset(&image.bytes).is_ok() {
+            let independent = prepare_selected(&path, None).unwrap();
+            assert_eq!(independent.sha256, image.sha256);
+            assert_eq!(independent.tx_sha256, image.tx_sha256);
+            assert_eq!(
+                independent.provenance,
+                if image.sha256 == STOCK_SHA256 {
+                    Provenance::Stock
+                } else {
+                    Provenance::Imported
+                },
+            );
+        }
         let fixture = Fixture::new();
         let state = Rc::new(RefCell::new(FakeState::default()));
         let s = state.clone();

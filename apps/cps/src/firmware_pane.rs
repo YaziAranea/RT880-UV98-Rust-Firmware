@@ -56,16 +56,16 @@ impl Default for FirmwarePane {
             preview: false,
             language: Language::default(),
             message: msg!(
-                "Выберите образ из комплекта и COM-порт кабеля.",
-                "Select an image from the bundle and the cable's COM port.",
-                "Wählen Sie ein Image aus dem Paket und den COM-Port des Kabels."
+                "Выберите BIN и COM-порт кабеля.",
+                "Select a BIN and the cable's COM port.",
+                "Wählen Sie eine BIN und den COM-Port des Kabels."
             ),
             error: false,
             finished: false,
             log: Vec::new(),
         };
-        if let Some(candidate) = firmware::default_image(&base) {
-            pane.load_image(candidate);
+        if let Some(image) = firmware::default_image(&base) {
+            pane.set_prepared(image);
         }
         pane
     }
@@ -96,16 +96,7 @@ impl FirmwarePane {
         self.log.clear();
         self.selected_path = Some(path.clone());
         match firmware::prepare(&path) {
-            Ok(image) => {
-                self.image = Some(image);
-                self.error = false;
-                self.message =
-                    msg!(
-                        "Образ проверен по каталогу комплекта. Запись ещё не начиналась.",
-                        "Image verified against the bundle catalog. Writing has not started.",
-                        "Image anhand des Paketkatalogs geprüft. Der Schreibvorgang hat noch nicht begonnen.",
-                    );
-            }
+            Ok(image) => self.set_prepared(image),
             Err(error) => {
                 self.image = None;
                 self.error = true;
@@ -120,6 +111,17 @@ impl FirmwarePane {
                 });
             }
         }
+    }
+
+    fn set_prepared(&mut self, image: PreparedImage) {
+        self.selected_path = Some(image.path.clone());
+        self.image = Some(image);
+        self.error = false;
+        self.message = msg!(
+            "BIN выбран. Запись ещё не начиналась.",
+            "BIN selected. Writing has not started.",
+            "BIN ausgewählt. Der Schreibvorgang hat noch nicht begonnen.",
+        );
     }
 
     pub fn close_blocked(&mut self) {
@@ -182,13 +184,11 @@ impl FirmwarePane {
         let output = parent.join(format!("UV98-personal-{stamp}"));
         match firmware::profile::personalize(&source, &manifest, &output) {
             Ok(image) => {
-                self.selected_path = Some(image.path.clone());
-                self.image = Some(image);
+                self.set_prepared(image);
                 self.finished = false;
                 self.progress = None;
                 self.session_dir = None;
                 self.log.clear();
-                self.error = false;
                 self.message = msgf!(
                     "Персональный образ готов и выбран: {}. Изменён только SHA256 ваших калибровок. Запись ещё не начиналась.",
                     "Personalized image ready and selected: {}. Only the calibration SHA256 changed. Writing has not started.",
@@ -413,21 +413,21 @@ impl FirmwarePane {
                 ui.label(
                     RichText::new(tr!(
                         lang,
-                        "1  Образ из комплекта",
-                        "1  Image from the bundle",
-                        "1  Image aus dem Paket",
+                        "1  BIN приложения",
+                        "1  Application BIN",
+                        "1  Anwendungs-BIN",
                     ))
                         .strong()
                         .color(ACCENT),
                 );
                 ui.horizontal(|ui| {
-                    if ui.button(tr!(lang, "Выбрать .bin…", "Select .bin…", ".bin auswählen…")).clicked() {
+                    if ui.button(tr!(lang, "Выбрать BIN…", "Select BIN…", "BIN auswählen…")).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .set_title(tr!(
                                 lang,
-                                "Образ UV98 из проверенного комплекта",
-                                "UV98 image from the verified bundle",
-                                "UV98-Image aus dem geprüften Paket",
+                                "Выбор BIN для UV98 Plus",
+                                "Select BIN for UV98 Plus",
+                                "BIN für UV98 Plus auswählen",
                             ))
                             .add_filter(tr!(lang, "Прошивка UV98", "UV98 firmware", "UV98-Firmware"), &["bin"])
                             .pick_file()
@@ -436,14 +436,14 @@ impl FirmwarePane {
                         }
                     }
                     if let Some(image) = &self.image {
-                        ui.colored_label(ACCENT, image.display_label(lang));
+                        ui.colored_label(ACCENT, image.display_label());
                         ui.label(trf!(lang, "{} байт", "{} bytes", "{} Byte", image.bytes_len));
                     } else {
                         ui.label(tr!(
                             lang,
-                            "Проверенный образ не выбран",
-                            "No verified image selected",
-                            "Kein geprüftes Image ausgewählt",
+                            "BIN не выбран",
+                            "No BIN selected",
+                            "Keine BIN ausgewählt",
                         ));
                     }
                 });
@@ -452,17 +452,20 @@ impl FirmwarePane {
                 }
                 if let Some(image) = &self.image {
                     ui.monospace(format!("SHA256  {}", image.sha256));
+                    ui.small(image.provenance_label(lang));
+                    if image.is_imported() {
+                        ui.colored_label(WARNING, tr!(
+                            lang,
+                            "Происхождение и совместимость с платой не подтверждены. Используйте BIN из доверенного источника для своей ревизии.",
+                            "Source and board compatibility are unverified. Use a BIN from a source you trust for your board revision.",
+                            "Herkunft und Platinenkompatibilität sind unbestätigt. Verwenden Sie eine BIN aus vertrauenswürdiger Quelle für Ihre Platinenrevision.",
+                        ));
+                    }
                 }
-                ui.small(
-                    tr!(
-                        lang,
-                        "Принимаются образы каталога комплекта и проверенные персональные копии на их основе.",
-                        "CPS accepts images from the bundle catalog and verified personal copies based on them.",
-                        "CPS akzeptiert Images aus dem Paketkatalog und daraus erstellte geprüfte persönliche Kopien.",
-                    ),
-                );
                 ui.add_space(5.0);
-                if ui.add_enabled(self.image.is_some(), egui::Button::new(tr!(
+                if ui.add_enabled(
+                    self.image.as_ref().is_some_and(PreparedImage::is_personalization_source),
+                    egui::Button::new(tr!(
                     lang,
                     "Подготовить образ для моей рации…",
                     "Prepare an image for my radio…",
@@ -472,9 +475,9 @@ impl FirmwarePane {
                 }
                 ui.small(tr!(
                     lang,
-                    "Для первого запуска на другой рации: шаблон текущего выпуска → manifest.json полного снимка 4 МиБ → новая папка с BIN и каталогом. COM не используется; дампы и исходный BIN сохраняются.",
-                    "For first use on a different radio: select an image from this release, choose manifest.json from a full 4 MiB snapshot, then create a new folder with the BIN and catalog. The COM port stays closed and the dumps and source BIN stay intact.",
-                    "Für den ersten Start auf einem anderen Funkgerät: Wählen Sie ein Image dieser Version und die manifest.json eines vollständigen 4-MiB-Abbilds. Erstellen Sie dann einen neuen Ordner mit BIN und Katalog. Der COM-Port bleibt geschlossen. Abbilder und Quell-BIN bleiben erhalten.",
+                    "Для другой рации выберите исходный BIN и manifest.json полного снимка 4 МиБ с этой рации. CPS сохранит личный BIN, исходный BIN и каталог. Храните их вместе.",
+                    "For another radio, select the original BIN and its full 4 MiB snapshot's manifest.json. CPS saves the personal BIN, the source BIN and a catalog. Keep them together.",
+                    "Wählen Sie für ein anderes Funkgerät die ursprüngliche BIN und die manifest.json seines vollständigen 4-MiB-Abbilds. CPS speichert die persönliche BIN, die Quell-BIN und einen Katalog. Bewahren Sie diese Dateien zusammen auf.",
                 ));
                 ui.colored_label(WARNING, tr!(
                     lang,
@@ -744,9 +747,9 @@ impl FirmwarePane {
         ));
         ui.small(tr!(
             lang,
-            "Возврат стока: выберите собственный совместимый заводской BIN; CPS проверит его по каталогу. Публичный комплект не содержит заводского BIN.",
-            "To restore stock firmware, select your own compatible stock BIN. CPS verifies it against the catalog. The public bundle omits the stock BIN.",
-            "Wählen Sie zur Wiederherstellung der Werksfirmware Ihre eigene kompatible Werks-BIN. CPS prüft sie anhand des Katalogs. Das öffentliche Paket enthält keine Werks-BIN.",
+            "Для возврата стока выберите заводской RT-880_Upgrade_V1_16_250915.bin. CPS сверит его SHA256. В публичном комплекте этого файла нет.",
+            "To restore stock firmware, select your RT-880_Upgrade_V1_16_250915.bin. CPS checks its SHA256. The public bundle omits this file.",
+            "Wählen Sie zur Wiederherstellung der Werksfirmware Ihre RT-880_Upgrade_V1_16_250915.bin. CPS prüft ihre SHA256-Prüfsumme. Das öffentliche Paket enthält diese Datei nicht.",
         ));
     }
 }

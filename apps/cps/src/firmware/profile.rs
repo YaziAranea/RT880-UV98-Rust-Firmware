@@ -1,4 +1,4 @@
-//! Local personalization of a catalog-verified application. Never opens a port.
+//! Local personalization of a supported application image. Never opens a port.
 //! A verified snapshot establishes data consistency, not board compatibility or
 //! measured RF calibration quality. No radio dump is copied into the output.
 use super::*;
@@ -10,6 +10,8 @@ const STORAGE_BYTES: usize = 4 * 1024 * 1024;
 const STORAGE_BLOCKS: usize = STORAGE_BYTES / BLOCK_SIZE;
 const CAL_BYTES: usize = uv98_calibration::BLOCK_LEN;
 const METHOD: &str = "uv98-calibration-sha256-v1";
+const PERSONAL_BIN: &str = "UV98-personal.bin";
+const SOURCE_BIN: &str = "UV98-source.bin";
 
 struct VerifiedSnapshot {
     manifest_sha256: String,
@@ -17,16 +19,18 @@ struct VerifiedSnapshot {
     calibration: [u8; 32],
 }
 
-fn digest_offset(bytes: &[u8]) -> Result<usize, LocalizedText> {
+pub(super) fn digest_offset(bytes: &[u8]) -> Result<usize, LocalizedText> {
     let mut locations = bytes
         .windows(MAGIC.len())
         .enumerate()
         .filter_map(|(offset, value)| (value == MAGIC).then_some(offset + MAGIC.len()));
-    let offset = locations.next().ok_or_else(|| msg!(
-        "Образ не поддерживает персонализацию. Выберите исходный R36 или новее с профилем калибровок.",
-        "This image does not support personalization. Select an original R36 or later image with a calibration profile.",
-        "Dieses Image unterstützt keine Personalisierung. Wählen Sie ein Original-Image ab R36 mit Kalibrierprofil.",
-    ))?;
+    let offset = locations.next().ok_or_else(|| {
+        msg!(
+            "В BIN нет поддерживаемого профиля калибровок UV98CALPROFILE1.",
+            "The BIN has no supported UV98CALPROFILE1 calibration profile.",
+            "Die BIN enthält kein unterstütztes Kalibrierprofil UV98CALPROFILE1.",
+        )
+    })?;
     if locations.next().is_some() || offset + 32 > bytes.len() {
         return Err(msg!(
             "Профиль калибровок в BIN повреждён или неоднозначен",
@@ -354,46 +358,38 @@ pub fn personalize(
     manifest: &Path,
     output: &Path,
 ) -> Result<PreparedImage, LocalizedText> {
-    let checked = prepare_with_catalog(&source.path, &source.catalog)?;
-    if checked.bytes != source.bytes || checked.sha256 != source.sha256 {
+    if !source.is_personalization_source() {
         return Err(msg!(
-            "Исходный образ изменился после выбора",
-            "The source image changed after selection",
-            "Das Quell-Image wurde nach der Auswahl verändert"
+            "Для персонализации выберите исходный BIN с профилем калибровок",
+            "Select an original BIN with a calibration profile to personalize",
+            "Wählen Sie zur Personalisierung eine ursprüngliche BIN mit Kalibrierprofil"
         ));
     }
-    let original_catalog: Value = serde_json::from_slice(&bounded_read(&source.catalog, 65536)?)
-        .map_err(|error| error.to_string())?;
-    if !original_catalog["personalization"].is_null() {
-        return Err(msg!(
-            "Для новой персонализации выберите исходный образ комплекта",
-            "Select an original bundle image to create a new personalized image",
-            "Wählen Sie für eine neue Personalisierung ein Original-Image des Pakets"
-        ));
-    }
-    let offset = digest_offset(&checked.bytes)?;
+    source.revalidate()?;
+    let offset = digest_offset(&source.bytes)?;
     let snapshot = verify_snapshot(manifest)?;
-    let original_digest = &checked.bytes[offset..offset + 32];
-    let mut bytes = checked.bytes.clone();
+    let original_digest = &source.bytes[offset..offset + 32];
+    let mut bytes = source.bytes.clone();
     bytes[offset..offset + 32].copy_from_slice(&snapshot.calibration);
-    validate_structure(&bytes)?;
+    digest_offset(&bytes)?;
     let calibration_sha256 = snapshot
         .calibration
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect::<String>();
+    let relative_image = format!("firmware/{PERSONAL_BIN}");
     let catalog_data = json!({
-        "schema":1, "profile":PROFILE, "default_image":"firmware/UV98-personal.bin",
+        "schema":1, "profile":PROFILE, "default_image":relative_image,
         "personalization":{
-            "schema":1,"method":METHOD,"created_unix_ms":ms(),
-            "parent_image_sha256":checked.sha256,
+            "schema":2,"method":METHOD,"created_unix_ms":ms(),
+            "parent_image_sha256":source.sha256,
             "parent_calibration_sha256":original_digest.iter().map(|b| format!("{b:02x}")).collect::<String>(),
             "calibration_sha256":calibration_sha256,
             "snapshot_manifest_sha256":snapshot.manifest_sha256,"nor_sha256":snapshot.nor_sha256,
             "verified_two_reads":true,"mcu_flash_read":false,
             "board_scope":"same independently verified UV98/RT880 board revision only; snapshot does not prove hardware compatibility"
         },
-        "images":[{"label":format!("{}{PERSONAL_LABEL_SUFFIX}",checked.label),"path":"firmware/UV98-personal.bin",
+        "images":[{"label":source.label,"path":relative_image,
             "sha256":hash(&bytes),"bytes":IMAGE_BYTES,"tx_sha256":wire_hash(&bytes)}]
     });
     let encoded_catalog =
@@ -407,7 +403,8 @@ pub fn personalize(
         )
     })?;
     let folder = output.join("firmware");
-    let image_path = folder.join("UV98-personal.bin");
+    let image_path = folder.join(PERSONAL_BIN);
+    let source_path = folder.join(SOURCE_BIN);
     let catalog_path = folder.join("catalog.json");
     let mut created_files = Vec::new();
     let mut created_folder = false;
@@ -415,6 +412,7 @@ pub fn personalize(
         fs::create_dir(&folder).map_err(|error| error.to_string())?;
         created_folder = true;
         for (path, contents) in [
+            (&source_path, source.bytes.as_slice()),
             (&image_path, bytes.as_slice()),
             (&catalog_path, encoded_catalog.as_slice()),
         ] {
@@ -422,9 +420,8 @@ pub fn personalize(
             created_files.push(path.clone());
             durable(&mut file, contents)?;
         }
-        // The same validation path used by a later CPS session must accept the
-        // derivative and its exact, trusted parent before reporting success.
-        prepare_saved(&image_path, &source.catalog)
+        // A later CPS session needs only the files in this folder.
+        prepare_selected(&image_path, None)
     })();
     if result.is_err() {
         for path in created_files.iter().rev() {
@@ -438,93 +435,130 @@ pub fn personalize(
     result
 }
 
-/// Reopening a personal image does not let a self-written catalog replace the
-/// release allowlist. Restoring the old digest must reproduce an allowed BIN.
+pub(super) fn read_sidecar(path: &Path) -> Result<Vec<u8>, LocalizedText> {
+    bounded_read(&path.with_file_name("catalog.json"), 65536)
+}
+
+pub(super) fn saved_sidecar(
+    image: &PreparedImage,
+) -> Result<Option<(Vec<u8>, Value)>, LocalizedText> {
+    let sidecar = read_sidecar(&image.path).and_then(|bytes| {
+        let data = parse_catalog(&bytes)?;
+        Ok((bytes, data))
+    });
+    if image
+        .path
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case(std::ffi::OsStr::new(PERSONAL_BIN)))
+    {
+        // A missing or broken sidecar must fail closed for a saved BIN.
+        return sidecar.map(Some);
+    }
+    // A renamed personal BIN can still be recognized by its exact hash.
+    Ok(sidecar.ok().filter(|(_, data)| {
+        !data["personalization"].is_null() && catalog_entry(data, &image.sha256).is_some()
+    }))
+}
+
 pub(super) fn prepare_saved(
-    path: &Path,
-    release_catalog: &Path,
+    mut image: PreparedImage,
+    sidecar: &[u8],
+    data: &Value,
+    release_catalog: Option<&Path>,
 ) -> Result<PreparedImage, LocalizedText> {
-    let own_catalog = path
-        .parent()
-        .ok_or_else(|| {
-            msg!(
-                "Нет папки образа",
-                "Image folder is missing",
-                "Image-Ordner fehlt"
-            )
-        })?
-        .join("catalog.json");
-    let mut prepared = prepare_with_catalog(path, &own_catalog)?;
-    let data: Value = serde_json::from_slice(&bounded_read(&own_catalog, 65536)?)
-        .map_err(|error| error.to_string())?;
+    verify_saved(
+        &image.path,
+        &image.bytes,
+        &image.sha256,
+        &image.tx_sha256,
+        data,
+        release_catalog,
+    )?;
+    image.provenance = Provenance::Personal {
+        sidecar_sha256: hash(sidecar),
+        legacy_catalog: release_catalog
+            .filter(|_| data["personalization"]["schema"] == 1)
+            .map(Path::to_path_buf),
+    };
+    Ok(image)
+}
+
+/// New files carry the exact original BIN and recorded snapshot digests. This
+/// verifies the byte-for-byte derivation, not a signature on the local files.
+/// Earlier personal catalogs require their original release catalog.
+pub(super) fn verify_saved(
+    path: &Path,
+    bytes: &[u8],
+    sha256: &str,
+    tx_sha256: &str,
+    data: &Value,
+    release_catalog: Option<&Path>,
+) -> Result<(), LocalizedText> {
+    verify_entry(data, sha256, tx_sha256)?;
     let provenance = &data["personalization"];
-    if provenance["schema"] != 1
-        || provenance["method"] != METHOD
+    if provenance["method"] != METHOD
         || provenance["verified_two_reads"] != true
+        || provenance["mcu_flash_read"] != false
     {
         return Err(msg!(
-            "Нет подтверждённого происхождения персонального образа",
-            "The personalized image has no verified provenance",
-            "Die Herkunft des personalisierten Images ist nicht bestätigt"
+            "В каталоге личного BIN отсутствуют сведения о проверке снимка",
+            "The personal BIN catalog is missing the snapshot verification record",
+            "Im Katalog der persönlichen BIN fehlen Angaben zur Prüfung des Abbilds"
         ));
     }
-    let offset = digest_offset(&prepared.bytes)?;
-    if prepared.bytes[offset..offset + 32] != sha_bytes(&provenance["calibration_sha256"])? {
+    sha_bytes(&provenance["snapshot_manifest_sha256"])?;
+    sha_bytes(&provenance["nor_sha256"])?;
+    let offset = digest_offset(bytes)?;
+    if bytes[offset..offset + 32] != sha_bytes(&provenance["calibration_sha256"])? {
         return Err(msg!(
             "Профиль BIN не совпадает с каталогом",
             "The profile in the BIN does not match the catalog",
             "Das Profil in der BIN stimmt nicht mit dem Katalog überein"
         ));
     }
-    let mut restored = prepared.bytes.clone();
+    let mut restored = bytes.to_vec();
     restored[offset..offset + 32]
         .copy_from_slice(&sha_bytes(&provenance["parent_calibration_sha256"])?);
     let parent_sha = hash(&restored);
     if provenance["parent_image_sha256"].as_str() != Some(&parent_sha) {
-        return Err(msg!(
-            "Изменения BIN выходят за границы профиля калибровок",
-            "BIN changes extend beyond the calibration profile",
-            "Änderungen an der BIN gehen über das Kalibrierprofil hinaus"
-        ));
+        return Err(source_mismatch());
     }
-    let trusted: Value = serde_json::from_slice(&bounded_read(release_catalog, 65536)?)
-        .map_err(|error| error.to_string())?;
-    if trusted["schema"] != 1 || trusted["profile"] != PROFILE {
-        return Err(msg!(
-            "Неподдерживаемый каталог комплекта",
-            "Unsupported bundle catalog",
-            "Paketkatalog wird nicht unterstützt"
-        ));
+    match provenance["schema"].as_u64() {
+        Some(2) => {
+            let source = bounded_read(&path.with_file_name(SOURCE_BIN), IMAGE_BYTES)?;
+            if source != restored || digest_offset(&source)? != offset {
+                return Err(source_mismatch());
+            }
+        }
+        Some(1) => {
+            let release_catalog = release_catalog.ok_or_else(|| msg!(
+                "Для личного BIN от старой CPS нужен каталог выпуска с исходным BIN",
+                "A personal BIN from an older CPS needs the release catalog that lists its source BIN",
+                "Eine persönliche BIN aus einer älteren CPS benötigt den Versionskatalog mit der Quell-BIN"
+            ))?;
+            bundle_entry(
+                &read_catalog(release_catalog)?,
+                &parent_sha,
+                &wire_hash(&restored),
+            )?;
+        }
+        _ => {
+            return Err(msg!(
+                "Версия каталога личного BIN не поддерживается",
+                "Unsupported personal BIN catalog version",
+                "Katalogversion der persönlichen BIN wird nicht unterstützt"
+            ))
+        }
     }
-    let entry = trusted["images"]
-        .as_array()
-        .ok_or_else(|| {
-            msg!(
-                "Нет images в каталоге",
-                "The catalog is missing images",
-                "Im Katalog fehlt images"
-            )
-        })?
-        .iter()
-        .find(|entry| entry["sha256"].as_str() == Some(&parent_sha))
-        .ok_or_else(|| {
-            msg!(
-                "Исходный BIN персонального образа отсутствует в каталоге этого комплекта",
-                "The source BIN of the personalized image is missing from this bundle's catalog",
-                "Die Quell-BIN des personalisierten Images fehlt im Katalog dieses Pakets"
-            )
-        })?;
-    if entry["bytes"].as_u64() != Some(IMAGE_BYTES as u64)
-        || entry["tx_sha256"].as_str() != Some(&wire_hash(&restored))
-    {
-        return Err(msg!(
-            "Исходный BIN не соответствует каталогу комплекта",
-            "The source BIN does not match the bundle catalog",
-            "Die Quell-BIN stimmt nicht mit dem Paketkatalog überein"
-        ));
-    }
-    prepared.personalized = true;
-    Ok(prepared)
+    Ok(())
+}
+
+fn source_mismatch() -> LocalizedText {
+    msg!(
+        "Личный BIN отличается от исходного за пределами профиля калибровок",
+        "The personal BIN differs from its source outside the calibration profile",
+        "Die persönliche BIN weicht außerhalb des Kalibrierprofils von der Quell-BIN ab"
+    )
 }
 
 #[cfg(test)]

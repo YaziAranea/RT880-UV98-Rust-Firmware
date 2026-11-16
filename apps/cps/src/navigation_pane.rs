@@ -311,9 +311,9 @@ impl Draft {
                 "R35 sendet manuelle Baken auf der TX-Frequenz des aktiven A/B-Kanals, die im APRS-Bildschirm angezeigt wird. Die ursprüngliche A/B/C-Zuordnung bleibt aus Kompatibilitätsgründen erhalten und steuert diese Bake nicht.",
             ));
             ui.small(tr!(language,
-                "Комментарий — текст в APRS. Select V передаёт числовой ID, а не текстовое имя. Автоматический маяк от одного появления GPS-позиции не запускается.",
-                "APRS transmits the comment as text. Select V sends a numeric ID. Acquiring a GPS fix alone does not trigger a beacon.",
-                "APRS überträgt den Kommentar als Text. Select V sendet eine numerische ID. Eine ermittelte GPS-Position allein löst keine Bake aus.",
+                "Комментарий — текст в APRS. Автоматический маяк от одного появления GPS-позиции не запускается.",
+                "APRS transmits the comment as text. Acquiring a GPS fix alone does not trigger a beacon.",
+                "APRS überträgt den Kommentar als Text. Eine ermittelte GPS-Position allein löst keine Bake aus.",
             ));
         });
         let mut action = Action::default();

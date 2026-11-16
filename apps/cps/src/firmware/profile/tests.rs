@@ -6,6 +6,7 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Fixture {
     root: PathBuf,
     source: PreparedImage,
+    source_catalog: PathBuf,
     manifest: PathBuf,
     data: Value,
 }
@@ -80,6 +81,7 @@ impl Fixture {
         Self {
             root,
             source,
+            source_catalog,
             manifest,
             data,
         }
@@ -91,8 +93,8 @@ impl Fixture {
 
     fn rewrite_source(&mut self, bytes: &[u8]) {
         fs::write(&self.source.path, bytes).unwrap();
-        fs::write(&self.source.catalog, serde_json::to_vec(&json!({"schema":1,"profile":PROFILE,"images":[{"label":"SYNTHETIC TEST R36","sha256":hash(bytes),"bytes":IMAGE_BYTES,"tx_sha256":wire_hash(bytes)}]})).unwrap()).unwrap();
-        self.source = prepare_with_catalog(&self.source.path, &self.source.catalog).unwrap();
+        fs::write(&self.source_catalog, serde_json::to_vec(&json!({"schema":1,"profile":PROFILE,"images":[{"label":"SYNTHETIC TEST R36","sha256":hash(bytes),"bytes":IMAGE_BYTES,"tx_sha256":wire_hash(bytes)}]})).unwrap()).unwrap();
+        self.source = prepare_with_catalog(&self.source.path, &self.source_catalog).unwrap();
     }
 }
 
@@ -103,8 +105,11 @@ impl Drop for Fixture {
 }
 
 #[test]
-fn personal_image_changes_only_digest_and_reopens_with_trusted_parent() {
-    let fixture = Fixture::new();
+fn independent_source_changes_only_digest_and_reopens_without_original_files() {
+    let mut fixture = Fixture::new();
+    fs::remove_file(&fixture.source_catalog).unwrap();
+    fixture.source = prepare_selected(&fixture.source.path, None).unwrap();
+    assert!(fixture.source.is_imported());
     let original = fixture.source.bytes.clone();
     let backup_manifest = fs::read(&fixture.manifest).unwrap();
     let output = fixture.root.join("personal");
@@ -120,11 +125,31 @@ fn personal_image_changes_only_digest_and_reopens_with_trusted_parent() {
     assert_eq!(fs::read(&fixture.source.path).unwrap(), original);
     assert_eq!(fs::read(&fixture.manifest).unwrap(), backup_manifest);
     assert_eq!(fs::read_dir(&output).unwrap().count(), 1);
-    assert_eq!(fs::read_dir(output.join("firmware")).unwrap().count(), 2);
-    let selected = prepare_saved(&image.path, &fixture.source.catalog).unwrap();
+    assert_eq!(fs::read_dir(output.join("firmware")).unwrap().count(), 3);
+    assert_eq!(
+        fs::read(image.path.with_file_name(SOURCE_BIN)).unwrap(),
+        original
+    );
+    fs::remove_file(&fixture.source.path).unwrap();
+    fs::remove_file(&fixture.manifest).unwrap();
+    let selected = prepare_selected(&image.path, None).unwrap();
+    assert!(matches!(
+        selected.provenance,
+        Provenance::Personal {
+            legacy_catalog: None,
+            ..
+        }
+    ));
+    assert!(selected.revalidate().is_ok());
     assert_eq!(selected.sha256, image.sha256);
     assert_eq!(selected.tx_sha256, wire_hash(&selected.bytes));
-    assert_eq!(default_image(&output), Some(image.path));
+    assert_eq!(default_image(&output).unwrap().path, image.path);
+    let renamed = image.path.with_file_name("renamed.bin");
+    fs::rename(&image.path, &renamed).unwrap();
+    assert!(matches!(
+        prepare_selected(&renamed, None).unwrap().provenance,
+        Provenance::Personal { .. }
+    ));
 }
 
 #[test]
@@ -230,7 +255,8 @@ fn self_consistent_personal_catalog_cannot_allow_unrelated_code_changes() {
     let mut bytes = image.bytes;
     bytes[2000] ^= 1;
     fs::write(&image.path, &bytes).unwrap();
-    let mut data: Value = serde_json::from_slice(&fs::read(&image.catalog).unwrap()).unwrap();
+    let sidecar = image.path.with_file_name("catalog.json");
+    let mut data: Value = serde_json::from_slice(&fs::read(&sidecar).unwrap()).unwrap();
     data["images"][0]["sha256"] = json!(hash(&bytes));
     data["images"][0]["tx_sha256"] = json!(wire_hash(&bytes));
     let offset = digest_offset(&bytes).unwrap();
@@ -238,6 +264,76 @@ fn self_consistent_personal_catalog_cannot_allow_unrelated_code_changes() {
         &sha_bytes(&data["personalization"]["parent_calibration_sha256"]).unwrap(),
     );
     data["personalization"]["parent_image_sha256"] = json!(hash(&bytes));
-    fs::write(&image.catalog, serde_json::to_vec(&data).unwrap()).unwrap();
-    assert!(prepare_saved(&image.path, &fixture.source.catalog).is_err());
+    fs::write(&sidecar, serde_json::to_vec(&data).unwrap()).unwrap();
+    assert!(prepare_selected(&image.path, None).is_err());
+}
+
+#[test]
+fn personal_sidecar_and_archived_source_are_required_and_revalidated() {
+    let fixture = Fixture::new();
+    let image = personalize(
+        &fixture.source,
+        &fixture.manifest,
+        &fixture.root.join("personal"),
+    )
+    .unwrap();
+    let source_path = image.path.with_file_name(SOURCE_BIN);
+    fs::remove_file(&source_path).unwrap();
+    assert!(prepare_selected(&image.path, None).is_err());
+    assert!(image.revalidate().is_err());
+    fs::write(source_path, &fixture.source.bytes).unwrap();
+
+    let sidecar_path = image.path.with_file_name("catalog.json");
+    let sidecar = fs::read(&sidecar_path).unwrap();
+    let mut forged: Value = serde_json::from_slice(&sidecar).unwrap();
+    forged["personalization"]["snapshot_manifest_sha256"] = json!("invalid");
+    fs::write(&sidecar_path, serde_json::to_vec(&forged).unwrap()).unwrap();
+    assert!(prepare_selected(&image.path, None).is_err());
+    assert!(image.revalidate().is_err());
+
+    fs::remove_file(&sidecar_path).unwrap();
+    assert!(prepare_selected(&image.path, None).is_err());
+    fs::write(sidecar_path, sidecar).unwrap();
+    assert!(prepare_selected(&image.path, None)
+        .unwrap()
+        .revalidate()
+        .is_ok());
+}
+
+#[test]
+fn legacy_personal_catalog_requires_the_release_catalog() {
+    let fixture = Fixture::new();
+    let image = personalize(
+        &fixture.source,
+        &fixture.manifest,
+        &fixture.root.join("personal"),
+    )
+    .unwrap();
+    let sidecar = image.path.with_file_name("catalog.json");
+    let mut data: Value = serde_json::from_slice(&fs::read(&sidecar).unwrap()).unwrap();
+    data["personalization"]["schema"] = json!(1);
+    fs::write(&sidecar, serde_json::to_vec(&data).unwrap()).unwrap();
+    fs::remove_file(image.path.with_file_name(SOURCE_BIN)).unwrap();
+    assert!(prepare_selected(&image.path, None).is_err());
+    let selected = prepare_selected(&image.path, Some(&fixture.source_catalog)).unwrap();
+    assert!(matches!(
+        selected.provenance,
+        Provenance::Personal {
+            legacy_catalog: Some(_),
+            ..
+        }
+    ));
+    assert!(selected.revalidate().is_ok());
+}
+
+#[test]
+fn independent_source_changed_after_selection_cannot_be_personalized() {
+    let fixture = Fixture::new();
+    let source = prepare_selected(&fixture.source.path, None).unwrap();
+    let mut changed = source.bytes.clone();
+    changed[2000] ^= 1;
+    fs::write(&source.path, changed).unwrap();
+    let output = fixture.root.join("personal");
+    assert!(personalize(&source, &fixture.manifest, &output).is_err());
+    assert!(!output.exists());
 }
