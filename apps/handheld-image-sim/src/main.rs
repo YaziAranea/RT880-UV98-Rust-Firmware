@@ -865,10 +865,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tap(&mut app, &mut now, Key::Down);
     drain(&mut app);
     let cursor_pixel_bytes = (panel.borrow().pixel_words - before) * 2;
-    assert_eq!(cursor_pixel_bytes, 15 * WIDTH * 2);
+    assert_eq!(cursor_pixel_bytes, 67 * WIDTH * 2);
     performance.push(serde_json::json!({
         "action":"menu cursor within current page",
-        "rows":15, "pixel_bytes":cursor_pixel_bytes, "old_rows":67,
+        "rows":67, "pixel_bytes":cursor_pixel_bytes, "selection_style":"filled",
         "physical_latency_measured":false
     }));
     tap(&mut app, &mut now, Key::Up);

@@ -28,24 +28,28 @@ The R40 kit bundles the released CPS 0.7.0 build. [CPS 0.7.0 source](https://git
 
 <table>
 <tr>
-<td align="center"><img src="docs/images/r39/en-home.png" width="240" alt="English dual A/B frequency screen with signal meters"><br><b>A/B channels and VFOs</b></td>
-<td align="center"><img src="docs/images/r39/en-spectrum.png" width="240" alt="Colour frequency spectrum and waterfall"><br><b>Spectrum and waterfall</b></td>
+<td align="center"><img src="docs/images/r40/en-home.png" width="240" alt="English dual A/B frequency screen with signal meters"><br><b>A/B channels and VFOs</b></td>
+<td align="center"><img src="docs/images/r40/en-spectrum.png" width="240" alt="Colour frequency spectrum and waterfall"><br><b>Spectrum and waterfall</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r39/en-hf.png" width="240" alt="Shortwave receiver with an RSSI waterfall"><br><b>Shortwave tools</b></td>
-<td align="center"><img src="docs/images/r39/en-menu.png" width="240" alt="English radio menu"><br><b>English menu in R39</b></td>
+<td align="center"><img src="docs/images/r40/en-hf.png" width="240" alt="Shortwave receiver with an RSSI waterfall"><br><b>Shortwave tools</b></td>
+<td align="center"><img src="docs/images/r40/en-menu.png" width="240" alt="English radio menu"><br><b>English menu in R40</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r39/en-tx-b.png" width="240" alt="Red TX outline on VFO B while VFO A is selected"><br><b>PTT B with A selected</b></td>
-<td align="center"><img src="docs/images/r39/en-battery-low.png" width="240" alt="Low battery indication on the main screen"><br><b>Low battery</b></td>
+<td align="center"><img src="docs/images/r40/en-tx-b.png" width="240" alt="Red TX outline on VFO B while VFO A is selected"><br><b>PTT B with A selected</b></td>
+<td align="center"><img src="docs/images/r40/en-battery-low.png" width="240" alt="Low battery indication on the main screen"><br><b>Low battery</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r39/en-cb-grid.png" width="240" alt="40-channel CB grid at channel 15 AM"><br><b>CB grid</b></td>
-<td align="center"><img src="docs/images/r39/en-mdc.png" width="240" alt="MDC1200 settings for slot B and its local name"><br><b>MDC1200</b></td>
+<td align="center"><img src="docs/images/r40/en-cb-grid.png" width="240" alt="40-channel CB grid at channel 15 AM"><br><b>CB grid</b></td>
+<td align="center"><img src="docs/images/r40/en-mdc.png" width="240" alt="MDC1200 settings for slot B and its local name"><br><b>MDC1200</b></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/images/r40/en-dtmf-rx.png" width="240" alt="Incoming DTMF"><br><b>Incoming DTMF</b></td>
+<td align="center"><img src="docs/images/r40/en-mdc-alias-en.png" width="240" alt="Local name entry"><br><b>Local name entry</b></td>
 </tr>
 </table>
 
-*R39 screenshots from the Rust renderer. Signals and readings are simulated.*
+*R40 screenshots from the Rust renderer. Signals and readings are simulated.*
 
 ## R40 features
 

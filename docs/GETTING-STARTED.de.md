@@ -13,7 +13,7 @@ Diese Anleitung beschreibt die erste Vorbereitung eines UV-98 Plus / der untersu
 3. Mit der originalen CPS für das eigene Modell das Gerät auslesen und die ursprüngliche `.880dmf`- oder `.98pdmf`-Datei speichern. Eine vorhandene Originaldatei wie `999.880dmf` unverändert aufbewahren.
 4. Original-CPS, Radio Tuning Software und andere Programme schließen, die das Kabel verwenden. Vor dem ersten Auslesen mit unserer CPS das Gerät für 3 Sekunden ausschalten und wieder normal starten.
 5. Einen Ordner anlegen, etwa `Dokumente/UV98-backup-2026-11-16`. Sinnvolle Unterordner: `01-original`, `02-calibration`, `03-nor`, `04-settings`, `05-recovery`. Die ursprüngliche CPS-Datei in `01-original` ablegen.
-6. Das [R40-Paket mit CPS 0.7.0](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases) vollständig entpacken. `UV98-CPS.exe` starten, unter **Язык / Language / Sprache** die Option **Deutsch** wählen und **Sicherungen** öffnen. Den tatsächlichen COM-Port über **Liste aktualisieren → Verfügbare Ports** wählen. Frühere Angaben wie COM20/COM21 sind keine Vorgabe für Ihren Rechner.
+6. Das [R40-Paket mit CPS 0.7.0](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r40/UV98-r40-2026-11-16.zip) vollständig entpacken. `UV98-CPS.exe` starten, unter **Язык / Language / Sprache** die Option **Deutsch** wählen und **Sicherungen** öffnen. Den tatsächlichen COM-Port über **Liste aktualisieren → Verfügbare Ports** wählen. Frühere Angaben wie COM20/COM21 sind keine Vorgabe für Ihren Rechner.
 
 Die Sprachwahl ist stets in der Symbolleiste sichtbar. Alle acht Reiter und bereits angezeigte Statusmeldungen wechseln sofort die Sprache. Ungespeicherte Änderungen bleiben erhalten. CPS speichert die Sprachwahl im Windows-Benutzerprofil. Titel und Filter der Dateidialoge folgen der CPS-Sprache. Die Standardschaltflächen folgen der Windows-Sprache. Das R40-Paket enthält die veröffentlichte CPS 0.7.0.
 
@@ -137,7 +137,7 @@ Beim normalen BK4819-FM-Empfang mit geöffnetem Audioweg öffnet sich das Fenste
 3. Unter **UNIT ID** vier Hexadezimalzeichen von `0001` bis `DEEE` eingeben. Für Ziffern 0–9 kurz drücken und für A–F die Tasten 1–6 gedrückt halten. Mit `*` löschen, mit MENU übernehmen und mit EXIT abbrechen. Zum Löschen der ID ein leeres Feld bestätigen.
 4. Unter **NAME (LOKAL)** eine Ziffer wiederholt drücken, um ihre Zeichen durchzugehen. Vor einem weiteren Zeichen auf derselben Taste ↑ drücken. Mit `#` RU/EN umschalten und mit `*` löschen. MENU speichert bis zu zwölf Zeichen. EXIT bricht die Bearbeitung ab.
 
-Das MDC1200-Paket überträgt die 16-Bit-PTT-ID. Der Name dient als lokale Beschriftung auf diesem Funkgerät. Zeitpunkt, ID, Name und weitere Firmware-Einstellungen liegen bis zum Ausschalten im RAM. [Simulierte Namenseingabe](images/r39/de-mdc-alias-en.png)
+Das MDC1200-Paket überträgt die 16-Bit-PTT-ID. Der Name dient als lokale Beschriftung auf diesem Funkgerät. Zeitpunkt, ID, Name und weitere Firmware-Einstellungen liegen bis zum Ausschalten im RAM. [Simulierte Namenseingabe](images/r40/de-mdc-alias-en.png)
 
 ## 6. Bei Bedarf zur Originalfirmware zurückkehren
 

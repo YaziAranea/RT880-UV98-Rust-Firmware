@@ -28,24 +28,28 @@ Das R40-Paket enthält die veröffentlichte CPS 0.7.0. [Quellcode der CPS 0.7.0]
 
 <table>
 <tr>
-<td align="center"><img src="docs/images/r39/de-home.png" width="240" alt="Deutsche A/B-Frequenzanzeige mit Signalpegeln"><br><b>Kanäle und VFOs A/B</b></td>
-<td align="center"><img src="docs/images/r39/de-spectrum.png" width="240" alt="Farbiges Frequenzspektrum mit Wasserfall"><br><b>Spektrum und Wasserfall</b></td>
+<td align="center"><img src="docs/images/r40/de-home.png" width="240" alt="Deutsche A/B-Frequenzanzeige mit Signalpegeln"><br><b>Kanäle und VFOs A/B</b></td>
+<td align="center"><img src="docs/images/r40/de-spectrum.png" width="240" alt="Farbiges Frequenzspektrum mit Wasserfall"><br><b>Spektrum und Wasserfall</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r39/de-hf.png" width="240" alt="Kurzwellenempfänger mit RSSI-Wasserfall"><br><b>Kurzwellenfunktionen</b></td>
-<td align="center"><img src="docs/images/r39/de-menu.png" width="240" alt="Deutsches Funkgerätemenü"><br><b>Deutsches Menü in R39</b></td>
+<td align="center"><img src="docs/images/r40/de-hf.png" width="240" alt="Kurzwellenempfänger mit RSSI-Wasserfall"><br><b>Kurzwellenfunktionen</b></td>
+<td align="center"><img src="docs/images/r40/de-menu.png" width="240" alt="Deutsches Funkgerätemenü"><br><b>Deutsches Menü in R40</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r39/de-tx-b.png" width="240" alt="Roter TX-Rahmen auf VFO B bei ausgewähltem VFO A"><br><b>PTT B bei Auswahl von A</b></td>
-<td align="center"><img src="docs/images/r39/de-battery-low.png" width="240" alt="Anzeige für einen niedrigen Akkustand"><br><b>Niedriger Akkustand</b></td>
+<td align="center"><img src="docs/images/r40/de-tx-b.png" width="240" alt="Roter TX-Rahmen auf VFO B bei ausgewähltem VFO A"><br><b>PTT B bei Auswahl von A</b></td>
+<td align="center"><img src="docs/images/r40/de-battery-low.png" width="240" alt="Anzeige für einen niedrigen Akkustand"><br><b>Niedriger Akkustand</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r39/de-cb-grid.png" width="240" alt="CB-Raster mit 40 Kanälen und ausgewähltem Kanal 15 AM"><br><b>CB-Kanalraster</b></td>
-<td align="center"><img src="docs/images/r39/de-mdc.png" width="240" alt="MDC1200-Einstellungen und lokaler Name für VFO B"><br><b>MDC1200</b></td>
+<td align="center"><img src="docs/images/r40/de-cb-grid.png" width="240" alt="CB-Raster mit 40 Kanälen und ausgewähltem Kanal 15 AM"><br><b>CB-Kanalraster</b></td>
+<td align="center"><img src="docs/images/r40/de-mdc.png" width="240" alt="MDC1200-Einstellungen und lokaler Name für VFO B"><br><b>MDC1200</b></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/images/r40/de-dtmf-rx.png" width="240" alt="DTMF-Empfang"><br><b>DTMF-Empfang</b></td>
+<td align="center"><img src="docs/images/r40/de-mdc-alias-en.png" width="240" alt="Lokaler Name"><br><b>Lokaler Name</b></td>
 </tr>
 </table>
 
-*R39-Bildschirmansichten aus dem Rust-Renderer. Signale und Messwerte sind simuliert.*
+*R40-Bildschirmansichten aus dem Rust-Renderer. Signale und Messwerte sind simuliert.*
 
 ## Funktionen in R40
 

@@ -28,24 +28,28 @@
 
 <table>
 <tr>
-<td align="center"><img src="docs/images/r39/ru-home.png" width="240" alt="Две частоты A/B и шкалы уровня сигнала"><br><b>Каналы и VFO A/B</b></td>
-<td align="center"><img src="docs/images/r39/ru-spectrum.png" width="240" alt="Цветной спектр диапазона и водопад"><br><b>Спектр и водопад</b></td>
+<td align="center"><img src="docs/images/r40/ru-home.png" width="240" alt="Две частоты A/B и шкалы уровня сигнала"><br><b>Каналы и VFO A/B</b></td>
+<td align="center"><img src="docs/images/r40/ru-spectrum.png" width="240" alt="Цветной спектр диапазона и водопад"><br><b>Спектр и водопад</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r39/ru-hf.png" width="240" alt="КВ-приёмник с обзором RSSI"><br><b>Инструменты КВ</b></td>
-<td align="center"><img src="docs/images/r39/ru-menu.png" width="240" alt="Русское меню рации"><br><b>Русское меню R39</b></td>
+<td align="center"><img src="docs/images/r40/ru-hf.png" width="240" alt="КВ-приёмник с обзором RSSI"><br><b>Инструменты КВ</b></td>
+<td align="center"><img src="docs/images/r40/ru-menu.png" width="240" alt="Русское меню рации"><br><b>Русское меню R40</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r39/ru-tx-b.png" width="240" alt="Красная рамка TX на VFO B при выбранном VFO A"><br><b>PTT B при выбранной строке A</b></td>
-<td align="center"><img src="docs/images/r39/ru-battery-low.png" width="240" alt="Индикация низкого заряда на главном экране"><br><b>Низкий заряд</b></td>
+<td align="center"><img src="docs/images/r40/ru-tx-b.png" width="240" alt="Красная рамка TX на VFO B при выбранном VFO A"><br><b>PTT B при выбранной строке A</b></td>
+<td align="center"><img src="docs/images/r40/ru-battery-low.png" width="240" alt="Индикация низкого заряда на главном экране"><br><b>Низкий заряд</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r39/ru-cb-grid.png" width="240" alt="40 каналов CB с выбранным каналом 15 AM"><br><b>Сетка CB</b></td>
-<td align="center"><img src="docs/images/r39/ru-mdc.png" width="240" alt="Настройки MDC1200 и локальное имя для слота B"><br><b>MDC1200</b></td>
+<td align="center"><img src="docs/images/r40/ru-cb-grid.png" width="240" alt="40 каналов CB с выбранным каналом 15 AM"><br><b>Сетка CB</b></td>
+<td align="center"><img src="docs/images/r40/ru-mdc.png" width="240" alt="Настройки MDC1200 и локальное имя для слота B"><br><b>MDC1200</b></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/images/r40/ru-dtmf-rx.png" width="240" alt="Входящий DTMF"><br><b>Входящий DTMF</b></td>
+<td align="center"><img src="docs/images/r40/ru-mdc-alias-en.png" width="240" alt="Ввод локального имени"><br><b>Ввод локального имени</b></td>
 </tr>
 </table>
 
-*Кадры R39 из Rust-рендерера. Сигналы и показания смоделированы.*
+*Кадры R40 из Rust-рендерера. Сигналы и показания смоделированы.*
 
 ## Возможности R40
 
