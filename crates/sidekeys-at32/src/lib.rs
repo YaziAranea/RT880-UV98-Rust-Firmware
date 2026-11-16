@@ -1,16 +1,19 @@
 #![no_std]
 #![cfg_attr(not(feature = "hardware"), forbid(unsafe_code))]
 //! PC2/ADC1 channel 12 side keys and PA7/ADC1 channel 7 battery.
+//! The ADC1 owner also supports a manual PA5/ADC1 channel 5 RX diagnostic.
 //! Conversions use foreground polling without DMA, IRQ or RF side effects.
 //! SDK calibration is volatile ADC self-calibration, not a calibration-NOR write.
 //! Auxiliary codes preserve stock thresholds; physical PTT B mapping is unproved.
 
 mod battery;
+mod capture;
 pub mod engine;
 #[cfg(feature = "hardware")]
 pub mod hardware;
 
 pub use battery::BatteryMonitor;
+pub use capture::{CaptureStats, CaptureTiming, RX_AUDIO_HZ, RX_AUDIO_SAMPLES};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Error {

@@ -32,6 +32,7 @@ pub const DIAGNOSTIC_CONTROL_F_MASK: u16 = 1 << 8;
 pub const BOOT_LOG_A_MASK: u16 = 1 << 11;
 pub const SIDE_ADC_C_MASK: u16 = 1 << 2;
 pub const BATTERY_ADC_A_MASK: u16 = 1 << 7;
+pub const RX_AUDIO_A_MASK: u16 = 1 << 5;
 /// Operational LCD/keypad lights and green/red status LEDs. The latter two
 /// consume PA13/PA14, so the operational backend cannot coexist with SWD.
 pub const RADIO_CONTROL_A_MASK: u16 = (1 << 4) | (1 << 9) | (1 << 13) | (1 << 14);
@@ -161,6 +162,26 @@ pub struct ModemPins {
 }
 pub struct ReservedAfterAuxiliary {
     _single_context: PhantomData<*mut ()>,
+}
+/// PA5 / ADC1_IN5 / DAC2_OUT. Does not confer ownership of ADC1 or DAC.
+pub struct RxAudioPins {
+    _single_context: PhantomData<*mut ()>,
+}
+pub struct ReservedAfterRxAudio {
+    _single_context: PhantomData<*mut ()>,
+}
+impl ReservedAfterAuxiliary {
+    /// Pure ownership split. The diagnostic uses PA5 as a passive analog input.
+    pub fn with_rx_audio(self) -> (RxAudioPins, ReservedAfterRxAudio) {
+        (
+            RxAudioPins {
+                _single_context: PhantomData,
+            },
+            ReservedAfterRxAudio {
+                _single_context: PhantomData,
+            },
+        )
+    }
 }
 impl RemainingPins {
     pub fn with_auxiliary(self) -> (GpsPins, ModemPins, ReservedAfterAuxiliary) {
@@ -346,6 +367,23 @@ mod tests {
                     | RF_PRIMARY_A_MASK
                     | RADIO_CONTROL_A_MASK
                     | BOOT_LOG_A_MASK
+                    | gps_and_modem),
+            0
+        );
+    }
+    #[test]
+    fn rx_audio_input_does_not_alias_existing_gpioa_owners() {
+        let gps_and_modem = 0x000f;
+        assert_eq!(RX_AUDIO_A_MASK, 0x0020);
+        assert_eq!(
+            RX_AUDIO_A_MASK
+                & (NOR_A_MASK
+                    | LCD_A_MASK
+                    | KEYSCAN_A_MASK
+                    | RF_PRIMARY_A_MASK
+                    | RADIO_CONTROL_A_MASK
+                    | BOOT_LOG_A_MASK
+                    | BATTERY_ADC_A_MASK
                     | gps_and_modem),
             0
         );

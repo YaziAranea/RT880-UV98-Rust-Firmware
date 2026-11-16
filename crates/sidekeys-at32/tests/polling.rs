@@ -1,7 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 use uv98_sidekeys_at32::{
     engine::{Engine, Register, Registers},
-    Error, PollTiming, Sample,
+    Error, PollTiming, Sample, RX_AUDIO_SAMPLES,
 };
 
 #[derive(Default)]
@@ -13,11 +13,13 @@ struct Model {
     triggers: usize,
     raw: u32,
     battery_raw: u32,
+    audio_raw: u32,
     conversion_channels: Vec<u32>,
     data_channel: u32,
     mux_lag: bool,
     fail_conversion: Option<usize>,
     ignore_sequence: Option<u32>,
+    ignore_sample_time: Option<u32>,
     waits: usize,
     fail_timing: bool,
 }
@@ -42,10 +44,10 @@ impl Registers for Bus {
         }
         if register == Register::Data {
             model.values[Register::Status as usize] &= !2;
-            return if model.data_channel == 7 {
-                model.battery_raw
-            } else {
-                model.raw
+            return match model.data_channel {
+                5 => model.audio_raw,
+                7 => model.battery_raw,
+                _ => model.raw,
             };
         }
         if register == Register::Misc && model.stuck == Some(Error::Configuration) {
@@ -61,6 +63,9 @@ impl Registers for Bus {
             return;
         }
         if register == Register::Sequence3 && model.ignore_sequence == Some(value) {
+            return;
+        }
+        if register == Register::SampleTime2 && model.ignore_sample_time == Some(value) {
             return;
         }
         model.values[register as usize] = value;
@@ -271,5 +276,148 @@ fn mux_selection_readback_mismatch_prevents_wrong_channel_conversion() {
         assert_eq!(adc.sample(), Err(Error::Faulted));
         assert_eq!(m.borrow().triggers, expected_triggers);
         assert_eq!(m.borrow().values[Register::Control2 as usize], 0);
+    }
+}
+
+fn advancing_counter(start: u32) -> impl FnMut() -> u32 {
+    let mut cycle = start;
+    move || {
+        cycle = cycle.wrapping_add(17);
+        cycle
+    }
+}
+
+#[test]
+fn audio_has_wrapping_timestamps_and_restores_the_exact_sample_time_and_mux() {
+    let (m, bus, time) = model();
+    let mut adc = Engine::prepare(bus, time, 8).unwrap();
+    let original_sample_time = (7 << 21) | (1 << 15);
+    {
+        let mut model = m.borrow_mut();
+        model.mux_lag = true;
+        model.raw = 4095;
+        model.battery_raw = 1224;
+        model.audio_raw = 902;
+        model.values[Register::SampleTime2 as usize] = original_sample_time;
+    }
+    let mut samples = [u16::MAX; RX_AUDIO_SAMPLES];
+    let timing = adc
+        .capture_rx_audio(&mut samples, advancing_counter(u32::MAX - 20_000))
+        .unwrap();
+    assert_eq!(samples, [902; RX_AUDIO_SAMPLES]);
+    assert!(timing.first_trigger_cycle > timing.last_trigger_cycle);
+    let nominal_span = (RX_AUDIO_SAMPLES as u32 - 1) * 6_000;
+    let span = timing
+        .last_trigger_cycle
+        .wrapping_sub(timing.first_trigger_cycle);
+    assert!(span.abs_diff(nominal_span) < 40);
+    assert!(timing.min_interval_cycles.abs_diff(6_000) < 40);
+    assert!(timing.max_interval_cycles.abs_diff(6_000) < 40);
+    assert!(timing.max_late_cycles < 40);
+    {
+        let model = m.borrow();
+        assert_eq!(
+            model.values[Register::SampleTime2 as usize],
+            original_sample_time
+        );
+        assert_eq!(model.values[Register::Sequence3 as usize], 12);
+        assert_eq!(model.values[Register::Control2 as usize], 1);
+        assert!(model
+            .writes
+            .contains(&(Register::SampleTime2, (7 << 21) | (7 << 15))));
+        assert_eq!(
+            &model.conversion_channels[..RX_AUDIO_SAMPLES + 1],
+            &[5; RX_AUDIO_SAMPLES + 1]
+        );
+        assert_eq!(model.conversion_channels[RX_AUDIO_SAMPLES + 1], 12);
+        assert_eq!(model.conversion_channels.len(), RX_AUDIO_SAMPLES + 2);
+    }
+    assert_eq!(adc.sample().unwrap(), Sample::from_raw(4095).unwrap());
+    assert_eq!(adc.sample_battery(), Ok(1224));
+    assert_eq!(adc.calibration_value(), 42);
+}
+
+#[test]
+fn audio_deadline_and_stalled_counter_discard_the_block_without_faulting_adc() {
+    for stalled_counter in [false, true] {
+        let (m, bus, time) = model();
+        let mut adc = Engine::prepare(bus, time, 8).unwrap();
+        m.borrow_mut().raw = 4095;
+        let mut cycle = 0u32;
+        let mut samples = [u16::MAX; RX_AUDIO_SAMPLES];
+        assert_eq!(
+            adc.capture_rx_audio(&mut samples, || {
+                // Inject a missed deadline just after the first retained trigger.
+                if !stalled_counter {
+                    cycle += if m.borrow().triggers == 2 { 6_301 } else { 17 };
+                }
+                cycle
+            }),
+            Err(Error::Timing)
+        );
+        {
+            let model = m.borrow();
+            let expected = if stalled_counter { 2 } else { 3 };
+            assert_eq!(model.triggers, expected);
+            assert_eq!(model.values[Register::SampleTime2 as usize], 7 << 21);
+            assert_eq!(model.values[Register::Sequence3 as usize], 12);
+            assert_eq!(model.values[Register::Control2 as usize], 1);
+        }
+        assert_eq!(adc.sample().unwrap(), Sample::from_raw(4095).unwrap());
+    }
+}
+
+#[test]
+fn audio_timeouts_disable_adc_and_restore_configuration_before_returning() {
+    for phase in [1, 2, RX_AUDIO_SAMPLES + 1, RX_AUDIO_SAMPLES + 2] {
+        let (m, bus, time) = model();
+        let mut adc = Engine::prepare(bus, time, 8).unwrap();
+        m.borrow_mut().fail_conversion = Some(phase);
+        let mut samples = [0; RX_AUDIO_SAMPLES];
+        assert_eq!(
+            adc.capture_rx_audio(&mut samples, advancing_counter(0)),
+            Err(Error::ConversionTimeout)
+        );
+        {
+            let model = m.borrow();
+            assert_eq!(model.triggers, phase);
+            assert_eq!(model.values[Register::SampleTime2 as usize], 7 << 21);
+            assert_eq!(model.values[Register::Sequence3 as usize], 12);
+            assert_eq!(model.values[Register::Control2 as usize], 0);
+            if phase != RX_AUDIO_SAMPLES + 2 {
+                assert!(model.writes.ends_with(&[
+                    (Register::Control2, 0),
+                    (Register::SampleTime2, 7 << 21),
+                    (Register::Sequence3, 12),
+                ]));
+            }
+        }
+        assert_eq!(adc.sample(), Err(Error::Faulted));
+        assert_eq!(adc.sample_battery(), Err(Error::Faulted));
+        assert_eq!(
+            adc.capture_rx_audio(&mut samples, advancing_counter(0)),
+            Err(Error::Faulted)
+        );
+    }
+}
+
+#[test]
+fn audio_readback_failures_disable_adc_and_prevent_mislabeled_samples() {
+    for (ignored_sample_time, expected_triggers) in
+        [(7 << 21 | 7 << 15, 0), (7 << 21, RX_AUDIO_SAMPLES + 1)]
+    {
+        let (m, bus, time) = model();
+        let mut adc = Engine::prepare(bus, time, 8).unwrap();
+        m.borrow_mut().ignore_sample_time = Some(ignored_sample_time);
+        let mut samples = [0; RX_AUDIO_SAMPLES];
+        assert_eq!(
+            adc.capture_rx_audio(&mut samples, advancing_counter(0)),
+            Err(Error::Configuration)
+        );
+        assert_eq!(adc.sample(), Err(Error::Faulted));
+        assert_eq!(adc.sample_battery(), Err(Error::Faulted));
+        let model = m.borrow();
+        assert_eq!(model.triggers, expected_triggers);
+        assert_eq!(model.values[Register::Control2 as usize], 0);
     }
 }
