@@ -3,6 +3,7 @@
     [string]$NorBackup = '../../outputs/uv98-backup-2026-11-08/storage-read-01/storage-address-space.bin',
     [switch]$UpperExoTxTrial,
     [switch]$ChannelTx,
+    [switch]$Pa5Audio,
     [ValidateSet('ru', 'en', 'de')]
     [string]$Language = 'ru'
 )
@@ -26,6 +27,7 @@ function Invoke-Checked {
 
 try {
     if ($UpperExoTxTrial -and $ChannelTx) { throw 'Select exactly one TX profile.' }
+    if ($Pa5Audio -and ($UpperExoTxTrial -or $ChannelTx)) { throw 'PA5 audio requires an RX-only build.' }
     Set-Location -LiteralPath $PSScriptRoot
     $captureTools = if (Test-Path -LiteralPath 'tools/boot-log/capture_boot_log.py') { 'tools/boot-log' } else { '../live-hardware' }
     if (-not $OutputDirectory) {
@@ -77,6 +79,7 @@ try {
     [string[]]$featureArgs = @()
     if ($ChannelTx) { $firmwareFeatures = @('channel-tx') }
     if ($UpperExoTxTrial) { $firmwareFeatures = @('upper-exo-tx-trial') }
+    if ($Pa5Audio) { $firmwareFeatures = @('pa5-audio') }
     $firmwareLanguage = $Language.ToLowerInvariant()
     $firmwareFeatures += "locale-$firmwareLanguage"
     $featureArgs = @('--features', ($firmwareFeatures -join ','))

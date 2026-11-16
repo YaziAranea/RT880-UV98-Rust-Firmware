@@ -13,6 +13,7 @@ channel-tx = []
 verbose-faults = []
 # Extra UART key/RX snapshots for diagnostic builds, not LCD data or faults.
 verbose-runtime = []
+pa5-audio = ["uv98-handheld-app/pa5-audio", "uv98-boot-log/pa5-audio"]
 locale-ru = ["uv98-handheld-ui/locale-ru"]
 locale-en = ["uv98-handheld-ui/locale-en"]
 locale-de = ["uv98-handheld-ui/locale-de"]

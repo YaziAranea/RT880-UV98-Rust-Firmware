@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 [features]
+pa5-audio = []
 locale-ru = []
 locale-en = []
 locale-de = []

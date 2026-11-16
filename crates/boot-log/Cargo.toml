@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 
 [features]
+pa5-audio = []
 default = []
 hardware = ["dep:at32f4xx-pac", "dep:uv98-board-pins"]
 

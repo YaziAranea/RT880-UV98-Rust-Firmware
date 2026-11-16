@@ -7,6 +7,8 @@
 //! both physical PTTs using the investigated board's isolated key ladder.
 //! A successful register check does not establish physical board/RF safety.
 
+#[cfg(feature = "pa5-audio")]
+mod audio_capture;
 mod beacon;
 #[path = "shortwave.rs"]
 mod shortwave_bus;
@@ -52,6 +54,11 @@ use uv98_spectrum::compact as spectrum;
 // Default remains RX-only; each published image declares one exact profile.
 #[cfg(all(feature = "upper-exo-tx-trial", feature = "channel-tx"))]
 compile_error!("Select exactly one TX profile");
+#[cfg(all(
+    feature = "pa5-audio",
+    any(feature = "channel-tx", feature = "upper-exo-tx-trial")
+))]
+compile_error!("PA5 capture is an RX-only diagnostic; TX profiles are incompatible");
 const LIVE_TX: bool = cfg!(any(feature = "upper-exo-tx-trial", feature = "channel-tx"));
 const LIVE_RELAY: bool = cfg!(feature = "channel-tx");
 const LOWER_PTT_ENABLED: bool = cfg!(feature = "channel-tx");
@@ -763,6 +770,20 @@ fn main() -> ! {
     );
     let (tuner_pins, reserved) = radio_pins.reserved.with_shortwave();
     let (gps_pins, modem_pins, _reserved) = reserved.with_auxiliary();
+    #[cfg(feature = "pa5-audio")]
+    let mut audio_capture = {
+        let (audio_pins, _reserved) = _reserved.with_rx_audio();
+        // PA5/DAC are exclusively owned by the passive diagnostic. GPS IRQ
+        // accesses USART2 only and cannot modify GPIOA/CRM or ADC1.
+        let input = checked(
+            &mut log,
+            unsafe {
+                uv98_sidekeys_at32::hardware::RxAudioInput::prepare(audio_pins, p.DAC, &mut p.CRM)
+            },
+            0xE05E,
+        );
+        audio_capture::Capture::new(input)
+    };
     let mut gps = unsafe { uv98_gps_at32::Gps::new(gps_pins) };
     let mut aprs_raw = [0xffu8; 198];
     let aprs_config = if app.read_auxiliary_config(3120, &mut aprs_raw) {
@@ -1200,6 +1221,29 @@ fn main() -> ! {
         }
         scope.event(now, spectrum::Event::Ptt(side_activity));
         let update = checked(&mut log, app.sample(now, sample), 0xE032);
+        #[cfg(feature = "pa5-audio")]
+        {
+            let allowed = app.status().view.screen == Screen::About
+                && !app.status().view.locked
+                && !upper
+                && ptt::side_idle(adc.raw)
+                && radio.state() == RfState::Receiving
+                && !scanner.active()
+                && !scope.active()
+                && !relay_active
+                && !beacon.active();
+            feed();
+            let captured = checked(
+                &mut log,
+                audio_capture.key(update.pressed, allowed, &mut side),
+                0xE05E,
+            );
+            feed();
+            app.set_audio_capture(audio_capture.view());
+            if captured {
+                continue;
+            }
+        }
         if let Some(key) = update.pressed.filter(|_| {
             cfg!(feature = "verbose-runtime") && !beacon.active() && ui_log_len < ui_log.len()
         }) {
@@ -2799,6 +2843,13 @@ fn main() -> ! {
                 }
             }
         }
+        #[cfg(feature = "pa5-audio")]
+        {
+            // Manual RX-only audio export has a separate finite frame budget.
+            audio_capture.export_step(&mut log);
+            app.set_audio_capture(audio_capture.view());
+        }
+
         // At most one optional developer frame in a quiet loop. Fault frames still
         // take the direct checked/stop path irrespective of these conditions.
         if cfg!(feature = "verbose-runtime")

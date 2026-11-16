@@ -19,11 +19,14 @@ UPPER_EXO_TRIAL_POLICY = (0x108, 1, 0xFFFFFFFF, 0x45584F31)
 CHANNEL_TX_POLICY = (0x108, 1, 0x16, 0x464D5431)
 TRIAL_FEATURE = "upper-exo-tx-trial"
 CHANNEL_TX_FEATURE = "channel-tx"
+PA5_FEATURE = "pa5-audio"
+PA5_DEPENDENCIES = ["uv98-handheld-app/pa5-audio", "uv98-boot-log/pa5-audio"]
 LOCALE_FEATURES = {f"locale-{code}": [f"uv98-handheld-ui/locale-{code}"] for code in LANGUAGES}
 PROFILES = {
     "rx": (RX_CANDIDATE_POLICY, [], "RX candidate"),
     "upper-exo-trial": (UPPER_EXO_TRIAL_POLICY, [TRIAL_FEATURE], "upper EXO trial"),
     "channel-tx": (CHANNEL_TX_POLICY, [CHANNEL_TX_FEATURE], "FM channel/VFO TX"),
+    "pa5-audio": (RX_CANDIDATE_POLICY, [PA5_FEATURE], "manual PA5 RX-only audio capture"),
 }
 
 
@@ -107,6 +110,15 @@ def validate_source(text, manifest, profile):
             or expression == "false" and profile == "rx"):
         raise ValueError("Packaged source must set LIVE_TX=false or use the selected explicit TX feature")
     features = manifest.get("features", {}).copy()
+    if PA5_FEATURE in features:
+        if features.pop(PA5_FEATURE) != PA5_DEPENDENCIES:
+            raise ValueError("PA5 diagnostic feature dependencies must remain exact")
+        compact = re.sub(r"\s+", "", code).replace(",)", ")")
+        guard = '#[cfg(all(feature="pa5-audio",any(feature="channel-tx",feature="upper-exo-tx-trial")))]compile_error!('
+        if guard not in compact:
+            raise ValueError("PA5 audio must explicitly exclude both TX features")
+    elif profile == "pa5-audio":
+        raise ValueError("PA5 capture requires the explicit diagnostic feature")
     locales = {feature: features.pop(feature) for feature in LOCALE_FEATURES if feature in features}
     if locales and locales != LOCALE_FEATURES:
         raise ValueError("Firmware locale feature declarations must forward only the matching catalog")
@@ -225,7 +237,8 @@ def validate_inputs(folder, root, profile="rx"):
                                        if channel_tx else None),
             "compiled_features": ["FM_RX", "AM_RX", "channel_and_vfo_scan", "A_B_selection",
                                   "zones", "key_shortcuts"] + (["FM_TX_UPPER_EXO_LIMITED"] if trial else
-                                                              ["FM_TX_CHANNEL_VFO"] if channel_tx else []),
+                                                              ["FM_TX_CHANNEL_VFO"] if channel_tx else
+                                                              ["PA5_MANUAL_PCM_RX_ONLY"] if profile == "pa5-audio" else []),
             "linked_release_policy": policy,
             "source_main_sha256": digest(source),
             "source_firmware_manifest_sha256": digest(firmware_manifest),

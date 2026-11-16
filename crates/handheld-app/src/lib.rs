@@ -225,6 +225,8 @@ impl Record {
 }
 
 pub struct App<N, L, D> {
+    #[cfg(feature = "pa5-audio")]
+    audio_capture: render::AudioCaptureView,
     nor: N,
     display: Display<L, D>,
     diagnostic: Diagnostic,
@@ -269,11 +271,23 @@ pub struct App<N, L, D> {
     spectrum_error: SpectrumError,
 }
 impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
+    #[cfg(feature = "pa5-audio")]
+    pub fn set_audio_capture(&mut self, view: render::AudioCaptureView) {
+        if self.audio_capture != view {
+            self.audio_capture = view;
+            if self.status.view.screen == Screen::About {
+                self.pending_rows.mark(0, render::HEIGHT);
+            }
+        }
+    }
+
     pub fn new(nor: N, lcd: L, delay: D, timing: Timing, expected_sha256: [u8; 32]) -> Self {
         let bitmap = [0; 128];
         let controller = Controller::new(&bitmap, 14_550_000);
         let view = controller.view();
         Self {
+            #[cfg(feature = "pa5-audio")]
+            audio_capture: render::AudioCaptureView::default(),
             nor,
             display: Display::new_portrait(lcd, delay),
             diagnostic: Diagnostic::new(),
@@ -1513,6 +1527,12 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             self.refresh_zones();
         }
         let page_changed = self.render_page != Some(self.status.view.screen);
+        #[cfg(feature = "pa5-audio")]
+        if page_changed
+            && (self.render_page == Some(Screen::About) || self.status.view.screen == Screen::About)
+        {
+            self.pending_rows.mark(0, render::HEIGHT);
+        }
         if page_changed {
             // These bitmaps describe work not yet on the physical panel, not
             // an old framebuffer. A partial page transition preserves chrome;
@@ -1656,6 +1676,17 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
 
     fn paint_rows(&mut self, start: u16, end: u16) -> Result<(), Error<N::Error, L::Error>> {
         let screen = self.status.view.screen;
+        #[cfg(feature = "pa5-audio")]
+        if screen == Screen::About {
+            return render::render_audio_rows(
+                &mut self.display,
+                self.audio_capture,
+                self.status.view.language(),
+                start,
+                end,
+            )
+            .map_err(Error::Render);
+        }
         let snapshot = matches!(screen, Screen::Home | Screen::ChannelDetails)
             .then(|| self.diagnostic.snapshot())
             .flatten()

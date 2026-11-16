@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 [features]
+pa5-audio = ["uv98-handheld-ui/pa5-audio"]
 locale-all = ["uv98-handheld-ui/locale-all"]
 
 [dependencies]

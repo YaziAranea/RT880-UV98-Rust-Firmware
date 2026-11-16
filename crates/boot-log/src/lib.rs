@@ -22,6 +22,17 @@ pub const RADIO_FAULT_RESERVE: u16 = 16;
 pub const DEFAULT_POLL_BUDGET: u32 = 8_192;
 pub const FRAME_POLL_BUDGET: u32 = 65_536;
 
+/// A manual PA5 export has its own finite allowance; ordinary log/fault quotas
+/// remain untouched. Available only in the separate RX-only diagnostic build.
+#[cfg(feature = "pa5-audio")]
+pub struct AudioExportBudget(u16);
+#[cfg(feature = "pa5-audio")]
+impl Default for AudioExportBudget {
+    fn default() -> Self {
+        Self(346)
+    }
+}
+
 /// Shared by the Rust backend and the stackless startup assembler. These are
 /// AT32F423 register definitions, independently checked against the vendor SDK.
 pub mod register {
@@ -489,7 +500,7 @@ impl<I: RegisterIo> Logger<I> {
         if self.muted {
             return Err(Error::Muted);
         }
-        let configured = self.clock.ok_or(Error::NotConfigured)?;
+        let _ = self.clock.ok_or(Error::NotConfigured)?;
         let fault = is_fault_frame(frame.code);
         if self.frames_left == 0 || !fault && self.frames_left <= self.reserved_frames_left {
             return Err(Error::FrameBudget);
@@ -505,6 +516,30 @@ impl<I: RegisterIo> Logger<I> {
             self.reserved_frames_left -= 1;
         }
         self.frames_left -= 1;
+        self.emit_wire(frame)
+    }
+
+    #[cfg(feature = "pa5-audio")]
+    pub fn emit_audio(
+        &mut self,
+        frame: Frame,
+        budget: &mut AudioExportBudget,
+    ) -> Result<(), Error> {
+        if budget.0 == 0
+            || !(matches!(frame.code, 0xA510_0000..=0xA510_0002 | 0xA51F_0000)
+                || (0xA520_0000..0xA520_0156).contains(&frame.code))
+        {
+            return Err(Error::FrameBudget);
+        }
+        budget.0 -= 1;
+        self.emit_wire(frame)
+    }
+
+    fn emit_wire(&mut self, frame: Frame) -> Result<(), Error> {
+        if self.muted {
+            return Err(Error::Muted);
+        }
+        let configured = self.clock.ok_or(Error::NotConfigured)?;
         match self.stable_clock() {
             Ok(current) if configured == current => {}
             _ => {
@@ -613,6 +648,14 @@ pub mod hardware {
         pub fn emit(&mut self, frame: Frame) -> Result<(), Error> {
             self.logger.emit(frame)
         }
+        #[cfg(feature = "pa5-audio")]
+        pub fn emit_audio(
+            &mut self,
+            frame: Frame,
+            budget: &mut AudioExportBudget,
+        ) -> Result<(), Error> {
+            self.logger.emit_audio(frame, budget)
+        }
         pub fn configure_at_pclk2(&mut self, hz: u32) -> Result<(), Error> {
             self.logger.configure_at_pclk2(hz)
         }
@@ -692,6 +735,36 @@ mod tests {
         let mut logger = Logger::new(FakeIo::hick());
         assert_eq!(logger.configure_for_current_clock(), Ok(8_000_000));
         logger
+    }
+
+    #[test]
+    #[cfg(feature = "pa5-audio")]
+    fn manual_audio_export_has_an_independent_finite_budget() {
+        let mut logger = configured();
+        let original = logger.frames_left();
+        let mut budget = AudioExportBudget::default();
+        assert_eq!(
+            logger.emit_audio(Frame::new(0xE001, [0; 3]), &mut budget),
+            Err(Error::FrameBudget)
+        );
+        for _ in 0..346 {
+            logger
+                .emit_audio(Frame::new(0xA510_0000, [0; 3]), &mut budget)
+                .unwrap();
+        }
+        assert_eq!(logger.frames_left(), original);
+        assert_eq!(
+            logger.emit_audio(Frame::new(0xA51F_0000, [0; 3]), &mut budget),
+            Err(Error::FrameBudget)
+        );
+        logger.disable();
+        assert_eq!(
+            logger.emit_audio(
+                Frame::new(0xA510_0000, [0; 3]),
+                &mut AudioExportBudget::default()
+            ),
+            Err(Error::Muted)
+        );
     }
 
     #[test]

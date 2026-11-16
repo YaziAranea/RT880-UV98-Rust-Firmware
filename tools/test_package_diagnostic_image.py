@@ -259,12 +259,16 @@ class PackageTests(unittest.TestCase):
 
     def test_each_profile_rejects_other_compiled_tags_and_feature_sets(self):
         self.channel_source()
+        self.source.write_text(self.source.read_text() +
+            '#[cfg(all(feature="pa5-audio",any(feature="channel-tx",feature="upper-exo-tx-trial")))]compile_error!("RX only");\n')
+        self.manifest.write_text(self.manifest.read_text() +
+            'pa5-audio = ["uv98-handheld-app/pa5-audio", "uv98-boot-log/pa5-audio"]\n')
         for profile, (words, features, _) in packaging.PROFILES.items():
             with self.subTest(profile=profile):
                 self.build(policy_fixture(words))
                 self.mutate_json("verification.json", firmware_features=features)
                 packaging.validate_inputs(self.folder, self.root, profile)
-                for wrong in [[], [packaging.TRIAL_FEATURE], [packaging.CHANNEL_TX_FEATURE],
+                for wrong in [[], [packaging.TRIAL_FEATURE], [packaging.CHANNEL_TX_FEATURE], [packaging.PA5_FEATURE],
                               [packaging.TRIAL_FEATURE, packaging.CHANNEL_TX_FEATURE],
                               [packaging.CHANNEL_TX_FEATURE, packaging.CHANNEL_TX_FEATURE]]:
                     if wrong == features:

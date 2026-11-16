@@ -30,6 +30,11 @@ mod font;
 #[path = "utility.rs"]
 mod utility;
 pub use utility::ShortwaveScope;
+#[cfg(feature = "pa5-audio")]
+#[path = "audio_capture.rs"]
+mod audio_capture;
+#[cfg(feature = "pa5-audio")]
+pub use audio_capture::{render_audio_rows, AudioCaptureView};
 use utility::{shortwave_processing_label, shortwave_scope_page, utility_page};
 
 pub const WIDTH: usize = 240;
@@ -449,7 +454,7 @@ pub const fn home_frequency_rows(slot: Slot) -> (u16, u16) {
 
 fn home_ham_rows(slot: Slot) -> (u16, u16) {
     let top = home_slot_rows(slot).0;
-    (top + HOME_META_Y, top + HOME_META_Y + 11)
+    (top + HOME_META_Y - 3, top + HOME_META_Y + 11)
 }
 
 fn home_meter_rows(slot: Slot) -> (u16, u16) {
@@ -1070,10 +1075,9 @@ pub fn radio_dirty_ranges(model: &Model<'_>, previous: RadioView) -> Result<Dirt
             }
             let old_live = home_radio_metadata(&view, previous, slot);
             let new_live = home_radio_metadata(&view, new, slot);
-            if view.entry.is_none()
-                && (old_live != new_live
-                    || (new_live
-                        && (previous.modulation != new.modulation || previous.power != new.power)))
+            if old_live != new_live
+                || (new_live
+                    && (previous.modulation != new.modulation || previous.power != new.power))
             {
                 let (start, end) = home_ham_rows(slot);
                 dirty.push(start, end);
@@ -1679,9 +1683,15 @@ fn mdc_page(row: u16, out: &mut Row<'_>, view: &View) {
 }
 
 /// One user-visible build identity for the header and the About page.
-pub const VERSION: &str = "0.1.8-r40";
+#[cfg(not(feature = "pa5-audio"))]
+pub const VERSION: &str = "0.1.8-r41";
+#[cfg(feature = "pa5-audio")]
+pub const VERSION: &str = "R41-PA5";
 /// Header has a fixed 42 px slot; About shows the full string.
-pub const VERSION_SHORT: &str = "R40";
+#[cfg(not(feature = "pa5-audio"))]
+pub const VERSION_SHORT: &str = "R41";
+#[cfg(feature = "pa5-audio")]
+pub const VERSION_SHORT: &str = "PA5";
 
 fn crossband(row: u16, out: &mut Row<'_>, view: &View) {
     let (status, tint) = match view.crossband_probe {
@@ -2569,6 +2579,30 @@ fn slot_card(row: u16, out: &mut Row<'_>, model: &Model<'_>, slot: Slot) {
         };
         let x = if content.mode == Mode::Vfo { 108 } else { 148 };
         text(row, out, x, top + HOME_META_Y + 2, 1, label, ink);
+    }
+    if live_metadata || active {
+        let power = if live_metadata {
+            model.radio.power
+        } else {
+            None
+        };
+        let ink = match power.and_then(Power::decode) {
+            Some(Power::Low) => 0x001f,    // Native panel BGR565: red.
+            Some(Power::Medium) => 0x07ff, // Yellow.
+            Some(Power::High) => 0x07e0,   // Green.
+            None => color::MUTED,
+        };
+        // The acknowledged setting belongs to the actual RF slot, including
+        // lower-PTT transmission while the editing focus remains on A.
+        text(
+            row,
+            out,
+            210,
+            top + HOME_META_Y - 3,
+            2,
+            power.map(power_label).unwrap_or("?"),
+            ink,
+        );
     }
     slot_meter(
         row,
@@ -3873,22 +3907,11 @@ fn valid_frequency(value: u32) -> bool {
     value > 0 && value <= 99_999_999
 }
 
-fn ham_status(row: u16, out: &mut Row<'_>, model: &Model<'_>, live_metadata: bool) {
+fn ham_status(row: u16, out: &mut Row<'_>, model: &Model<'_>, _live_metadata: bool) {
     if !(104..115).contains(&row) {
         return;
     }
     if model.view.mode != Mode::Channel {
-        if live_metadata {
-            text(
-                row,
-                out,
-                204,
-                106,
-                1,
-                model.radio.power.map(power_label).unwrap_or("?"),
-                color::MUTED,
-            );
-        }
         return;
     }
     let Some(channel) = model.channel.filter(|channel| channel.active) else {
@@ -3952,30 +3975,6 @@ fn ham_status(row: u16, out: &mut Row<'_>, model: &Model<'_>, live_metadata: boo
         bandwidth_label(channel.bandwidth_raw),
         color::MUTED,
     );
-    let mut power = Text::new();
-    if live_metadata {
-        match model.radio.power {
-            // Saved value first, effective value second: an override in RAM is
-            // never presented as a changed channel record.
-            Some(effective) if effective != channel.power_raw => {
-                let _ = write!(
-                    power,
-                    "{}/{}",
-                    power_label(channel.power_raw),
-                    power_label(effective)
-                );
-            }
-            Some(effective) => {
-                let _ = power.write_str(power_label(effective));
-            }
-            None => {
-                let _ = power.write_str("?");
-            }
-        }
-    } else {
-        let _ = power.write_str(power_label(channel.power_raw));
-    }
-    text(row, out, 204, 106, 1, power.as_str(), color::MUTED);
 }
 
 fn bandwidth_label(raw: u8) -> &'static str {
@@ -5117,7 +5116,7 @@ mod tests {
         });
         assert_eq!(
             compare_incremental(old, new),
-            WIDTH * (7 + 14 + 48 + 9 + 11)
+            WIDTH * (7 + 14 + 48 + 9 + 14)
         );
     }
 
@@ -5502,7 +5501,7 @@ mod tests {
         compare_radio_incremental(old, new);
         old = new;
         new.radio.power = Some(2);
-        assert_eq!(compare_radio_incremental(old, new), WIDTH * 11);
+        assert_eq!(compare_radio_incremental(old, new), WIDTH * 14);
         old = new;
         new.radio.state = RadioState::Transmitting;
         new.radio.tx_slot = Some(Slot::A);
@@ -5513,7 +5512,7 @@ mod tests {
         assert_eq!(compare_radio_incremental(old, new), WIDTH * (27 + 142));
         old = new;
         new.radio.power = Some(0);
-        assert_eq!(compare_radio_incremental(old, new), WIDTH * 18);
+        assert_eq!(compare_radio_incremental(old, new), WIDTH * 21);
         old = model(Screen::Home);
         old.radio.state = RadioState::Receiving;
         old.view.scan = ScanState::Running;
@@ -5568,6 +5567,36 @@ mod tests {
             old = new;
             new.radio.rssi = Some(401);
             assert_eq!(compare_radio_incremental(old, new), 0);
+        }
+    }
+
+    #[test]
+    fn large_power_follows_actual_b_tx_while_a_has_an_entry() {
+        let mut old = model(Screen::Home);
+        old.view.active_slot = Slot::A;
+        old.view.entry = Some(crate::controller::Entry {
+            kind: EntryKind::Frequency,
+            value: 14550000,
+            digits: 8,
+        });
+        old.radio.state = RadioState::Transmitting;
+        old.radio.tx_slot = Some(Slot::B);
+        old.radio.power = Some(0);
+        for (power, ink) in [(0, 0x001f), (1, 0x07ff), (2, 0x07e0)] {
+            let mut new = old;
+            new.radio.power = Some(power);
+            compare_radio_incremental(old, new);
+            let top = home_slot_rows(Slot::B).0 + HOME_META_Y - 3;
+            let mut painted_rows = 0;
+            for y in top..top + 14 {
+                let mut pixels = [0; WIDTH];
+                render_row(y, &mut pixels, &new).unwrap();
+                if pixels[210..222].contains(&ink) {
+                    painted_rows += 1;
+                }
+            }
+            assert!(painted_rows > 7, "power glyph must use the large font");
+            old = new;
         }
     }
 
@@ -5879,7 +5908,7 @@ mod tests {
             }
             new = old;
             new.view.reverse = true;
-            assert_eq!(compare_incremental(old, new), WIDTH * (48 + 9 + 11));
+            assert_eq!(compare_incremental(old, new), WIDTH * (48 + 9 + 14));
         }
     }
 
