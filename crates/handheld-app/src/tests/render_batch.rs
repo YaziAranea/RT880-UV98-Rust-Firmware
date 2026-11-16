@@ -210,6 +210,67 @@ fn pending_home_pass_paints_one_radio_snapshot_until_telemetry_repair() {
 }
 
 #[test]
+fn incoming_name_interrupts_pending_paint_and_yields_to_tx_badge() {
+    use uv98_handheld_ui::controller::RadioName;
+
+    let capture = Rc::new(RefCell::new(CapturedFrame::new()));
+    let panel = Panel {
+        capture: Some(capture.clone()),
+        ..Panel::default()
+    };
+    let windows = panel.windows.clone();
+    let mut app = App::new(
+        Memory::new(),
+        panel,
+        NoDelay,
+        Timing::new(30, 600).unwrap(),
+        PRESERVED_CALIBRATION_SHA256,
+    );
+    app.start(0).unwrap();
+    let idle = RadioView {
+        state: render::RadioState::Receiving,
+        ..RadioView::OFF
+    };
+    app.set_radio_view(idle).unwrap();
+    while app.render_pending() {
+        app.render_step(4).unwrap();
+    }
+
+    app.last_rendered = None;
+    app.draw().unwrap();
+    assert_eq!(app.render_step(4).unwrap().rows, 4);
+    let name = RadioName::from_payload(*b"QRST UVWXYZ 0123").unwrap();
+    let received = RadioView {
+        radio_name: Some(render::NameReception::new(Slot::B, name)),
+        ..idle
+    };
+    app.set_radio_view(received).unwrap();
+    assert_eq!(app.render_radio, received);
+    let (popup_first, _) = render::SIGNALING_POPUP_ROWS;
+    assert_eq!(app.render_step(4).unwrap().rows, 4);
+    assert_eq!(
+        windows.borrow().last(),
+        Some(&(popup_first, popup_first + 4))
+    );
+    assert!(app.pending_rows.has(300));
+    assert_eq!(app.render_step(4).unwrap().rows, 4);
+    assert_eq!(app.priority_run, PRIORITY_BURST_ROWS);
+
+    app.set_radio_view(RadioView {
+        state: render::RadioState::Transmitting,
+        tx_slot: Some(Slot::B),
+        ..received
+    })
+    .unwrap();
+    assert!(!app.priority_rows.has(popup_first + 8));
+    let tx_row = render::home_slot_rows(Slot::B).0;
+    assert!(app.priority_rows.has(tx_row));
+    assert_eq!(app.render_step(2).unwrap().rows, 2);
+    assert_eq!(windows.borrow().last(), Some(&(tx_row, tx_row + 2)));
+    assert_matches_complete_frame(&mut app, &capture);
+}
+
+#[test]
 fn interrupted_outline_and_tx_updates_converge_after_navigation() {
     let capture = Rc::new(RefCell::new(CapturedFrame::new()));
     let panel = Panel {

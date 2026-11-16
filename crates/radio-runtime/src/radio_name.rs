@@ -31,6 +31,7 @@ enum Phase {
     Capture(usize),
     Prepare(usize),
     Armed,
+    Rearm,
 }
 
 #[derive(Default)]
@@ -86,6 +87,11 @@ impl<I: Io> Runtime<I> {
                 }
             }
             Phase::Armed => Phase::Armed,
+            Phase::Rearm => {
+                self.write(0x59, CLEAR_RX_FIFO | CONTROL)?;
+                self.write(0x59, SCRAMBLE | RX_ENABLE | CONTROL)?;
+                Phase::Armed
+            }
         };
         Ok(())
     }
@@ -98,14 +104,20 @@ impl<I: Io> Runtime<I> {
             for pair in payload.chunks_exact_mut(2) {
                 pair.copy_from_slice(&self.read(0x5f)?.to_be_bytes());
             }
-            if let (Some(name), Some(now)) = (RadioName::from_payload(payload), self.last_now) {
+            // A completion during the drain makes the FIFO contents
+            // ambiguous. Confirm no new IRQ before publishing the bytes.
+            let stable = self.read(0x0c)? & 1 == 0;
+            if let (true, Some(name), Some(now)) =
+                (stable, RadioName::from_payload(payload), self.last_now)
+            {
                 self.name_rx.latest = Some((name, now));
             }
         }
-        // Stock disables its RX modem after a valid frame and arms it again
-        // on the next RX entry. Rearm both valid and rejected frames here.
-        self.write(0x59, CLEAR_RX_FIFO | CONTROL)?;
-        self.write(0x59, SCRAMBLE | RX_ENABLE | CONTROL)
+        // Disable before clearing the FIFO. The next observation services
+        // any intervening IRQ with name capture disabled, then rearms.
+        self.write(0x59, CONTROL)?;
+        self.name_rx.phase = Phase::Rearm;
+        Ok(())
     }
 
     pub(super) fn stop_name_rx(&mut self) -> Result<(), Fault<I::Error>> {

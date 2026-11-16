@@ -665,8 +665,9 @@ impl<I: Io> Runtime<I> {
         let mut status = self.read(0x0c)?;
         let mut detected = SignalingInterrupts::default();
         if status & 1 != 0 {
-            // Stock samples the FSK CRC result before acknowledgement.
-            let flags = if capture_name || !capture_dtmf {
+            // Stock samples CRC before acknowledgement. This can be stale
+            // if FSK finishes while an unrelated IRQ is already pending.
+            let flags_before = if capture_name || !capture_dtmf {
                 self.read(0x0b)?
             } else {
                 0
@@ -677,19 +678,26 @@ impl<I: Io> Runtime<I> {
             } else {
                 0
             };
-            if capture_dtmf && causes & dtmf_rx::DTMF_IRQ != 0 {
-                // REG0B can retain the last code across unrelated IRQs.
-                // Read its payload only for the documented REG02 cause.
+            let dtmf_found = capture_dtmf && causes & dtmf_rx::DTMF_IRQ != 0;
+            let fsk_finished = capture_name && causes & radio_name::RX_FINISHED_IRQ != 0;
+            let flags_after = if dtmf_found || fsk_finished {
+                self.read(0x0b)?
+            } else {
+                0
+            };
+            if dtmf_found {
                 detected.dtmf = Some(dtmf_rx::Detected {
-                    code: ((self.read(0x0b)? >> 8) & 0xf) as u8,
+                    code: ((flags_after >> 8) & 0xf) as u8,
                     carrier_before_ack: status & 2 != 0,
                 });
             }
-            if capture_name && causes & radio_name::RX_FINISHED_IRQ != 0 {
-                detected.name_crc = Some(flags & radio_name::CRC_PASS != 0);
-            }
-            // Still-pending IRQs cannot qualify the subaudible tone gate.
+            // A new pending IRQ can make the post-ACK flags belong to a
+            // newer packet. Neither ambiguous sample qualifies a frame.
             status = self.read(0x0c)?;
+            if fsk_finished {
+                detected.name_crc =
+                    Some(status & 1 == 0 && flags_before & flags_after & radio_name::CRC_PASS != 0);
+            }
         }
         Ok((status, detected))
     }

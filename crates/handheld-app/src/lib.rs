@@ -1643,12 +1643,23 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
                 self.deferred_radio_rows.mark(start, end);
             }
         } else {
-            // State, power, modulation and monitor changes are never deferred.
+            // Control changes and visible signaling are never deferred.
             self.render_radio = self.radio;
             self.pending_rows.merge_take(&mut self.deferred_radio_rows);
             for &(start, end) in radio_damage.ranges() {
                 self.pending_rows.mark(start, end);
             }
+        }
+        if self.radio.state == render::RadioState::Receiving {
+            if self.last_radio.radio_name != self.radio.radio_name {
+                if let Some(rows) = self.radio.signaling_popup_damage(self.last_radio) {
+                    self.mark_priority(rows);
+                }
+            }
+        } else if self.last_radio.state == render::RadioState::Receiving {
+            let (start, end) = render::SIGNALING_POPUP_ROWS;
+            self.priority_rows.clear(start, end);
+            self.priority_run = 0;
         }
         let old_tx = self.last_radio.transmitting_slot();
         let new_tx = self.radio.transmitting_slot();
@@ -1770,7 +1781,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
 /// and all controller/PTT events keep their normal immediate queuing semantics.
 fn radio_controls_equal(a: RadioView, b: RadioView) -> bool {
     a.state == b.state
-        && a.visible_dtmf() == b.visible_dtmf()
+        && a.signaling_popup_damage(b).is_none()
         && a.tx_slot == b.tx_slot
         && a.receiving_slot() == b.receiving_slot()
         && a.tx_trial == b.tx_trial

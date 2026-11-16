@@ -23,6 +23,7 @@ use crate::meter::{receive_segments, transmit_segments, SEGMENTS as METER_SEGMEN
 #[path = "signaling_popup.rs"]
 mod signaling_popup;
 pub use signaling_popup::{DtmfReception, NameReception};
+pub const SIGNALING_POPUP_ROWS: (u16, u16) = signaling_popup::ROWS;
 
 #[path = "font.rs"]
 mod font;
@@ -168,6 +169,10 @@ impl RadioView {
         self.radio_name
             .map(signaling_popup::Reception::Name)
             .or_else(|| self.visible_dtmf().map(signaling_popup::Reception::Dtmf))
+    }
+
+    pub fn signaling_popup_damage(self, previous: Self) -> Option<(u16, u16)> {
+        (self.signaling_popup() != previous.signaling_popup()).then_some(SIGNALING_POPUP_ROWS)
     }
 
     pub fn receiving_slot(self) -> Option<Slot> {
@@ -890,6 +895,9 @@ pub fn dirty_ranges(model: &Model<'_>, previous: Option<View>) -> Result<DirtyRa
             }
         }
         Screen::Mdc => {
+            if mdc_end_replaced_by_name(&old) != mdc_end_replaced_by_name(&new) {
+                dirty.push(MDC_NAME_HINT_ROW, MDC_NAME_HINT_ROW + 7);
+            }
             if old.mdc_draft.is_some() != new.mdc_draft.is_some() {
                 dirty.push(48, 269);
                 dirty.push(305, 312);
@@ -1042,8 +1050,8 @@ pub fn radio_dirty_ranges(model: &Model<'_>, previous: RadioView) -> Result<Dirt
     validate(model)?;
     let new = model.radio;
     let mut dirty = DirtyRanges::new();
-    if previous.signaling_popup() != new.signaling_popup() {
-        dirty.push(signaling_popup::ROWS.0, signaling_popup::ROWS.1);
+    if let Some((start, end)) = new.signaling_popup_damage(previous) {
+        dirty.push(start, end);
     }
     let (banner_start, banner_end) = radio_banner_rows(model.view.screen);
     let view = model.view;
@@ -1600,7 +1608,30 @@ fn mdc_timing_label(timing: u8) -> &'static str {
     }
 }
 
+const MDC_NAME_HINT_ROW: u16 = 209;
+const MDC_NAME_HINT: &str = "\x1f171";
+
+fn mdc_end_replaced_by_name(view: &View) -> bool {
+    let settings = view.mdc_for_slot(view.active_slot);
+    let timing = match view.mdc_draft {
+        Some(MdcDraft::Timing(timing)) => timing,
+        _ => settings.mode,
+    };
+    view.roger_name().is_some() && matches!(timing, 2 | 3)
+}
+
 fn mdc_page(row: u16, out: &mut Row<'_>, view: &View) {
+    if (MDC_NAME_HINT_ROW..MDC_NAME_HINT_ROW + 7).contains(&row) && mdc_end_replaced_by_name(view) {
+        text(
+            row,
+            out,
+            16,
+            MDC_NAME_HINT_ROW,
+            1,
+            MDC_NAME_HINT,
+            color::MUTED,
+        );
+    }
     let mut value = Text::new();
     if let Some(draft) = view.mdc_draft {
         text(
@@ -3117,6 +3148,9 @@ fn setting(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
             label,
             item_color(selected),
         );
+    }
+    if setting == Setting::NameRoger {
+        text(row, out, 16, 261, 1, MDC_NAME_HINT, color::MUTED);
     }
     if setting.choice_count() > 3 {
         return;
@@ -5164,6 +5198,25 @@ mod tests {
             stepped.view.cb = stepped.view.cb.map(|cb| cb.adjacent(false));
             stepped.view.vfo_10hz = stepped.view.cb.unwrap().frequency_10hz();
             assert_eq!(compare_incremental(committed, stepped), WIDTH * (7 + 48));
+        }
+    }
+
+    #[test]
+    fn mdc_end_conflict_hint_tracks_draft_in_each_locale() {
+        use uv98_signaling::radio_name::RadioName;
+
+        for language in [Language::Russian, Language::English, Language::German] {
+            let mut begin = model(Screen::Mdc);
+            begin.view.language = language;
+            begin.view.radio_name = RadioName::from_payload(*b"QRST UVWXYZ 0123");
+            begin.view.name_roger_enabled = true;
+            begin.view.mdc_draft = Some(MdcDraft::Timing(1));
+            let mut end = begin;
+            end.view.mdc_draft = Some(MdcDraft::Timing(2));
+            assert!(!mdc_end_replaced_by_name(&begin.view));
+            assert!(mdc_end_replaced_by_name(&end.view));
+            assert_eq!(compare_incremental(begin, end), WIDTH * (44 + 7));
+            assert_eq!(compare_incremental(end, begin), WIDTH * (44 + 7));
         }
     }
 

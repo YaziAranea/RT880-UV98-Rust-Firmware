@@ -21,6 +21,8 @@ struct Mock {
     ack_clears_irq: bool,
     pending_irq_cause: u16,
     fifo: VecDeque<u16>,
+    fsk_arrives_at_ack: Option<u16>,
+    fsk_arrives_during_drain: bool,
     drop_carrier_on_ack: bool,
     muted: bool,
     hf: bool,
@@ -38,6 +40,8 @@ impl Mock {
             ack_clears_irq: false,
             pending_irq_cause: 0,
             fifo: VecDeque::new(),
+            fsk_arrives_at_ack: None,
+            fsk_arrives_during_drain: false,
             drop_carrier_on_ack: false,
             muted: true,
             hf: false,
@@ -62,6 +66,11 @@ impl Io for Mock {
     fn read(&mut self, r: u8) -> Result<u16, Self::Error> {
         self.event(Event::Read(r))?;
         if r == 0x5f {
+            if self.fsk_arrives_during_drain {
+                self.fsk_arrives_during_drain = false;
+                self.pending_irq_cause |= radio_name::RX_FINISHED_IRQ;
+                self.words[0x0c] |= 1;
+            }
             return self.fifo.pop_front().ok_or("RX FIFO underflow");
         }
         Ok(self.words[r as usize] ^ u16::from(self.mismatch == Some(r)))
@@ -69,7 +78,14 @@ impl Io for Mock {
     fn write(&mut self, r: u8, v: u16) -> Result<(), Self::Error> {
         self.event(Event::Write(r, v))?;
         self.words[r as usize] = v;
+        if r == 0x59 && v & 0x4000 != 0 {
+            self.fifo.clear();
+        }
         if self.ack_clears_irq && (r, v) == (0x02, 0) {
+            if let Some(status) = self.fsk_arrives_at_ack.take() {
+                self.words[0x0b] = status;
+                self.pending_irq_cause |= radio_name::RX_FINISHED_IRQ;
+            }
             // Acknowledge latches the IRQ flags for the following read.
             self.words[0x02] = core::mem::take(&mut self.pending_irq_cause);
             self.words[0x0c] &= !1;
@@ -212,6 +228,13 @@ fn stock_name_rx_uses_one_finished_crc_packet_and_keeps_dtmf_live() {
     }
     assert_eq!(radio.io.words[0x3f] & 0x2800, 0x2800);
     assert_eq!(radio.io.words[0x59], 0x3028);
+    let rearm = |radio: &mut Runtime<Mock>| {
+        assert_eq!(radio.io.words[0x59], 0x0028);
+        radio
+            .observe_signaling_for_slot(audio(), 0, Slot::B)
+            .unwrap();
+        assert_eq!(radio.io.words[0x59], 0x3028);
+    };
     radio.io.ack_clears_irq = true;
     radio.io.words[0x0c] = 3;
     radio.io.words[0x0b] = 0x0110; // Valid-looking stale CRC plus DTMF 1.
@@ -229,17 +252,43 @@ fn stock_name_rx_uses_one_finished_crc_packet_and_keeps_dtmf_live() {
         .observe_signaling_for_slot(audio(), 0, Slot::B)
         .unwrap();
     assert_eq!(radio.received_radio_name(now), None);
-    assert_eq!(radio.io.words[0x59], 0x3028);
+    rearm(&mut radio);
 
-    radio.io.words[0x0c] = 1; // Carrier can already have ended.
-    radio.io.words[0x0b] = radio_name::CRC_PASS;
-    radio.io.pending_irq_cause = radio_name::RX_FINISHED_IRQ;
-    radio.io.fifo = VecDeque::from([
+    let name_words = [
         0x415a, 0x2051, 0x5820, 0x5230, 0x4142, 0x43ff, 0xffff, 0xffff,
-    ]);
+    ];
+    // A failed FSK frame arrives between the old CRC read and ACK for DTMF.
+    // Its FIFO happens to contain printable text. It must not be displayed.
+    radio.io.words[0x0c] = 3;
+    radio.io.words[0x0b] = 0x0110;
+    radio.io.pending_irq_cause = dtmf_rx::DTMF_IRQ;
+    radio.io.fsk_arrives_at_ack = Some(0x0200);
+    radio.io.fifo = VecDeque::from(name_words);
+    radio.io.events.clear();
     radio
         .observe_signaling_for_slot(audio(), 0, Slot::B)
         .unwrap();
+    assert_eq!(radio.received_radio_name(now), None);
+    assert_eq!(radio.received_dtmf(now), "12");
+    assert!(!radio.io.events.contains(&Event::Read(0x5f)));
+    rearm(&mut radio);
+    assert!(radio.io.fifo.is_empty());
+
+    for another_irq_during_drain in [true, false] {
+        radio.io.words[0x0c] = 1; // Carrier can already have ended.
+        radio.io.words[0x0b] = radio_name::CRC_PASS;
+        radio.io.pending_irq_cause = radio_name::RX_FINISHED_IRQ;
+        radio.io.fifo = VecDeque::from(name_words);
+        radio.io.fsk_arrives_during_drain = another_irq_during_drain;
+        radio
+            .observe_signaling_for_slot(audio(), 0, Slot::B)
+            .unwrap();
+        assert_eq!(
+            radio.received_radio_name(now).is_none(),
+            another_irq_during_drain
+        );
+        rearm(&mut radio);
+    }
     let (slot, name) = radio.received_radio_name(now).unwrap();
     assert_eq!(slot, Slot::B);
     assert_eq!(name.as_str(), "AZ QX R0ABC");
