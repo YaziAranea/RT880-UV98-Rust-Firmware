@@ -244,6 +244,8 @@
 .endm
 
 .section .text.__pre_init, "ax", %progbits
+/* The stackless UART continuation uses ADR.W with a word-aligned PC. */
+.p2align 2
 .global __pre_init
 .type __pre_init, %function
 .thumb_func
@@ -510,6 +512,7 @@ __pre_init:
  * can still fault on the identity reads; no general unknown-chip recovery.
  */
 .section .text.__diag_terminal_fail_stop, "ax", %progbits
+.p2align 2
 .global __diag_terminal_fail_stop
 .type __diag_terminal_fail_stop, %function
 .thumb_func
