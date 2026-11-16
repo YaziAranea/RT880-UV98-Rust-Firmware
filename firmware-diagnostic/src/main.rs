@@ -258,7 +258,7 @@ fn tx_permitted<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
     input: ptt::Input,
 ) -> bool {
     if cfg!(feature = "channel-tx") {
-        tx_policy::authorize_target(app.status().view, target, profile, input).is_ok()
+        tx_policy::authorize_target(&app.status().view, &target, profile, input).is_ok()
     } else {
         tx_trial::permits(app.status().view, profile, input)
             && app
@@ -1197,10 +1197,9 @@ fn main() -> ! {
         }
         scope.event(now, spectrum::Event::Ptt(side_activity));
         let update = checked(&mut log, app.sample(now, sample), 0xE032);
-        if let Some(key) = update
-            .pressed
-            .filter(|_| !beacon.active() && ui_log_len < ui_log.len())
-        {
+        if let Some(key) = update.pressed.filter(|_| {
+            cfg!(feature = "verbose-runtime") && !beacon.active() && ui_log_len < ui_log.len()
+        }) {
             let v = app.status().view;
             // USART6 waits for all 47 bytes to finish. Queue the snapshot at
             // the event so key repeats do not stall the LCD pass or RF work.
@@ -2211,8 +2210,8 @@ fn main() -> ! {
                         tx_slot = Some(slot);
                         tx_started_at = Some(now);
                         tx_authorization = tx_policy::authorize_target(
-                            app.status().view,
-                            target,
+                            &app.status().view,
+                            &target,
                             tx_profile,
                             raw_ptt,
                         )
@@ -2504,7 +2503,10 @@ fn main() -> ! {
                 }
             }
         }
-        if radio.state() == RfState::Receiving
+        // Optional developer snapshots. Normal RX observation, LCD meters,
+        // PTT/TOT guards and fault records remain unconditional.
+        if cfg!(feature = "verbose-runtime")
+            && radio.state() == RfState::Receiving
             && (!scope.active() || scope.listening())
             && telemetry_samples > 0
             && now.wrapping_sub(telemetry_at) >= 500
@@ -2703,7 +2705,7 @@ fn main() -> ! {
             0xE05D,
         );
         let render_start = DWT::cycle_count();
-        if app.render_pending() && redraw_since.is_none() {
+        if cfg!(feature = "verbose-runtime") && app.render_pending() && redraw_since.is_none() {
             redraw_since = Some(now);
         }
         // Keep the foreground return to physical PTT polling short during the
@@ -2727,24 +2729,28 @@ fn main() -> ! {
             }),
             0xE032,
         );
-        max_render_cycles = max_render_cycles.max(DWT::cycle_count().wrapping_sub(render_start));
-        render_rows += u32::from(drawn.rows);
-        max_loop_cycles = max_loop_cycles.max(DWT::cycle_count().wrapping_sub(loop_started));
         let now = require(time.sample(DWT::cycle_count()), 0xE016);
-        loop_count = loop_count.saturating_add(1);
-        active_loop_us =
-            active_loop_us.saturating_add(DWT::cycle_count().wrapping_sub(loop_started) / 48);
-        if let Some(start) = redraw_since {
-            // Oldest outstanding dirty pass, possibly including coalesced
-            // telemetry. This is backlog duration, not key-to-photon latency.
-            max_redraw_ms = max_redraw_ms.max(now.wrapping_sub(start));
-            if !drawn.pending {
-                redraw_since = None;
+        if cfg!(feature = "verbose-runtime") {
+            max_render_cycles =
+                max_render_cycles.max(DWT::cycle_count().wrapping_sub(render_start));
+            render_rows += u32::from(drawn.rows);
+            max_loop_cycles = max_loop_cycles.max(DWT::cycle_count().wrapping_sub(loop_started));
+            loop_count = loop_count.saturating_add(1);
+            active_loop_us =
+                active_loop_us.saturating_add(DWT::cycle_count().wrapping_sub(loop_started) / 48);
+            if let Some(start) = redraw_since {
+                // Oldest outstanding dirty pass, possibly including coalesced
+                // telemetry. This is backlog duration, not key-to-photon latency.
+                max_redraw_ms = max_redraw_ms.max(now.wrapping_sub(start));
+                if !drawn.pending {
+                    redraw_since = None;
+                }
             }
         }
-        // At most one deferred frame in a quiet loop. Fault frames still
+        // At most one optional developer frame in a quiet loop. Fault frames still
         // take the direct checked/stop path irrespective of these conditions.
-        if drawn.rows == 0
+        if cfg!(feature = "verbose-runtime")
+            && drawn.rows == 0
             && !drawn.pending
             && raw == Some((0, false))
             && ptt::side_idle(adc.raw)
@@ -2754,7 +2760,7 @@ fn main() -> ! {
         {
             if let Some(details) = throughput_log.take() {
                 event(&mut log, 0x176, details);
-            } else if ui_log_sent < ui_log_len {
+            } else if cfg!(feature = "verbose-runtime") && ui_log_sent < ui_log_len {
                 event(&mut log, 0x132, ui_log[ui_log_sent]);
                 ui_log_sent += 1;
             } else if now.wrapping_sub(heartbeat_at) >= 2000 {

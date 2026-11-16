@@ -13,9 +13,9 @@ Diese Anleitung beschreibt die erste Vorbereitung eines UV-98 Plus / der untersu
 3. Mit der originalen CPS für das eigene Modell das Gerät auslesen und die ursprüngliche `.880dmf`- oder `.98pdmf`-Datei speichern. Eine vorhandene Originaldatei wie `999.880dmf` unverändert aufbewahren.
 4. Original-CPS, Radio Tuning Software und andere Programme schließen, die das Kabel verwenden. Vor dem ersten Auslesen mit unserer CPS das Gerät für 3 Sekunden ausschalten und wieder normal starten.
 5. Einen Ordner anlegen, etwa `Dokumente/UV98-backup-2026-11-16`. Sinnvolle Unterordner: `01-original`, `02-calibration`, `03-nor`, `04-settings`, `05-recovery`. Die ursprüngliche CPS-Datei in `01-original` ablegen.
-6. Das [R38-Paket mit CPS 0.7.0](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r38/UV98-r38-2026-11-16.zip) vollständig entpacken. `UV98-CPS.exe` starten, unter **Язык / Language / Sprache** die Option **Deutsch** wählen und **Sicherungen** öffnen. Den tatsächlichen COM-Port über **Liste aktualisieren → Verfügbare Ports** wählen. Frühere Angaben wie COM20/COM21 sind keine Vorgabe für Ihren Rechner.
+6. Das [R39-Paket mit CPS 0.7.0](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r39/UV98-r39-2026-11-16.zip) vollständig entpacken. `UV98-CPS.exe` starten, unter **Язык / Language / Sprache** die Option **Deutsch** wählen und **Sicherungen** öffnen. Den tatsächlichen COM-Port über **Liste aktualisieren → Verfügbare Ports** wählen. Frühere Angaben wie COM20/COM21 sind keine Vorgabe für Ihren Rechner.
 
-Die Sprachwahl ist stets in der Symbolleiste sichtbar. Alle acht Reiter und bereits angezeigte Statusmeldungen wechseln sofort die Sprache. Ungespeicherte Änderungen bleiben erhalten. CPS speichert die Sprachwahl im Windows-Benutzerprofil. Titel und Filter der Dateidialoge folgen der CPS-Sprache. Die Standardschaltflächen folgen der Windows-Sprache. Das R38-Paket enthält die veröffentlichte CPS 0.7.0.
+Die Sprachwahl ist stets in der Symbolleiste sichtbar. Alle acht Reiter und bereits angezeigte Statusmeldungen wechseln sofort die Sprache. Ungespeicherte Änderungen bleiben erhalten. CPS speichert die Sprachwahl im Windows-Benutzerprofil. Titel und Filter der Dateidialoge folgen der CPS-Sprache. Die Standardschaltflächen folgen der Windows-Sprache. Das R39-Paket enthält die veröffentlichte CPS 0.7.0.
 
 Modell, originale Firmwareversion und bekannte Platinenrevision in einer kurzen Textdatei bei den Sicherungen notieren.
 
@@ -77,11 +77,11 @@ Die Datei mit dem Namen `RT-880_Upgrade_V1_16_250915.bin` im Ordner `recovery` n
 
 ## 4. Kompatibilität vor dem Flashen prüfen
 
-R38 ist für das untersuchte AT32F423-Platinenprofil vorgesehen. Vor dem Flashen die Platinenrevision prüfen. Die Vorbereitung anhand der Sicherung bindet das Image an die eigenen Kalibrierungen.
+R39 ist für das untersuchte AT32F423-Platinenprofil vorgesehen. Vor dem Flashen die Platinenrevision prüfen. Die Vorbereitung anhand der Sicherung bindet das Image an die eigenen Kalibrierungen.
 
 Für eine bestätigte kompatible Platine eine persönliche BIN vorbereiten. **Ein Rust-Compiler wird dafür nicht benötigt.**
 
-1. **Firmware** in unserer CPS öffnen. Die ursprüngliche `UV98-r38.bin` aus dem aktuellen Paket auswählen.
+1. **Firmware** in unserer CPS öffnen. Die ursprüngliche `UV98-r39.bin` aus dem aktuellen Paket auswählen.
 2. **Image für mein Funkgerät vorbereiten…** anklicken.
 3. **`manifest.json` der vollständigen 4-MiB-NOR-Sicherung** auswählen, die mit „Einstellungsspeicher lesen (4 MiB)“ erstellt wurde. Das Manifest auswählen, nicht `storage-address-space.bin` selbst. Eine reine Kalibrierungssicherung reicht nicht aus.
 4. Einen übergeordneten Ordner für neue Images wählen, etwa `Dokumente/UV98-personal`. CPS erstellt darin ein neues Verzeichnis `UV98-personal-…`.
@@ -92,7 +92,7 @@ CPS prüft den Status der zwei Lesevorgänge, Größen und SHA-Werte der Sicheru
 
 Die persönliche BIN hat einen eigenen SHA im neuen CPS-Katalog. BIN und Katalog zusammen aufbewahren und die Sicherung des eigenen Geräts verwenden.
 
-Wird die Vorbereitung abgelehnt, Auswahl prüfen. Erforderlich sind die vollständige und erfolgreich verglichene NOR-Sicherung des eigenen Geräts sowie die ursprüngliche R38-BIN aus demselben Paket. Für die Prüfung das Originalmanifest und den Originalkatalog verwenden.
+Wird die Vorbereitung abgelehnt, Auswahl prüfen. Erforderlich sind die vollständige und erfolgreich verglichene NOR-Sicherung des eigenen Geräts sowie die ursprüngliche R39-BIN aus demselben Paket. Für die Prüfung das Originalmanifest und den Originalkatalog verwenden.
 
 Erst nach erfolgreicher Vorbereitung, bestätigter Platinenkompatibilität und Sicherung der geprüften Daten sowie der richtigen Werks-BIN an zwei Orten fortfahren.
 
@@ -109,14 +109,18 @@ Erst nach erfolgreicher Vorbereitung, bestätigter Platinenkompatibilität und S
 
 In der Standardbelegung fordert die obere PTT eine Sendung über A an, die untere über B. Das tatsächlich sendende Feld zeigt TX und einen roten Rahmen, unabhängig vom ausgewählten VFO. Die Leistung liegt je VFO im RAM und steht nach dem Einschalten auf LOW. Das Akkusymbol zeigt den ungefähren Stand mit bis zu vier Balken und die Spannung in Schritten von 0,1 V (`--.-V`, wenn kein Messwert verfügbar ist). [Nachweise zur unteren PTT](../research/r37/ptt.md)
 
-Bootloader-Bestätigungen belegen die Dateiübertragung. Start und Funkbetrieb am Gerät prüfen. R33 ist die vom Besitzer akzeptierte Ausgangsversion. Für R38 stehen Gerätetests der TX-Anzeige, der unteren PTT, der Akkuanzeige, des CB-/KW-Betriebs und der MDC1200-Dekodierung aus. [Nachweise und Prüfgrenzen für R38](../research/r38/EVIDENCE-RU.md)
+Bootloader-Bestätigungen belegen die Dateiübertragung. Start und Funkbetrieb am Gerät prüfen. R33 ist die vom Besitzer akzeptierte Ausgangsversion. Für R39 stehen Gerätetests der TX-Anzeige, der unteren PTT, der Akkuanzeige, des CB-/KW-Betriebs, des Empfangs des versetzten FM-Signals und der MDC1200-Dekodierung aus. [R39-Nachweise und Prüfgrenzen](../research/r39/EVIDENCE-RU.md)
 
 ### CB-Kanalraster
 
 1. **MENU → KANÄLE / VFO → CB-RASTER** öffnen. Beim ersten Öffnen nach dem Einschalten ist **Kanal 15 AM auf 27,135 MHz** im CEPT-Raster mit 40 Kanälen ausgewählt.
-2. Mit ↑/↓ einen Kanal wählen oder die Nummer **1–40** eingeben. Mit MENU VFO A abstimmen. Mit `#` zwischen 5er- und 0er-Raster wechseln. Kanal 15 im 0er-Raster liegt auf **27,130 MHz**. Mit `*` zwischen AM und FM wechseln. CB-AM ist auf Empfang beschränkt. Für FM gelten die vorhandenen TX-Prüfungen.
+2. Mit ↑/↓ einen Kanal wählen oder die Nummer **1–40** eingeben. Mit MENU VFO A abstimmen. Mit `#` zwischen 5er- und 0er-Raster wechseln. Kanal 15 im 0er-Raster liegt auf **27,130 MHz**. Mit `*` zwischen AM und FM wechseln.
 3. Für einen Direktaufruf **MENU → TASTEN → LANGDRUCK** öffnen, die gewünschte Ziffer drücken, **CB-RASTER** wählen und mit MENU bestätigen. Auf der Hauptanzeige die zugewiesene Ziffer gedrückt halten.
 4. Im Raster EXIT gedrückt halten, um CB zu verlassen und die vorherige Einstellung von VFO A wiederherzustellen. VFO B arbeitet unabhängig. Die letzte bestätigte CB-Auswahl bleibt bis zum Ausschalten verfügbar.
+
+**Experimentelles CB-AM.** Im CB-Raster von VFO A empfängt AM auf der nominellen Kanalfrequenz. Beim Drücken der PTT sendet das Gerät in Schmalband-FM 2 kHz höher. Auf Kanal 15 gilt im CEPT-Raster **RX 27,135 → TX 27,137 MHz** und im 0er-Raster **RX 27,130 → TX 27,132 MHz**. Bei CB-FM liegen Empfang und Sendung auf der nominellen Kanalfrequenz. VFO B arbeitet mit seinen eigenen Einstellungen. Die übrigen AM-Modi sind auf Empfang beschränkt. Für beide CB-Sendemodi gelten die vorhandenen TX-Prüfungen.
+
+Ein AM-Empfänger kann das versetzte FM-Signal an der Flanke seines Filters demodulieren. Der Empfang hängt von der Filtercharakteristik und dem FM-Hub ab. Die Kompatibilität muss noch an Funkgeräten geprüft werden.
 
 ### MDC1200 und lokaler Name
 
@@ -125,7 +129,7 @@ Bootloader-Bestätigungen belegen die Dateiübertragung. Start und Funkbetrieb a
 3. Unter **UNIT ID** vier Hexadezimalzeichen von `0001` bis `DEEE` eingeben. Für Ziffern 0–9 kurz drücken und für A–F die Tasten 1–6 gedrückt halten. Mit `*` löschen, mit MENU übernehmen und mit EXIT abbrechen. Zum Löschen der ID ein leeres Feld bestätigen.
 4. Unter **NAME (LOKAL)** eine Ziffer wiederholt drücken, um ihre Zeichen durchzugehen. Vor einem weiteren Zeichen auf derselben Taste ↑ drücken. Mit `#` RU/EN umschalten und mit `*` löschen. MENU speichert bis zu zwölf Zeichen. EXIT bricht die Bearbeitung ab.
 
-Das MDC1200-Paket überträgt die PTT-ID. Der Name dient als Beschriftung auf diesem Gerät. Zeitpunkt, ID, Name und weitere Firmware-Einstellungen liegen bis zum Ausschalten im RAM. [Simulierte Namenseingabe](images/r38/de-mdc-alias-en.png)
+Das MDC1200-Paket überträgt die PTT-ID. Der Name dient als Beschriftung auf diesem Gerät. Zeitpunkt, ID, Name und weitere Firmware-Einstellungen liegen bis zum Ausschalten im RAM. [Simulierte Namenseingabe](images/r39/de-mdc-alias-en.png)
 
 ## 6. Bei Bedarf zur Originalfirmware zurückkehren
 

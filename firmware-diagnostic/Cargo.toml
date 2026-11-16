@@ -11,6 +11,8 @@ default = []
 upper-exo-tx-trial = []
 channel-tx = []
 verbose-faults = []
+# Extra UART key/RX snapshots for diagnostic builds, not LCD data or faults.
+verbose-runtime = []
 
 [[bin]]
 name = "uv98-diag-firmware"

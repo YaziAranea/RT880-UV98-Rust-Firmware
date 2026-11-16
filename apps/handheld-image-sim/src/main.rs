@@ -552,12 +552,17 @@ fn capture_r38_public(
         2_713_000
     );
     tap(app, now, Key::Hash);
-    tap(app, now, Key::Star);
     digits(app, now, "15");
     tap(app, now, Key::Menu);
     assert_eq!(app.status().view.vfo_10hz, 2_713_500);
     app.select_slot(Slot::B).unwrap();
     assert_eq!(app.status().view.vfo_10hz, original_b_frequency);
+    let (cb_a, _) = app.peer_radio_selection();
+    assert!(cb_a.cb_for_slot(Slot::A).unwrap().is_am());
+    assert_eq!(
+        uv98_handheld_ui::controller::vfo_tx_frequency(&cb_a),
+        Some(2_713_700)
+    );
     sample(app, now, 0, true);
     let upper = sample(app, now, 0, true);
     assert!(upper.ptt_tx_requested);
@@ -566,7 +571,8 @@ fn capture_r38_public(
     app.set_radio_view(RadioView {
         state: RadioState::Transmitting,
         tx_slot: Some(Slot::A),
-        modulation: Modulation::Fm,
+        // Firmware reports the RX profile. The card identifies CB TX as FM.
+        modulation: Modulation::Am,
         route: Some(RadioRoute::Hf),
         power: Some(0),
         ..RadioView::OFF

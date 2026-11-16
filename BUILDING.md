@@ -89,3 +89,13 @@ Use real local paths and a new output directory. This workflow additionally need
 Use `--exclude-private-fixture` with `tools/package_diagnostic_image.py` when preparing a shareable source archive. The legacy packager otherwise includes the owner's fixture in `source.zip`. That switch alone is not a public-release privacy or licensing audit: inspect archive entries, logs and reports as well.
 
 The [public R37 kit with CPS 0.7.0](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37-CPS-0.7.0-2026-11-16.zip) excludes manufacturer recovery firmware and personal calibration/NOR/codeplug files. The [getting-started guide](docs/GETTING-STARTED.en.md#where-to-get-the-stock-recovery-file) provides the separately obtained matching stock file and its hash. The older R35 kit remains a private historical artifact; its bundled recovery file must not be copied automatically into a public release.
+
+
+### Optional runtime UART diagnostics (R39)
+
+The firmware feature `verbose-runtime` enables key snapshots (0x132), extra
+RX/register snapshots (0x174/0x175), and timing/profiling frames (0x172/0x176).
+It is off in the R39 release to fit the application flash region. LCD meters,
+normal RX observations, RF events, PTT/TOT guards and fault records remain active.
+This flag is for diagnostic compositions; combining every feature with
+`channel-tx` is not qualified to fit. Keep the linker memory bounds unchanged.

@@ -318,7 +318,7 @@ pub(super) fn utility_page(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
             } else if view.reverse {
                 Some(view.vfo_10hz)
             } else {
-                crate::controller::vfo_tx_frequency(view)
+                crate::controller::vfo_tx_frequency(&view)
             };
             let mut target = Text::new();
             let _ = write!(

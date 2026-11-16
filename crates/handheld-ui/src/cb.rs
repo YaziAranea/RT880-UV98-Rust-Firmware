@@ -56,12 +56,18 @@ impl CbChannel {
         Some(Self { number, ..self })
     }
 
+    #[inline(never)]
     pub const fn frequency_10hz(self) -> u32 {
         let khz = match self.grid {
             CbGrid::Zeros => CEPT_KHZ[self.number as usize - 1] - 5,
             CbGrid::Cept => CEPT_KHZ[self.number as usize - 1],
         };
         khz as u32 * 100
+    }
+
+    /// Carrier for experimental FM transmission in CB AM and ordinary CB FM.
+    pub const fn tx_frequency_10hz(self) -> u32 {
+        self.frequency_10hz() + if self.am { 200 } else { 0 }
     }
 
     pub const fn is_am(self) -> bool {
@@ -94,11 +100,18 @@ mod tests {
             ..cept
         };
         assert_eq!(zeros.frequency_10hz(), 2_713_000);
+        assert_eq!(cept.tx_frequency_10hz(), 2_713_700);
+        assert_eq!(zeros.tx_frequency_10hz(), 2_713_200);
         for number in 1..=CHANNEL_COUNT {
-            let zero_frequency = zeros.with_number(number).unwrap().frequency_10hz();
-            let cept_frequency = cept.with_number(number).unwrap().frequency_10hz();
-            assert_eq!(zero_frequency % 1_000, 0);
-            assert_eq!(cept_frequency - zero_frequency, 500);
+            let zeros = zeros.with_number(number).unwrap();
+            let cept = cept.with_number(number).unwrap();
+            assert_eq!(zeros.frequency_10hz() % 1_000, 0);
+            assert_eq!(cept.frequency_10hz() - zeros.frequency_10hz(), 500);
+            for mut channel in [zeros, cept] {
+                assert_eq!(channel.tx_frequency_10hz() - channel.frequency_10hz(), 200);
+                channel.am = false;
+                assert_eq!(channel.tx_frequency_10hz(), channel.frequency_10hz());
+            }
         }
         for (number, frequency) in [
             (1, 2_696_500),

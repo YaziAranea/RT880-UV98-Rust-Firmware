@@ -372,7 +372,26 @@ fn cb_peer_selection_keeps_b_unchanged_and_restores_a_channel_from_nor_read_only
         ..Default::default()
     };
     let am = uv98_radio_runtime::policy::profile(a, a_channel, settings, stale_fm).unwrap();
-    assert!(am.transmit.is_none());
+    assert_eq!(am.receive.unwrap().frequency_10hz, 2_713_500);
+    assert_eq!(
+        am.receive.unwrap().modulation,
+        uv98_rf_sequence::Modulation::Am
+    );
+    assert_eq!(am.transmit.unwrap().frequency_10hz, 2_713_700);
+    event(&mut app, InputEvent::Ptt(true));
+    let upper = uv98_radio_runtime::ptt::Input {
+        upper: true,
+        lower: false,
+        clean: true,
+    };
+    let allowed =
+        uv98_radio_runtime::tx_policy::authorize_target(&app.status.view, &a, am, upper).unwrap();
+    assert_eq!(allowed.slot, Slot::A);
+    assert_eq!(allowed.transmit.frequency_10hz, 2_713_700);
+    assert_eq!(app.status.view.active_slot, Slot::B);
+    assert!(allowed.still_held_target(app.status.view, a, am, upper));
+    event(&mut app, InputEvent::Ptt(false));
+    assert!(!allowed.still_held_target(app.status.view, a, am, upper));
     // Choose FM explicitly in the CB grid, then request upper PTT while B
     // remains selected. This exercises app projection, policy and authority.
     event(&mut app, InputEvent::Hold(Key::Digit6));
@@ -398,7 +417,7 @@ fn cb_peer_selection_keeps_b_unchanged_and_restores_a_channel_from_nor_read_only
         clean: true,
     };
     let allowed =
-        uv98_radio_runtime::tx_policy::authorize_target(app.status.view, a, fm, upper).unwrap();
+        uv98_radio_runtime::tx_policy::authorize_target(&app.status.view, &a, fm, upper).unwrap();
     assert_eq!(allowed.slot, Slot::A);
     assert_eq!(allowed.transmit.frequency_10hz, 2_713_500);
     assert_eq!(allowed.transmit.tone, 0);

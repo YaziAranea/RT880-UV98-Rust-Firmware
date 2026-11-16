@@ -161,6 +161,77 @@ fn cold_rx_tx_release_round_trip() {
 }
 
 #[test]
+fn cb_pseudo_am_release_restores_nominal_am_registers_and_unkeys_pa() {
+    use uv98_handheld_ui::{
+        cb::{CbChannel, CbGrid},
+        controller::{Controller, Mode},
+    };
+    for grid in [CbGrid::Cept, CbGrid::Zeros] {
+        let mut cb = CbChannel::default();
+        cb.grid = grid;
+        let nominal = cb.frequency_10hz();
+        let mut view = Controller::new(&[255; 128], nominal).view();
+        view.mode = Mode::Vfo;
+        view.cb = Some(cb);
+        view.vfo_10hz = nominal;
+        let profile = policy::profile(
+            view,
+            None,
+            policy::Settings {
+                squelch: 1,
+                mic_gain: 31,
+                fm_volume: [58, 15],
+                am_volume: [50, 12],
+                squelch_delay: 10,
+            },
+            policy::Overrides::default(),
+        )
+        .unwrap();
+        let receive = profile.receive.unwrap();
+        let transmit = profile.transmit.unwrap();
+        let (mut radio, mut now) = ready();
+        radio.stop().unwrap();
+        radio.receive(&cal(), receive, now).unwrap();
+        pump(&mut radio, &mut now, false);
+        let original = (
+            radio.io.words[0x38],
+            radio.io.words[0x39],
+            radio.io.words[0x47],
+        );
+        radio.transmit(&cal(), transmit, now, true).unwrap();
+        pump(&mut radio, &mut now, true);
+        assert_eq!(radio.state(), State::Transmitting);
+        let expected = sequence::sweep::QualifiedRange::new(
+            &cal(),
+            nominal + 200,
+            nominal + 200,
+            nominal + 200,
+            1250,
+        )
+        .unwrap()
+        .origin_words();
+        assert_eq!((radio.io.words[0x38], radio.io.words[0x39]), expected);
+        let result = radio.tick(now + 1, false).unwrap();
+        assert!(result.tx_ended && !result.tx_timed_out);
+        assert_off(&radio);
+        radio.receive(&cal(), receive, now + 2).unwrap();
+        now += 2;
+        pump(&mut radio, &mut now, false);
+        assert_eq!(radio.state(), State::Receiving);
+        assert_eq!(
+            (
+                radio.io.words[0x38],
+                radio.io.words[0x39],
+                radio.io.words[0x47]
+            ),
+            original
+        );
+        assert_eq!(receive.frequency_10hz, nominal);
+        assert_eq!(receive.modulation, Modulation::Am);
+    }
+}
+
+#[test]
 fn signaling_access_requires_live_tx_and_cannot_change_rf_registers() {
     let (mut r, mut now) = ready();
     assert!(r.signaling_write(0x70, 0).is_err());

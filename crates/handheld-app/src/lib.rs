@@ -1297,18 +1297,19 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         peer_record: Option<&'a Record>,
         zone_names: &'a [[u8; 16]; ZONE_COUNT],
     ) -> PeerView<'a> {
-        let slot = if controller.view().active_slot == Slot::A {
+        let view = controller.view_ref();
+        let slot = if view.active_slot == Slot::A {
             Slot::B
         } else {
             Slot::A
         };
         let context = controller.context(slot);
         let (rx, tx) = if context.mode == Mode::Vfo {
-            let shifted = controller::vfo_tx_frequency(View {
-                vfo_10hz: context.vfo_10hz,
-                shift_index: context.shift_index,
-                ..controller.view()
-            });
+            let shifted = controller::vfo_tx_frequency_for(
+                context.vfo_10hz,
+                context.shift_index,
+                view.cb_for_slot(slot),
+            );
             (Some(context.vfo_10hz), shifted)
         } else {
             peer_record
@@ -1318,7 +1319,8 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
                     (Some(channel.rx_10hz), Some(channel.tx_10hz))
                 })
         };
-        let (frequency_10hz, tx_frequency_10hz) = if context.reverse { (tx, rx) } else { (rx, tx) };
+        let reverse = context.reverse && view.cb_for_slot(slot).is_none();
+        let (frequency_10hz, tx_frequency_10hz) = if reverse { (tx, rx) } else { (rx, tx) };
         PeerView {
             slot,
             mode: context.mode,
@@ -1334,7 +1336,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             },
             zone: context.zone,
             zone_name: context.zone.map(|zone| &zone_names[zone as usize][..]),
-            reverse: context.reverse,
+            reverse,
         }
     }
 

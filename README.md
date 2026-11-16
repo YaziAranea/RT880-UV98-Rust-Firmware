@@ -10,15 +10,15 @@ Independent A/B operation, a colour spectrum display, shortwave tools and access
 
 **English** · [Deutsch](README.de.md) · [Русский](README.ru.md)
 
-[**Firmware BIN**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r38/UV98-r38.bin) · [**Firmware + CPS 0.7.0**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r38/UV98-r38-2026-11-16.zip) · [**Start here: backup and installation**](docs/GETTING-STARTED.en.md) · [Release notes](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r38)
+[**Firmware BIN**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r39/UV98-r39.bin) · [**Firmware + CPS 0.7.0**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r39/UV98-r39-2026-11-16.zip) · [**Start here: backup and installation**](docs/GETTING-STARTED.en.md) · [Release notes](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r39)
 
-> **Experimental firmware for the investigated AT32F423 board profile.** Use CPS to prepare a personal R38 image from your radio's verified NOR backup before flashing. CPS binds the image to your factory calibration. Verify board compatibility before proceeding. [Backup and preparation guide](docs/GETTING-STARTED.en.md#4-check-compatibility-before-flashing)
+> **Experimental firmware for the investigated AT32F423 board profile.** Use CPS to prepare a personal R39 image from your radio's verified NOR backup before flashing. CPS binds the image to your factory calibration. Verify board compatibility before proceeding. [Backup and preparation guide](docs/GETTING-STARTED.en.md#4-check-compatibility-before-flashing)
 
 ## Windows CPS 0.7.0
 
 Use **Язык / Language / Sprache** in the toolbar to select **Русский**, **English** or **Deutsch**. All eight tabs and existing status messages switch immediately. Unsaved edits stay in place, and CPS remembers the selection in your Windows user profile. File dialog titles and filters follow CPS. Standard dialog buttons follow Windows.
 
-The R38 kit bundles the released CPS 0.7.0 build. [CPS 0.7.0 source](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/tree/cps-v0.7.0)
+The R39 kit bundles the released CPS 0.7.0 build. [CPS 0.7.0 source](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/tree/cps-v0.7.0)
 
 ![CPS 0.7.0 channel editor in English](docs/images/cps-0.7.0/en-channels.png)
 
@@ -28,31 +28,31 @@ The R38 kit bundles the released CPS 0.7.0 build. [CPS 0.7.0 source](https://git
 
 <table>
 <tr>
-<td align="center"><img src="docs/images/r38/en-home.png" width="240" alt="English dual A/B frequency screen with signal meters"><br><b>A/B channels and VFOs</b></td>
-<td align="center"><img src="docs/images/r38/en-spectrum.png" width="240" alt="Colour frequency spectrum and waterfall"><br><b>Spectrum and waterfall</b></td>
+<td align="center"><img src="docs/images/r39/en-home.png" width="240" alt="English dual A/B frequency screen with signal meters"><br><b>A/B channels and VFOs</b></td>
+<td align="center"><img src="docs/images/r39/en-spectrum.png" width="240" alt="Colour frequency spectrum and waterfall"><br><b>Spectrum and waterfall</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r38/en-hf.png" width="240" alt="Shortwave receiver with an RSSI waterfall"><br><b>Shortwave tools</b></td>
-<td align="center"><img src="docs/images/r38/en-menu.png" width="240" alt="English radio menu"><br><b>English · Deutsch · Русский</b></td>
+<td align="center"><img src="docs/images/r39/en-hf.png" width="240" alt="Shortwave receiver with an RSSI waterfall"><br><b>Shortwave tools</b></td>
+<td align="center"><img src="docs/images/r39/en-menu.png" width="240" alt="English radio menu"><br><b>English · Deutsch · Русский</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r38/en-tx-b.png" width="240" alt="Red TX outline on VFO B while VFO A is selected"><br><b>PTT B with A selected</b></td>
-<td align="center"><img src="docs/images/r38/en-battery-low.png" width="240" alt="Low battery indication on the main screen"><br><b>Low battery</b></td>
+<td align="center"><img src="docs/images/r39/en-tx-b.png" width="240" alt="Red TX outline on VFO B while VFO A is selected"><br><b>PTT B with A selected</b></td>
+<td align="center"><img src="docs/images/r39/en-battery-low.png" width="240" alt="Low battery indication on the main screen"><br><b>Low battery</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r38/en-cb-grid.png" width="240" alt="40-channel CB grid at channel 15 AM"><br><b>CB grid</b></td>
-<td align="center"><img src="docs/images/r38/en-mdc.png" width="240" alt="MDC1200 settings for slot B and its local name"><br><b>MDC1200</b></td>
+<td align="center"><img src="docs/images/r39/en-cb-grid.png" width="240" alt="40-channel CB grid at channel 15 AM"><br><b>CB grid</b></td>
+<td align="center"><img src="docs/images/r39/en-mdc.png" width="240" alt="MDC1200 settings for slot B and its local name"><br><b>MDC1200</b></td>
 </tr>
 </table>
 
 *UI simulations rendered by the same Rust renderer used on the radio. Signals and readings in these illustrations are simulated; the images are not RF measurements.*
 
-## New in R38
+## R39 features
 
-- **CB grid.** The 40-channel CEPT grid for VFO A opens on channel 15 AM at 27.135 MHz on first use. Use `#` for the zero-ending frequencies. Any long digit can open the grid. Hold EXIT on the grid to restore the previous A context. CB AM is receive-only. [CB controls](docs/GETTING-STARTED.en.md#cb-grid)
-- **TX outline.** A red outline follows the slot that actually transmits. With the default bindings, the upper PTT requests A and the lower PTT requests B. [Simulated TX on A with B selected](docs/images/r38/en-cb-tx-a.png)
+- **CB grid.** The 40-channel CEPT grid for VFO A opens on channel 15 AM at 27.135 MHz on first use. Use `#` for the zero-ending frequencies. Assign a long digit to open the grid. Hold EXIT on the grid to restore the previous A context. In the CB grid on A, AM receives on the channel frequency. PTT uses experimental narrow FM 2 kHz higher. On CEPT channel 15, RX is 27.135 MHz and TX is 27.137 MHz. [CB controls](docs/GETTING-STARTED.en.md#cb-grid)
+- **TX outline.** A red outline follows the slot that actually transmits. With the default bindings, the upper PTT requests A and the lower PTT requests B. [Simulated TX on A with B selected](docs/images/r39/en-cb-tx-a.png)
 - **MDC1200.** Set an individual PTT ID and choose off, start, end or both for each slot. The 12-character RU/EN name is a local label stored in RAM. [MDC1200 and keypad controls](docs/GETTING-STARTED.en.md#mdc1200-and-local-name)
-- **Display and shortwave.** Each LCD update slice can handle several changed regions. The Si4732 waterfall redraws the rows affected by the RSSI sweep. Timing and reception on the radio still need verification. [R38 evidence and test limits](research/r38/EVIDENCE-RU.md)
+- **Display and shortwave.** Each LCD update slice can handle several changed regions. The Si4732 waterfall redraws the rows affected by the RSSI sweep. Timing and reception on the radio still need verification. [Display and shortwave evidence from R38](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/blob/r38/research/r38/EVIDENCE-RU.md)
 
 ## What is included
 
@@ -73,13 +73,13 @@ The stock “800 MHz” mode starts at **840 MHz**. The preset uses 850.000 MHz.
 1. Keep the radio on its stock firmware and save its original `.880dmf` / `.98pdmf` file.
 2. Use our CPS to save **calibration**, **4 MiB NOR** and **settings/channel sections**. Each operation reads twice and compares the results.
 3. Keep the complete snapshot folders and a matching factory recovery file in two places. The public package does not include the manufacturer's firmware.
-4. Check board compatibility, then prepare your personal R38 image in CPS from the verified NOR snapshot. No Rust compiler is needed for this step.
+4. Check board compatibility, then prepare your personal R39 image in CPS from the verified NOR snapshot. No Rust compiler is needed for this step.
 
 The [file checklist and step-by-step guide](docs/GETTING-STARTED.en.md) names every CPS button and expected file. **The 4 MiB NOR backup is not an MCU firmware or bootloader dump.**
 
 ## Current limits
 
-R33 is the owner's accepted hardware baseline. R38 still needs on-radio checks of TX indication, display timing, CB/HF operation and MDC1200 decoding. Build and simulation results are in the [R38 release notes](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r38).
+R33 is the owner's accepted hardware baseline. R39 still needs on-radio checks of TX indication, display timing, CB/HF operation, reception of the offset FM signal and MDC1200 decoding. Build and simulation results are in the [R39 release notes](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r39).
 
 - Dual Watch alternates the receiver. Simultaneous audio from two BK4819 receivers is not implemented.
 - The HF waterfall retunes one Si4732 and interrupts audio during the sweep; it is not an FFT.

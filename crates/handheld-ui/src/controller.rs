@@ -1027,6 +1027,10 @@ impl Controller {
         self.view
     }
 
+    pub const fn view_ref(&self) -> &View {
+        &self.view
+    }
+
     /// Commit only after the spectrum backend restored normal RX successfully.
     /// A highlighted bin alone never changes a slot's saved frequency or mode.
     pub fn accept_spectrum_frequency(&mut self, frequency_10hz: u32) -> Change {
@@ -2805,7 +2809,9 @@ impl Controller {
 
     fn toggle_reverse(&mut self) {
         if (self.view.mode == Mode::Channel && self.view.channel.is_some())
-            || (self.view.mode == Mode::Vfo && self.view.shift_index != 0)
+            || (self.view.mode == Mode::Vfo
+                && self.view.shift_index != 0
+                && self.selected_cb().is_none())
         {
             self.view.reverse = !self.view.reverse;
             self.view.screen = Screen::Home;
@@ -3679,6 +3685,10 @@ mod tests {
         assert!(!ui.view.reverse);
         assert_eq!(ui.context(Slot::B), original_b);
         assert_eq!(ui.view.cb_for_slot(Slot::B), None);
+        ui.view.shift_index = 1;
+        ui.handle(InputEvent::Hold(Key::Digit4), &bitmap);
+        assert!(!ui.view.reverse);
+        ui.view.shift_index = 0;
 
         press(&mut ui, Key::Up, &bitmap);
         assert_eq!(ui.view.vfo_10hz, 2_723_500); // Channel 24 after 23.
@@ -5102,7 +5112,22 @@ mod tests {
     }
 }
 
-pub fn vfo_tx_frequency(view: View) -> Option<u32> {
-    view.vfo_10hz
-        .checked_add_signed(*SHIFT_10HZ.get(usize::from(view.shift_index))?)
+pub fn vfo_tx_frequency(view: &View) -> Option<u32> {
+    vfo_tx_frequency_for(
+        view.vfo_10hz,
+        view.shift_index,
+        view.cb_for_slot(view.active_slot),
+    )
+}
+
+#[inline(never)]
+pub fn vfo_tx_frequency_for(
+    frequency_10hz: u32,
+    shift_index: u8,
+    cb: Option<CbChannel>,
+) -> Option<u32> {
+    if let Some(cb) = cb {
+        return Some(cb.tx_frequency_10hz());
+    }
+    frequency_10hz.checked_add_signed(*SHIFT_10HZ.get(usize::from(shift_index))?)
 }

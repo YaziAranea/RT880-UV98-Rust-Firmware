@@ -124,7 +124,7 @@ pub fn profile(
         match view.mode {
             Mode::Vfo => (
                 view.vfo_10hz,
-                uv98_handheld_ui::controller::vfo_tx_frequency(view).unwrap_or(0),
+                uv98_handheld_ui::controller::vfo_tx_frequency(&view).unwrap_or(0),
                 0,
                 match TX_CTCSS.get(usize::from(view.tx_tone_index)) {
                     Some(0) => 0,
@@ -170,10 +170,11 @@ pub fn profile(
         core::mem::swap(&mut rx_tone, &mut tx_tone);
     }
     let modulation = if let Some(cb) = cb {
-        // CB is an explicit per-A mode; a stale generic A/B override must not
-        // silently turn AM reception into FM transmission on this channel.
+        // CB is an explicit per-A mode. AM reception stays on the channel;
+        // experimental pseudo-AM uses narrow FM TX exactly 2 kHz above it.
+        // Generic shift, reverse and modulation overrides do not alter this.
         rx = cb.frequency_10hz();
-        tx = rx;
+        tx = cb.tx_frequency_10hz();
         rx_tone = 0;
         tx_tone = 0;
         // Use the existing narrow calibration branch for CB FM. This is not
@@ -208,10 +209,10 @@ pub fn profile(
             squelch_delay: cfg.squelch_delay,
         })
     };
-    // AM transmit is deliberately unsupported. A malformed TX side does not
-    // disable a valid RX side, but it can never inherit the RX frequency/tone.
+    // The transmitter remains FM. Only the explicit CB AM context permits
+    // shifted FM alongside AM reception; all other AM stays receive-only.
     let transmit = if mode == OperationMode::ReceiveOnly
-        || modulation != Modulation::Fm
+        || (modulation != Modulation::Fm && cb.is_none())
         || aviation_band(tx)
         || (view.mode == Mode::Channel && channel.is_some_and(|ch| ch.power().is_none()))
         || range(tx).is_none()
@@ -300,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn cb_a_is_simplex_explicit_mode_and_does_not_leak_into_b() {
+    fn cb_a_keeps_explicit_rx_and_tx_modes_and_does_not_leak_into_b() {
         use uv98_handheld_ui::{cb::CbChannel, controller::Slot};
         let mut v = view();
         v.mode = Mode::Vfo;
@@ -323,7 +324,10 @@ mod tests {
         .unwrap();
         assert_eq!(am.receive.unwrap().frequency_10hz, 2_713_500);
         assert_eq!(am.receive.unwrap().modulation, Modulation::Am);
-        assert!(am.transmit.is_none());
+        let tx = am.transmit.unwrap();
+        assert_eq!(tx.frequency_10hz, 2_713_700);
+        assert_eq!(tx.width, Width::Narrow);
+        assert_eq!((tx.tone, tx.tone_mode, tx.option_nibble), (0, 0, 0));
         assert_eq!(scan_target(v), Err(Error::Options));
         v.cb.as_mut().unwrap().am = false;
         let fm = profile(

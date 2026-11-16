@@ -971,8 +971,8 @@ pub fn radio_dirty_ranges(model: &Model<'_>, previous: RadioView) -> Result<Dirt
             {
                 continue;
             }
-            let old_meter = home_meter(view, previous, slot);
-            let new_meter = home_meter(view, new, slot);
+            let old_meter = home_meter(&view, previous, slot);
+            let new_meter = home_meter(&view, new, slot);
             if old_meter != new_meter {
                 let (start, end) = home_meter_rows(slot);
                 let only_fill_changed = matches!(
@@ -988,8 +988,8 @@ pub fn radio_dirty_ranges(model: &Model<'_>, previous: RadioView) -> Result<Dirt
                 // A changed live sample needs only the seven bar rows.
                 dirty.push(start, if only_fill_changed { start + 7 } else { end });
             }
-            let old_live = home_radio_metadata(view, previous, slot);
-            let new_live = home_radio_metadata(view, new, slot);
+            let old_live = home_radio_metadata(&view, previous, slot);
+            let new_live = home_radio_metadata(&view, new, slot);
             if view.entry.is_none()
                 && (old_live != new_live
                     || (new_live
@@ -1108,10 +1108,10 @@ fn render_validated_row(row: u16, pixels: &mut [u16; WIDTH], model: &Model<'_>) 
             Screen::Setting => setting(row, out, model),
             Screen::Spectrum => spectrum(row, out, model),
             Screen::Shortwave => shortwave(row, out, model),
-            Screen::Crossband => crossband(row, out, model.view),
+            Screen::Crossband => crossband(row, out, &model.view),
             Screen::Gps | Screen::Aprs | Screen::TxId => utility_page(row, out, model),
-            Screen::Cb => cb_grid(row, out, model.view),
-            Screen::Mdc => mdc_page(row, out, model.view),
+            Screen::Cb => cb_grid(row, out, &model.view),
+            Screen::Mdc => mdc_page(row, out, &model.view),
         }
         notice(row, out, model.view.notice);
     } else {
@@ -1427,7 +1427,7 @@ fn cb_channel_rows(number: u8) -> (u16, u16) {
     (y, y + CB_CHANNEL_HEIGHT)
 }
 
-fn cb_grid(row: u16, out: &mut Row<'_>, view: View) {
+fn cb_grid(row: u16, out: &mut Row<'_>, view: &View) {
     let Some(cb) = view.cb_draft else {
         return;
     };
@@ -1523,7 +1523,7 @@ fn mdc_timing_label(timing: u8) -> &'static str {
     }
 }
 
-fn mdc_page(row: u16, out: &mut Row<'_>, view: View) {
+fn mdc_page(row: u16, out: &mut Row<'_>, view: &View) {
     let mut value = Text::new();
     if let Some(draft) = view.mdc_draft {
         text(
@@ -1622,11 +1622,11 @@ fn mdc_page(row: u16, out: &mut Row<'_>, view: View) {
 }
 
 /// One user-visible build identity for the header and the About page.
-pub const VERSION: &str = "0.1.8-r38";
+pub const VERSION: &str = "0.1.8-r39";
 /// Header has a fixed 42 px slot; About shows the full string.
-pub const VERSION_SHORT: &str = "R38";
+pub const VERSION_SHORT: &str = "R39";
 
-fn crossband(row: u16, out: &mut Row<'_>, view: View) {
+fn crossband(row: u16, out: &mut Row<'_>, view: &View) {
     let (status, tint) = match view.crossband_probe {
         CrossbandProbe::Starting => ("\x1f0F7", color::ACCENT),
         CrossbandProbe::InvalidPair => ("\x1f0C2", color::WARNING),
@@ -2431,16 +2431,16 @@ fn slot_card(row: u16, out: &mut Row<'_>, model: &Model<'_>, slot: Slot) {
                 row,
                 out,
                 top + HOME_METER_Y,
-                home_meter(model.view, model.radio, slot),
+                home_meter(&model.view, model.radio, slot),
             );
         } else {
             text(row, out, 16, top + HOME_METER_Y, 1, "\x1f02E", color::MUTED);
         }
         return;
     }
-    let live_metadata = home_radio_metadata(model.view, model.radio, slot);
+    let live_metadata = home_radio_metadata(&model.view, model.radio, slot);
     if active {
-        if (top + 104..top + 111).contains(&row) {
+        if cb.is_none() && (top + 104..top + 111).contains(&row) {
             let setup = match content.mode {
                 Mode::Channel => model.channel.filter(|ch| ch.active).and_then(|ch| {
                     let (rx, tx, _, tone) = displayed_channel(ch, model.view.reverse);
@@ -2459,7 +2459,7 @@ fn slot_card(row: u16, out: &mut Row<'_>, model: &Model<'_>, slot: Slot) {
                     let tx = if model.view.reverse {
                         Some(model.view.vfo_10hz)
                     } else {
-                        crate::controller::vfo_tx_frequency(model.view)
+                        crate::controller::vfo_tx_frequency(&model.view)
                     };
                     tx.map(|tx| (tx, tone))
                 }
@@ -2500,8 +2500,8 @@ fn slot_card(row: u16, out: &mut Row<'_>, model: &Model<'_>, slot: Slot) {
     }
     if live_metadata {
         let (label, ink) = match model.radio.modulation {
-            Modulation::Am => ("AM", color::AM_BADGE),
-            Modulation::Fm => ("FM", color::FM_BADGE),
+            Modulation::Am if !(transmitting && cb.is_some()) => ("AM", color::AM_BADGE),
+            _ => ("FM", color::FM_BADGE),
         };
         let x = if content.mode == Mode::Vfo { 108 } else { 148 };
         text(row, out, x, top + HOME_META_Y + 2, 1, label, ink);
@@ -2510,7 +2510,7 @@ fn slot_card(row: u16, out: &mut Row<'_>, model: &Model<'_>, slot: Slot) {
         row,
         out,
         top + HOME_METER_Y,
-        home_meter(model.view, model.radio, slot),
+        home_meter(&model.view, model.radio, slot),
     );
 }
 
@@ -2532,7 +2532,7 @@ impl MeterReading {
     }
 }
 
-fn home_meter(view: View, radio: RadioView, slot: Slot) -> MeterReading {
+fn home_meter(view: &View, radio: RadioView, slot: Slot) -> MeterReading {
     let meter_slot = if radio.state == RadioState::Transmitting {
         radio.transmitting_slot()
     } else {
@@ -2545,7 +2545,7 @@ fn home_meter(view: View, radio: RadioView, slot: Slot) -> MeterReading {
     }
 }
 
-fn home_radio_metadata(view: View, radio: RadioView, slot: Slot) -> bool {
+fn home_radio_metadata(view: &View, radio: RadioView, slot: Slot) -> bool {
     if radio.state == RadioState::Receiving {
         view.active_slot == slot
     } else {
@@ -2669,9 +2669,11 @@ fn home_frequency(model: &Model<'_>) -> Option<u32> {
                 }
             }),
         Mode::Vfo => {
-            let shifted = model.view.reverse ^ transmitting;
+            let reverse =
+                model.view.reverse && model.view.cb_for_slot(model.view.active_slot).is_none();
+            let shifted = reverse ^ transmitting;
             if shifted {
-                crate::controller::vfo_tx_frequency(model.view)
+                crate::controller::vfo_tx_frequency(&model.view)
             } else {
                 Some(model.view.vfo_10hz)
             }
@@ -5500,11 +5502,11 @@ mod tests {
                 Some(14_610_000)
             );
             assert_eq!(
-                home_meter(transmitting.view, transmitting.radio, focus),
+                home_meter(&transmitting.view, transmitting.radio, focus),
                 MeterReading::Inactive
             );
             assert_eq!(
-                home_meter(transmitting.view, transmitting.radio, tx_slot),
+                home_meter(&transmitting.view, transmitting.radio, tx_slot),
                 MeterReading::Transmit(Some(10))
             );
             let mut row = [0; WIDTH];
@@ -5524,6 +5526,79 @@ mod tests {
             assert_eq!(row[4], color::ACCENT);
             render_row(6, &mut row, &transmitting).unwrap();
             assert!(row[..170].iter().all(|&pixel| pixel == color::PANEL));
+            compare_radio_incremental(receiving, transmitting);
+            compare_radio_incremental(transmitting, receiving);
+        }
+    }
+
+    #[test]
+    fn cb_am_display_uses_nominal_rx_and_acknowledged_offset_fm_tx() {
+        let cb = crate::cb::CbChannel::default();
+        const B_RX: u32 = 43_350_000;
+        for focus in [Slot::A, Slot::B] {
+            let mut receiving = model(Screen::Home);
+            receiving.view.cb = Some(cb);
+            receiving.view.active_slot = focus;
+            receiving.view.mode = Mode::Vfo;
+            receiving.view.vfo_10hz = if focus == Slot::A {
+                cb.frequency_10hz()
+            } else {
+                B_RX
+            };
+            receiving.view.shift_index = 0;
+            let peer = focus.other();
+            let (peer_rx, peer_tx) = if peer == Slot::A {
+                (cb.frequency_10hz(), cb.tx_frequency_10hz())
+            } else {
+                (B_RX, B_RX)
+            };
+            receiving.peer = Some(PeerView {
+                slot: peer,
+                mode: Mode::Vfo,
+                frequency_10hz: Some(peer_rx),
+                tx_frequency_10hz: Some(peer_tx),
+                channel: None,
+                name: &[],
+                zone: None,
+                zone_name: None,
+                reverse: false,
+            });
+            receiving.radio.state = RadioState::Receiving;
+            receiving.radio.modulation = Modulation::Am;
+            receiving.radio.tx_slot = Some(Slot::A);
+            receiving.view.ptt_down = true;
+            if focus == Slot::A {
+                let clean = receiving;
+                receiving.view.reverse = true;
+                receiving.view.shift_index = 1;
+                receiving.view.tx_tone_index = 1;
+                let y = home_slot_rows(Slot::A).0 + 104;
+                let mut clean_row = [0; WIDTH];
+                let mut stale_row = [0; WIDTH];
+                render_row(y, &mut clean_row, &clean).unwrap();
+                render_row(y, &mut stale_row, &receiving).unwrap();
+                assert_eq!(clean_row, stale_row);
+            }
+            let nominal = slot_content(&receiving, Slot::A).frequency_10hz.unwrap();
+            assert_eq!(frequency(nominal).as_str(), "027.13500");
+
+            let mut transmitting = receiving;
+            transmitting.radio.state = RadioState::Transmitting;
+            let carrier = slot_content(&transmitting, Slot::A).frequency_10hz.unwrap();
+            assert_eq!(frequency(carrier).as_str(), "027.13700");
+            assert_eq!(
+                slot_content(&transmitting, Slot::B).frequency_10hz,
+                Some(B_RX)
+            );
+            let badge_top = home_slot_rows(Slot::A).0 + HOME_META_Y + 2;
+            let mut saw_fm = false;
+            for y in badge_top..badge_top + 7 {
+                let mut row = [0; WIDTH];
+                render_row(y, &mut row, &transmitting).unwrap();
+                saw_fm |= row[108..120].contains(&color::FM_BADGE);
+                assert!(!row[108..120].contains(&color::AM_BADGE));
+            }
+            assert!(saw_fm);
             compare_radio_incremental(receiving, transmitting);
             compare_radio_incremental(transmitting, receiving);
         }

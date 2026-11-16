@@ -13,8 +13,8 @@
 use crate::{policy, ptt::Input, TX_TIMEOUT_MS};
 use uv98_band_plan::{select_routes, SelectorMode};
 use uv98_codeplug::channels::Tone;
-use uv98_handheld_ui::controller::{Context, ScanState, Screen, SideAction, Slot, View};
-use uv98_rf_sequence::{Modulation, TxRequest};
+use uv98_handheld_ui::controller::{Context, Mode, ScanState, Screen, SideAction, Slot, View};
+use uv98_rf_sequence::{Modulation, TxRequest, Width};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Source {
@@ -64,7 +64,7 @@ impl Authorization {
         profile: policy::Profile,
         input: Input,
     ) -> bool {
-        authorize_target(operator, target, profile, input) == Ok(self)
+        authorize_target(&operator, &target, profile, input) == Ok(self)
     }
 
     /// Configuration-only validation for a separately timed end-of-TX ID.
@@ -90,7 +90,7 @@ impl Authorization {
             lower: self.source == Source::Lower,
             clean: true,
         };
-        authorize_target(operator, target, profile, original_source) == Ok(self)
+        authorize_target(&operator, &target, profile, original_source) == Ok(self)
     }
 }
 
@@ -103,14 +103,17 @@ pub fn authorize(
     profile: policy::Profile,
     input: Input,
 ) -> Result<Authorization, Denied> {
-    authorize_target(view, view, profile, input)
+    authorize_target(&view, &view, profile, input)
 }
 
 /// The operator view supplies the UI and binding state. The target view and
 /// profile describe the requested slot's committed radio settings.
+// Shared by arming, hold and tail checks. Avoid copying the whole policy into
+// each firmware call site under whole-program LTO.
+#[inline(never)]
 pub fn authorize_target(
-    operator: View,
-    target: View,
+    operator: &View,
+    target: &View,
     profile: policy::Profile,
     input: Input,
 ) -> Result<Authorization, Denied> {
@@ -144,7 +147,35 @@ pub fn authorize_target(
     if target.active_slot != slot || operator.ptt_slot != Some(slot) {
         return Err(Denied::Context);
     }
-    if profile.audio.modulation != Modulation::Fm {
+    let cb = operator.cb_for_slot(slot);
+    if target.cb_for_slot(slot) != cb {
+        return Err(Denied::Context);
+    }
+    if let Some(cb) = cb {
+        // The only AM-receive exception is committed CB A: the transmitter
+        // itself is narrow FM, exactly +2 kHz, with no subaudio signalling.
+        let modulation = if cb.is_am() {
+            Modulation::Am
+        } else {
+            Modulation::Fm
+        };
+        if !(profile.audio.modulation == modulation
+            && target.mode == Mode::Vfo
+            && target.vfo_10hz == cb.frequency_10hz()
+            && profile.receive.is_some_and(|rx| {
+                rx.modulation == modulation && rx.frequency_10hz == cb.frequency_10hz()
+            })
+            && profile.transmit.is_some_and(|tx| {
+                tx.frequency_10hz == cb.tx_frequency_10hz()
+                    && tx.width == Width::Narrow
+                    && tx.tone == 0
+                    && tx.tone_mode == 0
+                    && tx.option_nibble == 0
+            }))
+        {
+            return Err(Denied::Modulation);
+        }
+    } else if profile.audio.modulation != Modulation::Fm {
         return Err(Denied::Modulation);
     }
     let transmit = profile.transmit.ok_or(Denied::NoTransmit)?;
@@ -258,6 +289,156 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn cb_am_uses_shifted_fm_on_both_grids_with_normal_ptt_guards() {
+        use uv98_handheld_ui::cb::{CbChannel, CbGrid, CHANNEL_COUNT};
+        let calibration = Calibration::parse(include_bytes!(
+            "../../calibration/tests/fixtures/uv98-plus-stock-1.16.bin"
+        ))
+        .unwrap();
+        for grid in [CbGrid::Cept, CbGrid::Zeros] {
+            for number in 1..=CHANNEL_COUNT {
+                let mut cb = CbChannel::default().with_number(number).unwrap();
+                cb.grid = grid;
+                let nominal = cb.frequency_10hz();
+                let mut v = view();
+                v.mode = Mode::Vfo;
+                v.cb = Some(cb);
+                v.vfo_10hz = nominal;
+                let p = profile(v, &record(nominal, nominal), 0);
+                let permitted = authorize(v, p, UPPER).unwrap();
+                let rx = p.receive.unwrap();
+                assert_eq!(
+                    (rx.frequency_10hz, rx.modulation),
+                    (nominal, Modulation::Am)
+                );
+                assert_eq!(permitted.transmit.frequency_10hz, nominal + 200);
+                assert_eq!(permitted.tx_route, 1);
+                assert!(sequence::transmit(&calibration, permitted.transmit).is_ok());
+                assert!(sequence::receive(&calibration, rx).is_ok());
+                for input in [
+                    RELEASED,
+                    LOWER,
+                    Input {
+                        upper: true,
+                        lower: true,
+                        clean: true,
+                    },
+                    Input {
+                        clean: false,
+                        ..UPPER
+                    },
+                ] {
+                    assert!(!permitted.still_held(v, p, input));
+                }
+                for changed in [
+                    View { locked: true, ..v },
+                    View {
+                        screen: Screen::Cb,
+                        ..v
+                    },
+                    View { cb: None, ..v },
+                ] {
+                    assert!(!permitted.still_held(changed, p, UPPER));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cb_am_exception_rejects_forged_frequency_context_and_tx_parameters() {
+        use uv98_handheld_ui::cb::CbChannel;
+        let cb = CbChannel::default();
+        let mut v = view();
+        v.mode = Mode::Vfo;
+        v.cb = Some(cb);
+        v.vfo_10hz = cb.frequency_10hz();
+        let p = profile(v, &record(v.vfo_10hz, v.vfo_10hz), 0);
+        assert!(permits(v, p, UPPER));
+        let mut fm_cb = cb;
+        fm_cb.am = false;
+        for changed in [
+            View { cb: None, ..v },
+            View {
+                cb: Some(fm_cb),
+                ..v
+            },
+            View {
+                mode: Mode::Channel,
+                ..v
+            },
+            View {
+                vfo_10hz: v.vfo_10hz + 1,
+                ..v
+            },
+            View {
+                active_slot: Slot::B,
+                ptt_slot: Some(Slot::B),
+                side_bindings: [SideAction::PttB; 2],
+                ..v
+            },
+        ] {
+            assert!(!permits(changed, p, UPPER));
+        }
+        let tx = p.transmit.unwrap();
+        for transmit in [
+            TxRequest {
+                frequency_10hz: v.vfo_10hz,
+                ..tx
+            },
+            TxRequest {
+                frequency_10hz: v.vfo_10hz + 199,
+                ..tx
+            },
+            TxRequest {
+                frequency_10hz: 14_550_000,
+                ..tx
+            },
+            TxRequest {
+                width: Width::Wide,
+                ..tx
+            },
+            TxRequest { tone: 0x1375, ..tx },
+            TxRequest { tone_mode: 1, ..tx },
+            TxRequest {
+                option_nibble: 1,
+                ..tx
+            },
+        ] {
+            assert!(!permits(
+                v,
+                policy::Profile {
+                    transmit: Some(transmit),
+                    ..p
+                },
+                UPPER
+            ));
+        }
+        assert!(!permits(v, policy::Profile { receive: None, ..p }, UPPER));
+        let mut changed = p;
+        changed.receive.as_mut().unwrap().frequency_10hz += 200;
+        assert!(!permits(v, changed, UPPER));
+        changed = p;
+        changed.receive.as_mut().unwrap().modulation = Modulation::Fm;
+        assert!(!permits(v, changed, UPPER));
+        // The committed operator CB context owns this exception, even if an
+        // inconsistent projected target or profile claims ordinary FM.
+        changed = p;
+        changed.audio.modulation = Modulation::Fm;
+        assert!(!permits(v, changed, UPPER));
+        changed.transmit.as_mut().unwrap().frequency_10hz = 14_550_000;
+        assert!(!permits(v, changed, UPPER));
+        let erased = View { cb: None, ..v };
+        assert_eq!(
+            authorize_target(&v, &erased, changed, UPPER),
+            Err(Denied::Context)
+        );
+        assert_eq!(
+            authorize_target(&erased, &v, p, UPPER),
+            Err(Denied::Context)
+        );
     }
 
     #[test]
@@ -415,7 +596,7 @@ mod tests {
             ..operator_a
         };
         let profile_b = profile(b, &raw_b, 2);
-        let allowed = authorize_target(operator_a, b, profile_b, LOWER).unwrap();
+        let allowed = authorize_target(&operator_a, &b, profile_b, LOWER).unwrap();
         assert_eq!((allowed.slot, allowed.source), (Slot::B, Source::Lower));
         assert_eq!(allowed.transmit.frequency_10hz, 43_297_500);
         assert_eq!(allowed.transmit.tone, 0x1375);
@@ -441,7 +622,7 @@ mod tests {
         let mut rx_only_b = raw_b;
         rx_only_b[1] = 1;
         assert_eq!(
-            authorize_target(operator_a, b, profile(b, &rx_only_b, 2), LOWER),
+            authorize_target(&operator_a, &b, profile(b, &rx_only_b, 2), LOWER),
             Err(Denied::NoTransmit)
         );
 
@@ -457,7 +638,7 @@ mod tests {
         };
         let mut raw_a = record(14_550_000, 14_490_000);
         raw_a[14..16].copy_from_slice(&0x2013u16.to_le_bytes());
-        let allowed = authorize_target(operator_b, a, profile(a, &raw_a, 1), UPPER).unwrap();
+        let allowed = authorize_target(&operator_b, &a, profile(a, &raw_a, 1), UPPER).unwrap();
         assert_eq!((allowed.slot, allowed.source), (Slot::A, Source::Upper));
         assert_eq!(allowed.transmit.frequency_10hz, 14_490_000);
         assert_eq!(allowed.transmit.tone, 0x2013);
@@ -466,11 +647,11 @@ mod tests {
         let mut follow_focus = operator_b;
         follow_focus.side_bindings[0] = SideAction::Active;
         assert_eq!(
-            authorize_target(follow_focus, a, profile(a, &raw_a, 1), UPPER),
+            authorize_target(&follow_focus, &a, profile(a, &raw_a, 1), UPPER),
             Err(Denied::Context)
         );
         follow_focus.ptt_slot = Some(Slot::B);
-        assert!(authorize_target(follow_focus, b, profile_b, UPPER).is_ok());
+        assert!(authorize_target(&follow_focus, &b, profile_b, UPPER).is_ok());
     }
 
     #[test]
