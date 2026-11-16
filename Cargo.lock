@@ -2957,6 +2957,7 @@ dependencies = [
  "uv98-codeplug",
  "uv98-display",
  "uv98-keys",
+ "uv98-signaling",
  "uv98-spectrum",
 ]
 
@@ -3008,7 +3009,9 @@ dependencies = [
  "uv98-codeplug",
  "uv98-diag-quiesce",
  "uv98-handheld-ui",
+ "uv98-keys",
  "uv98-rf-sequence",
+ "uv98-signaling",
  "uv98-spectrum",
 ]
 

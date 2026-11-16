@@ -2,7 +2,7 @@
 //! This is a sequential RSSI waterfall, not an FFT or a second audio receiver.
 //! The caller mutes audio while enabled, then restores the selected tuning.
 
-use crate::shortwave::{Tuning, Update};
+use crate::shortwave::{Processing, Tuning, Update};
 use uv98_handheld_ui::controller::{ShortwaveMode, SW_MAX_KHZ, SW_MIN_KHZ};
 
 pub const BINS: usize = 32;
@@ -55,9 +55,21 @@ pub struct Sweep {
     selection: Option<Tuning>,
     requested: Option<Tuning>,
     bin: u8,
+    processing: Option<Processing>,
 }
 
 impl Sweep {
+    /// A filter change invalidates the partly measured row as well as its
+    /// pending bin. The Session independently rejects pre-change replies.
+    pub fn set_processing(&mut self, processing: Processing) {
+        if self.processing != Some(processing) {
+            self.processing = Some(processing);
+            self.selection = None;
+            self.requested = None;
+            self.bin = 0;
+        }
+    }
+
     /// Return one target until a matching confirmed measurement arrives.
     /// Changes of mode/centre restart the row; disabling restores the exact
     /// user selection, including the SSB BFO, without writing the saved VFO.
@@ -169,6 +181,31 @@ mod tests {
         };
         assert_eq!(sweep.observe(old, update), None);
         assert_eq!(sweep.observe(next, update).unwrap().bin, 0);
+    }
+
+    #[test]
+    fn processing_change_discards_partial_row_and_pending_measurement() {
+        let mut sweep = Sweep::default();
+        let tune = selected(ShortwaveMode::Am, 7100);
+        let mut processing = Processing {
+            filter: crate::shortwave::AmFilter::Wide6k,
+            soft_mute: false,
+        };
+        sweep.set_processing(processing);
+        let first = sweep.request(tune, true);
+        let measurement = Update::Tuned {
+            part: 0x20,
+            rssi: 40,
+            snr: 9,
+        };
+        assert_eq!(sweep.observe(first, measurement).unwrap().bin, 0);
+        let old = sweep.request(tune, true);
+        processing.filter = crate::shortwave::AmFilter::Narrow1k;
+        sweep.set_processing(processing);
+        assert_eq!(sweep.observe(old, measurement), None);
+        let restarted = sweep.request(tune, true);
+        assert_eq!(restarted, first);
+        assert_eq!(sweep.observe(restarted, measurement).unwrap().bin, 0);
     }
 
     #[test]

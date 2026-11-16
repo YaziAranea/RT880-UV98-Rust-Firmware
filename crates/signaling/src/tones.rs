@@ -139,7 +139,7 @@ pub trait ToneRegisters {
 /// Saves only modulation registers. Never writes PA, synthesizer, relay or RF
 /// register30 after the session: a fault/cancel cannot accidentally re-enable TX.
 /// Call begin only inside an already qualified voice-TX state. The root runtime
-/// disables MIC ADC (REG30 bit1) during tones and restores it ONLY while TX valid.
+/// disables MIC ADC (REG30 bit 2) during tones and restores it while TX is valid.
 pub struct BkToneSession {
     saved: Option<[u16; 5]>,
     current: Option<Tone>,

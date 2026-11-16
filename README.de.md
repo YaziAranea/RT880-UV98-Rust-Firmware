@@ -10,15 +10,15 @@ Unabhängige A/B-Einstellungen, ein farbiges Spektrum, Kurzwellenfunktionen und 
 
 [English](README.md) · **Deutsch** · [Русский](README.ru.md)
 
-[**Firmware-BIN**](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37.bin) · [**Firmware und CPS 0.7.0**](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37-CPS-0.7.0-2026-11-16.zip) · [**Hier beginnen: Sicherung und Installation**](docs/GETTING-STARTED.de.md) · [Versionshinweise](https://github.com/YaziAranea/uv98-rust/releases/tag/r37)
+[**Firmware-BIN**](https://github.com/YaziAranea/uv98-rust/releases/download/r38/UV98-r38.bin) · [**Firmware und CPS 0.7.0**](https://github.com/YaziAranea/uv98-rust/releases/download/r38/UV98-r38-2026-11-16.zip) · [**Hier beginnen: Sicherung und Installation**](docs/GETTING-STARTED.de.md) · [Versionshinweise](https://github.com/YaziAranea/uv98-rust/releases/tag/r38)
 
-> **Experimentelle Firmware für das untersuchte AT32F423-Platinenprofil.** R37 ist eine Vorlage: Vor dem Flashen mit CPS ein persönliches Image aus der geprüften NOR-Sicherung des eigenen Geräts erstellen. Dabei wird das Image an die eigenen Kalibrierungen gebunden; die Werksdaten werden nicht ersetzt. Eine ähnliche Modellbezeichnung belegt keine Platinenkompatibilität. Zuerst die [Sicherungs- und Vorbereitungsanleitung](docs/GETTING-STARTED.de.md#4-kompatibilität-vor-dem-flashen-prüfen) lesen.
+> **Experimentelle Firmware für das untersuchte AT32F423-Platinenprofil.** Vor dem Flashen mit CPS ein persönliches R38-Image aus der geprüften NOR-Sicherung des eigenen Geräts erstellen. CPS bindet das Image an die eigenen Werkskalibrierungen. Zuerst die Platinenkompatibilität prüfen. [Sicherungs- und Vorbereitungsanleitung](docs/GETTING-STARTED.de.md#4-kompatibilität-vor-dem-flashen-prüfen)
 
 ## Windows-CPS 0.7.0
 
 Wählen Sie in der Symbolleiste unter **Язык / Language / Sprache** zwischen **Русский**, **English** und **Deutsch**. Alle acht Reiter und bereits angezeigte Statusmeldungen wechseln sofort die Sprache. Ungespeicherte Änderungen bleiben erhalten. CPS speichert die Sprachwahl im Windows-Benutzerprofil. Titel und Filter der Dateidialoge folgen der CPS-Sprache. Die Standardschaltflächen folgen der Windows-Sprache.
 
-Das Paket enthält dieselbe R37-Firmware-BIN. Das CPS-Update erfordert kein erneutes Flashen. [Quellcode der CPS 0.7.0](https://github.com/YaziAranea/uv98-rust/tree/cps-v0.7.0)
+Das R38-Paket enthält die veröffentlichte CPS 0.7.0. [Quellcode der CPS 0.7.0](https://github.com/YaziAranea/uv98-rust/tree/cps-v0.7.0)
 
 ![Kanaleditor der CPS 0.7.0 auf Deutsch](docs/images/cps-0.7.0/de-channels.png)
 
@@ -28,26 +28,31 @@ Das Paket enthält dieselbe R37-Firmware-BIN. Das CPS-Update erfordert kein erne
 
 <table>
 <tr>
-<td align="center"><img src="docs/images/r37/de-home.png" width="240" alt="Deutsche A/B-Frequenzanzeige mit Signalpegeln"><br><b>Kanäle und VFOs A/B</b></td>
-<td align="center"><img src="docs/images/r37/de-spectrum.png" width="240" alt="Farbiges Frequenzspektrum mit Wasserfall"><br><b>Spektrum und Wasserfall</b></td>
+<td align="center"><img src="docs/images/r38/de-home.png" width="240" alt="Deutsche A/B-Frequenzanzeige mit Signalpegeln"><br><b>Kanäle und VFOs A/B</b></td>
+<td align="center"><img src="docs/images/r38/de-spectrum.png" width="240" alt="Farbiges Frequenzspektrum mit Wasserfall"><br><b>Spektrum und Wasserfall</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r37/de-hf.png" width="240" alt="Kurzwellenempfänger mit RSSI-Wasserfall"><br><b>Kurzwellenfunktionen</b></td>
-<td align="center"><img src="docs/images/r37/de-menu.png" width="240" alt="Deutsches Funkgerätemenü"><br><b>Deutsch · English · Русский</b></td>
+<td align="center"><img src="docs/images/r38/de-hf.png" width="240" alt="Kurzwellenempfänger mit RSSI-Wasserfall"><br><b>Kurzwellenfunktionen</b></td>
+<td align="center"><img src="docs/images/r38/de-menu.png" width="240" alt="Deutsches Funkgerätemenü"><br><b>Deutsch · English · Русский</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r37/de-tx-b.png" width="240" alt="TX-Anzeige auf VFO B bei ausgewähltem VFO A"><br><b>PTT B bei Auswahl von A</b></td>
-<td align="center"><img src="docs/images/r37/de-battery-low.png" width="240" alt="Anzeige für einen niedrigen Akkustand"><br><b>Niedriger Akkustand</b></td>
+<td align="center"><img src="docs/images/r38/de-tx-b.png" width="240" alt="Roter TX-Rahmen auf VFO B bei ausgewähltem VFO A"><br><b>PTT B bei Auswahl von A</b></td>
+<td align="center"><img src="docs/images/r38/de-battery-low.png" width="240" alt="Anzeige für einen niedrigen Akkustand"><br><b>Niedriger Akkustand</b></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/images/r38/de-cb-grid.png" width="240" alt="CB-Raster mit 40 Kanälen und ausgewähltem Kanal 15 AM"><br><b>CB-Kanalraster</b></td>
+<td align="center"><img src="docs/images/r38/de-mdc.png" width="240" alt="MDC1200-Einstellungen und lokaler Name für VFO B"><br><b>MDC1200</b></td>
 </tr>
 </table>
 
 *Diese UI-Simulationen verwenden denselben Rust-Renderer wie das Funkgerät. Signale und Messwerte in den Abbildungen sind simuliert; sie sind keine HF-Messungen.*
 
-## Neu in R37
+## Neu in R38
 
-- In der Standardbelegung fordert die obere PTT eine Sendung über A an, die untere über B. Das sendende Feld zeigt TX. Ist A ausgewählt, verwendet die untere PTT Sendefrequenz, Sendeton und die aktuell eingestellte Leistung von B. A bleibt ausgewählt. Die Leistung wird für A und B getrennt im RAM eingestellt und steht nach dem Einschalten auf LOW. Die ADC-Zuordnung der unteren PTT beruht auf dem Schaltplan und archivierten Messwerten. Der Test von R37 am Gerät steht noch aus. [Nachweise zur PTT](research/r37/ptt.md)
-- Das Akkusymbol zeigt den ungefähren Stand mit bis zu vier Balken, daneben steht die Spannung als Zahl (`--.-V`, wenn kein Messwert verfügbar ist). Es verwendet die originale ADC-Umrechnung in Schritten von 0,1 V. Spannungsgenauigkeit und Schwellenwerte sind am Gerät noch zu prüfen.
-- Beim Wechsel des ausgewählten Eintrags auf derselben Menüseite überträgt der Rendertest 15 LCD-Zeilen statt 67. Das sind bei diesem Vorgang rund 78 % weniger Pixeldaten. Die Bildrate am Gerät wurde bisher nicht gemessen.
+- **CB-Kanalraster.** Für VFO A stehen 40 Kanäle zur Wahl. Beim ersten Öffnen ist Kanal 15 AM auf 27,135 MHz im CEPT-Raster ausgewählt. Mit `#` zum 0er-Raster wechseln. Eine lange Zifferntaste kann das Raster öffnen. Dort EXIT gedrückt halten, um die vorherige Einstellung von A wiederherzustellen. CB-AM ist auf Empfang beschränkt. [CB-Bedienung](docs/GETTING-STARTED.de.md#cb-kanalraster)
+- **Roter TX-Rahmen.** Der Rahmen markiert das tatsächlich sendende Feld. In der Standardbelegung fordert die obere PTT eine Sendung auf A an, die untere auf B. [Simulierte Sendung auf A bei ausgewähltem B](docs/images/r38/de-cb-tx-a.png)
+- **MDC1200.** Die PTT-ID und der Sendezeitpunkt sind für A und B getrennt einstellbar. Zur Wahl stehen aus, Sendeanfang, Sendeende oder beides. Der lokale Name mit bis zu zwölf kyrillischen oder lateinischen Zeichen liegt im RAM. [MDC1200 und Namenseingabe](docs/GETTING-STARTED.de.md#mdc1200-und-lokaler-name)
+- **Anzeige und Kurzwelle.** Jeder begrenzte LCD-Aktualisierungsschritt kann mehrere geänderte Bereiche übertragen. Der Si4732-Wasserfall zeichnet die vom RSSI-Suchlauf betroffenen Zeilen neu. LCD-Zeiten und Empfang sind am Gerät noch zu prüfen. [Nachweise und Prüfgrenzen für R38](research/r38/EVIDENCE-RU.md)
 
 ## Funktionen
 
@@ -56,25 +61,25 @@ Das Paket enthält dieselbe R37-Firmware-BIN. Das CPS-Update erfordert kein erne
 | Funkbetrieb | Unabhängige Kanal-/VFO-Einstellungen für A/B, Zonen, Relaisablage, CTCSS/DCS-Anzeigen, segmentierte S-Meter und belegbare Tasten. |
 | Signalsuche | Frequenzsuchlauf, Spektrumcursor und Verschieben des Frequenzfensters, Abhören eines Peaks und farbiger Wasserfall. |
 | Kurzwelle | Si4732 mit AM/USB/LSB/CW-Bedienung, Band- und Schrittwahl, sequenziellem RSSI-Wasserfall, AM-Filtern und Soft Mute. |
-| Signalisierung | DTMF über die Tastatur bei gedrückter PTT; fünfstellige ZVEI1-/CCIR-Kennung am Sendeende. |
+| Signalisierung | MDC1200-PTT-ID, DTMF über die Tastatur bei gedrückter PTT und fünfstellige ZVEI1-/CCIR-Kennung am Sendeende. |
 | Navigation | GPS-Positionsverarbeitung und manuell ausgelöste APRS-Positionsbake über das unterstützte C-BUS-Modem. |
 | Windows-CPS | Kanal- und Zonenbearbeitung, Kalibrierungs-/NOR-Sicherungen, GPS/APRS-Dateieinstellungen, BIN-Prüfung und Flashen über den originalen Bootloader. |
 | Sprachen | Dokumentation und wählbare Funkgeräteoberfläche auf Deutsch, Englisch und Russisch. Eigene Kanalnamen bleiben unverändert. |
 
-Der originale Modus „800 MHz“ beginnt bei **840 MHz**; die Vorgabe wählt 850,000 MHz. Die CB-Vorgabe liegt bei 27,135 MHz. CB-AM ist nur Empfang; AM-Senden wurde nicht ergänzt.
+Der originale Modus „800 MHz“ beginnt bei **840 MHz**. Die Vorgabe wählt 850,000 MHz.
 
 ## Zuerst sichern
 
 1. Die Originalfirmware beibehalten und die ursprüngliche `.880dmf`-/`.98pdmf`-Datei des eigenen Geräts sichern.
 2. Mit unserer CPS **Kalibrierung**, **4 MiB NOR** sowie **Einstellungs-/Kanalsektionen** lesen. Jeder Vorgang liest zweimal und vergleicht die Daten.
 3. Die vollständigen Sicherungsordner und eine passende originale Wiederherstellungsdatei an zwei Orten aufbewahren. Das öffentliche Paket enthält keine Herstellerfirmware.
-4. Die Platinenkompatibilität prüfen und anschließend in CPS ein persönliches R37-Image aus der geprüften NOR-Sicherung erstellen. Dafür wird kein Rust-Compiler benötigt.
+4. Die Platinenkompatibilität prüfen und anschließend in CPS ein persönliches R38-Image aus der geprüften NOR-Sicherung erstellen. Dafür wird kein Rust-Compiler benötigt.
 
 Die [Schritt-für-Schritt-Anleitung](docs/GETTING-STARTED.de.md) nennt die CPS-Schaltflächen, erwarteten Dateien, Prüfkriterien und den Rückweg. **Der 4-MiB-NOR-Dump enthält weder MCU-Firmware noch Bootloader.**
 
 ## Aktuelle Grenzen
 
-R33 bleibt die vom Besitzer am Gerät akzeptierte Ausgangsversion. Der Gerätetest für R37 steht noch aus. Build- und Simulationsergebnisse stehen in den [Versionshinweisen](https://github.com/YaziAranea/uv98-rust/releases/tag/r37).
+R33 bleibt die vom Besitzer am Gerät akzeptierte Ausgangsversion. Bei R38 stehen Gerätetests für den TX-Rahmen, die LCD-Zeiten, CB/Kurzwelle und die MDC1200-Dekodierung aus. [Build- und Simulationsergebnisse für R38](https://github.com/YaziAranea/uv98-rust/releases/tag/r38)
 
 - Dual Watch hört A/B abwechselnd ab. Gleichzeitige Audiowiedergabe beider BK4819-Empfänger ist nicht implementiert.
 - Der KW-Wasserfall stimmt den einzigen Si4732 nacheinander ab und unterbricht dabei die Audiowiedergabe. Er ist keine FFT.

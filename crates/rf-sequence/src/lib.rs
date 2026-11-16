@@ -410,6 +410,16 @@ pub fn receive(calibration: &Calibration<'_>, request: RxRequest) -> Result<Plan
 /// RF-enable requests are final gates followed by selected calibration PA code.
 /// Caller MUST enforce release-to-arm/PTT/TOT and independent fault shutdown.
 pub fn transmit(calibration: &Calibration<'_>, request: TxRequest) -> Result<Plan, Error> {
+    transmit_with_microphone(calibration, request, true)
+}
+
+/// Same calibrated TX plan, optionally keeping the microphone ADC off from
+/// the first carrier for a beginning-of-transmission data burst.
+pub fn transmit_with_microphone(
+    calibration: &Calibration<'_>,
+    request: TxRequest,
+    microphone_enabled: bool,
+) -> Result<Plan, Error> {
     validate_options(request.tone_mode, request.option_nibble)?;
     if request.power > 2 {
         return Err(Error::InvalidPower(request.power));
@@ -477,7 +487,7 @@ pub fn transmit(calibration: &Calibration<'_>, request: TxRequest) -> Result<Pla
     plan.push(Step::DelayMs(10));
     plan.write(0x52, 0x028f);
     plan.write(0x30, 0x0200);
-    plan.write(0x30, 0xc1fe);
+    plan.write(0x30, 0xc1fa | (u16::from(microphone_enabled) << 2));
     plan.push(Step::TxGates(route));
     plan.write(0x36, rf::power_register_04f0c(u32::from(power)));
     Ok(plan)

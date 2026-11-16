@@ -13,9 +13,9 @@ This guide covers first-time preparation of a UV-98 Plus / the investigated RT-8
 3. Use the stock CPS for your model to read the radio and save its original `.880dmf` or `.98pdmf` file. Keep an existing original such as `999.880dmf` unchanged.
 4. Close the stock CPS, Radio Tuning Software and other programs using the cable. Before the first read in our CPS, power the radio off for 3 seconds, then start it normally again.
 5. Create a folder such as `Documents/UV98-backup-2026-11-16`. Suggested subfolders: `01-original`, `02-calibration`, `03-nor`, `04-settings`, `05-recovery`. Put the original CPS file in `01-original`.
-6. Extract the entire [R37 package with CPS 0.7.0](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37-CPS-0.7.0-2026-11-16.zip). Run `UV98-CPS.exe`, choose **English** in **Язык / Language / Sprache**, then open **Backups**. Select the actual cable COM port using **Refresh list → Available ports**. Old references to COM20/COM21 are not your required port number.
+6. Extract the entire [R38 package with CPS 0.7.0](https://github.com/YaziAranea/uv98-rust/releases/download/r38/UV98-r38-2026-11-16.zip). Run `UV98-CPS.exe`, choose **English** in **Язык / Language / Sprache**, then open **Backups**. Select the actual cable COM port using **Refresh list → Available ports**. Old references to COM20/COM21 are not your required port number.
 
-The toolbar language selector is always visible. All eight tabs and existing status messages switch immediately and unsaved edits stay in place. CPS remembers the selection in your Windows user profile. File dialog titles and filters follow CPS. Standard dialog buttons follow Windows. The kit contains the same R37 firmware BIN, so updating CPS requires no reflash.
+The toolbar language selector is always visible. All eight tabs and existing status messages switch immediately and unsaved edits stay in place. CPS remembers the selection in your Windows user profile. File dialog titles and filters follow CPS. Standard dialog buttons follow Windows. The R38 kit includes the released CPS 0.7.0 build.
 
 Keep a short text note beside the backups with the radio model, stock version and board revision if known.
 
@@ -77,11 +77,11 @@ Place the file named `RT-880_Upgrade_V1_16_250915.bin` in a `recovery` folder be
 
 ## 4. Check compatibility before flashing
 
-R37 targets the investigated AT32F423 board profile. A similar case or an RT-880 label does not establish compatibility with another revision. Backup-based preparation binds the image to your calibration; it does not automatically determine hardware compatibility.
+R38 targets the investigated AT32F423 board profile. Verify the board revision before flashing. Backup-based preparation binds the image to your calibration.
 
 For a confirmed compatible board, prepare a personal BIN. **No Rust compiler is needed.**
 
-1. Open **Firmware** in our CPS. Select the original `UV98-r37.bin` from the current package.
+1. Open **Firmware** in our CPS. Select the original `UV98-r38.bin` from the current package.
 2. Click **Prepare an image for my radio…**.
 3. Select **`manifest.json` from the full 4 MiB NOR snapshot** created by “Read settings storage (4 MiB)”. Select the manifest, not `storage-address-space.bin` itself. A calibration-only snapshot is not sufficient.
 4. Choose a parent folder for new images, for example `Documents/UV98-personal`. CPS creates a new `UV98-personal-…` directory inside it.
@@ -90,9 +90,9 @@ For a confirmed compatible board, prepare a personal BIN. **No Rust compiler is 
 
 CPS checks the two-read status, snapshot sizes and SHA values, calibration equality with the start of NOR, and the original template against its release catalog and calibration-profile marker. Only the expected **SHA of your calibration** is placed in the new BIN, not the calibration data themselves. The original image and backup remain unchanged. At boot, the firmware compares this hash with the actual calibration in the radio.
 
-The personal BIN's SHA differs from the original R37 template's SHA; that is expected. Writing uses the new catalog created by CPS. Do not move a lone BIN without its catalog or substitute a backup from another radio.
+The personal BIN has its own SHA, recorded in the catalog created by CPS. Keep the BIN and catalog together and use the backup from your own radio.
 
-If preparation is rejected, do not edit the manifest or catalog to bypass validation. Check that you selected your own complete, verified NOR snapshot and the original R37 from the same package.
+If preparation is rejected, verify that you selected your own complete, verified NOR snapshot and the original R38 BIN from the same package. Keep validation enabled and use the original manifest and catalog.
 
 Proceed only after successful preparation, confirmation of board compatibility, and saving verified backups and the correct factory BIN in two places.
 
@@ -107,9 +107,25 @@ Proceed only after successful preparation, confirmation of board compatibility, 
 
 **Choose the display language:** MENU → СИСТЕМА / TX → ЯЗЫК / LANGUAGE → ENGLISH. Use ↑/↓, MENU to confirm and EXIT to cancel. Available choices are РУССКИЙ, ENGLISH and DEUTSCH. After changing to English, the path reads MENU → SYSTEM / TX → LANGUAGE. The selection currently resets to Russian after power-off.
 
-With the default bindings, the upper PTT requests A and the lower PTT requests B. TX appears on the transmitting card. B can transmit while A remains selected. Each slot's current power setting is held in RAM and starts at LOW. The battery icon shows up to four approximate level bars and the numeric voltage in 0.1 V steps (`--.-V` when unavailable). [PTT hardware evidence](../research/r37/ptt.md)
+With the default bindings, the upper PTT requests A and the lower PTT requests B. During transmission, the transmitting card shows TX and a red outline, regardless of the selected slot. Each slot's current power setting is held in RAM and starts at LOW. The battery icon shows up to four approximate level bars and the numeric voltage in 0.1 V steps (`--.-V` when unavailable). [Lower PTT hardware evidence](../research/r37/ptt.md)
 
-Loader acknowledgements confirm file transfer. Check boot and operation on the device. R33 is the owner's accepted baseline. R37's lower PTT mapping, battery readings and display performance await a radio test. The language and other Rust settings on the radio reset after power-off.
+Loader acknowledgements confirm file transfer. Check boot and operation on the device. R33 is the owner's accepted baseline. R38's TX display, lower PTT, battery readings, CB/HF operation and external MDC1200 decoding still need on-radio checks. [R38 evidence and test limits](../research/r38/EVIDENCE-RU.md)
+
+### CB grid
+
+1. Open **MENU → CHANNELS / VFO → CB GRID**. The first opening after power-on selects channel **15 AM, 27.135 MHz** in the 40-channel CEPT grid.
+2. Use ↑/↓ or enter channel **1–40**, then press MENU to tune VFO A. Use `#` to switch between the five- and zero-ending grids. Channel 15 on the zero-ending grid is **27.130 MHz**. Use `*` to choose AM or FM. CB AM is receive-only. FM uses the existing TX checks.
+3. For a shortcut, open **MENU → KEYS → LONG-PRESS KEYS**, press the digit you want to assign, choose **CB GRID**, then confirm with MENU. Hold that digit on the home screen to open the grid.
+4. Hold EXIT on the grid to leave CB and restore the previous VFO A context. VFO B is independent. The last confirmed CB selection stays available until power-off.
+
+### MDC1200 and local name
+
+1. On the home screen, select A or B. Hold `*` to switch slots. Open **MENU → GPS / SIGNALS → MDC1200** and check the slot in the header.
+2. In **MDC TIMING**, choose **OFF**, **START OF TX**, **END OF TX** or **START AND END OF TX**. The initial mode is **OFF**. Confirm with MENU.
+3. In **UNIT ID**, enter four hex digits from `0001` through `DEEE`. Tap 0–9 for digits and hold 1–6 for A–F. Use `*` to delete, MENU to accept, and EXIT to cancel. Confirm an empty field to clear the ID.
+4. In **NAME (LOCAL)**, tap a digit repeatedly to cycle its characters. Press ↑ before entering a second character on the same key. Use `#` to switch RU/EN and `*` to delete. MENU saves up to 12 characters. EXIT cancels the edit.
+
+The MDC1200 packet carries the PTT ID. The name is a label on this radio. Timing, ID, name and other firmware settings are stored in RAM until power-off. [Simulated name editor](images/r38/en-mdc-alias-en.png)
 
 ## 6. Return to stock if needed
 

@@ -187,7 +187,8 @@ fn signaling_access_requires_live_tx_and_cannot_change_rf_registers() {
         ]
     );
     r.signaling_microphone(false).unwrap();
-    assert_eq!(r.io.words[0x30], rf[0] & !2);
+    assert_eq!(r.io.words[0x30], rf[0] & !4);
+    assert_eq!(r.io.words[0x30] & 2, rf[0] & 2); // TX DSP remains enabled.
     r.signaling_microphone(true).unwrap();
     assert_eq!(r.io.words[0x30], rf[0]);
     let fault = r.signaling_write(0x36, 0xffff).unwrap_err();

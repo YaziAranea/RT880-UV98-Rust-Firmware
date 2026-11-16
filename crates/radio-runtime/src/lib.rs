@@ -10,6 +10,7 @@ use uv98_rf_sequence::{self as sequence, Modulation, Plan, RxRequest, Step, TxRe
 pub mod capabilities;
 pub mod crossband;
 pub mod lighting;
+pub mod mdc1200;
 pub mod policy;
 pub mod ptt;
 pub mod scan;
@@ -25,6 +26,9 @@ pub mod watch;
 pub const CONFIG_TIMEOUT_MS: u32 = 3000;
 pub const RECEIVE_SETTLE_MS: u32 = 10;
 pub const TX_TIMEOUT_MS: u32 = 30_000;
+
+// Beken BK4819 Application Note v1.0, §12. Bit 1 enables the TX DSP.
+const MIC_ADC: u16 = 1 << 2;
 
 #[cfg(any(feature = "hardware", test))]
 mod gpio_control;
@@ -137,6 +141,7 @@ pub struct Runtime<I: Io> {
     indicator_state: Option<(bool, bool)>,
     backlight_state: Option<(bool, bool)>,
     signaling_baseline: Option<(u16, u16)>,
+    mdc_modem: Option<mdc1200::Modem>,
 }
 
 impl<I: Io> Runtime<I> {
@@ -162,6 +167,7 @@ impl<I: Io> Runtime<I> {
             indicator_state: None,
             backlight_state: None,
             signaling_baseline: None,
+            mdc_modem: None,
         }
     }
     pub fn state(&self) -> State {
@@ -263,6 +269,10 @@ impl<I: Io> Runtime<I> {
             self.indicator_state = None;
         } else {
             self.indicator_state = Some((false, false));
+        }
+        if self.cleanup_mdc() {
+            // Bit7 groups independent modulation cleanup requests.
+            errors |= 1 << 7;
         }
         if let Some((reg50, reg70)) = self.signaling_baseline.take() {
             // PA/gates/DSP are already requested off. A release, TOT or fault
@@ -373,7 +383,7 @@ impl<I: Io> Runtime<I> {
         Ok(())
     }
 
-    /// REG30 bit 1 controls the microphone ADC. Keep RF/TX enable bits intact
+    /// REG30 bit 2 controls the microphone ADC. Keep RF/TX enable bits intact
     /// while replacing speech with a tone, then restore normal speech input.
     pub fn signaling_microphone(&mut self, enabled: bool) -> Result<(), Fault<I::Error>> {
         if self.state != State::Transmitting {
@@ -382,7 +392,7 @@ impl<I: Io> Runtime<I> {
         let checked = self.io.verify_control();
         self.io_result(checked)?;
         let word = self.read(0x30)?;
-        self.write(0x30, (word & !2) | if enabled { 2 } else { 0 })
+        self.write(0x30, (word & !MIC_ADC) | if enabled { MIC_ADC } else { 0 })
     }
     fn gates(&mut self, route: u8) -> Result<(), Fault<I::Error>> {
         let result = self.io.hf_gates(false, false);
@@ -457,6 +467,19 @@ impl<I: Io> Runtime<I> {
         now: u32,
         held: bool,
     ) -> Result<(), Fault<I::Error>> {
+        self.transmit_with_mdc(calibration, request, now, held, mdc1200::Config::default())
+    }
+
+    /// Keep MIC ADC off from the first carrier if a valid MDC beginning
+    /// burst is configured. The foreground owns scheduling and PTT checks.
+    pub fn transmit_with_mdc(
+        &mut self,
+        calibration: &Calibration<'_>,
+        request: TxRequest,
+        now: u32,
+        held: bool,
+        config: mdc1200::Config,
+    ) -> Result<(), Fault<I::Error>> {
         if !self.initialized {
             return Err(self.reject(Error::NotInitialized));
         }
@@ -464,7 +487,8 @@ impl<I: Io> Runtime<I> {
             return Err(self.reject(Error::PttReleased));
         }
         let plan =
-            sequence::transmit(calibration, request).map_err(|e| self.reject(Error::Request(e)))?;
+            sequence::transmit_with_microphone(calibration, request, config.begin().is_none())
+                .map_err(|e| self.reject(Error::Request(e)))?;
         self.start(plan, Target::Transmit, now)
     }
     pub fn stop(&mut self) -> Result<(), Fault<I::Error>> {

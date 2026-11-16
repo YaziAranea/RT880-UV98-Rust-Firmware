@@ -254,11 +254,13 @@ pub struct App<N, L, D> {
     row_cursor: u16,
     render_page: Option<Screen>,
     radio: RadioView,
+    render_radio: RadioView,
     last_radio: RadioView,
     battery_mv: Option<u16>,
     spectrum: Option<SpectrumSnapshot>,
     waterfall: render::Waterfall,
     shortwave_scope: render::ShortwaveScope,
+    shortwave_scope_selection: Option<(controller::ShortwaveMode, u16, i16, u8, bool)>,
     last_spectrum: Option<SpectrumSnapshot>,
     /// Physical lower side-key input identification, independent of its
     /// editable assignment. False until the board traces a real source.
@@ -307,11 +309,13 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             row_cursor: 0,
             render_page: None,
             radio: RadioView::OFF,
+            render_radio: RadioView::OFF,
             last_radio: RadioView::OFF,
             battery_mv: None,
             spectrum: None,
             waterfall: render::Waterfall::new(),
             shortwave_scope: render::ShortwaveScope::new(),
+            shortwave_scope_selection: None,
             last_spectrum: None,
             lower_side_mapped: false,
             spectrum_error: SpectrumError::None,
@@ -442,12 +446,30 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         snr: u8,
         complete: bool,
     ) -> Result<(), Error<N::Error, L::Error>> {
-        if self.shortwave_scope.first_hz != first_hz || self.shortwave_scope.step_hz != step_hz {
+        let view = self.status.view;
+        let selection = (
+            view.shortwave_mode,
+            view.shortwave_fraction_hz,
+            view.shortwave_bfo,
+            view.shortwave_filter,
+            view.shortwave_soft_mute,
+        );
+        let reset = self.shortwave_scope.first_hz != first_hz
+            || self.shortwave_scope.step_hz != step_hz
+            || self.shortwave_scope_selection != Some(selection);
+        if reset {
             self.shortwave_scope.reset(first_hz, step_hz);
+            self.shortwave_scope_selection = Some(selection);
         }
-        self.shortwave_scope.sample(bin, rssi, snr, complete);
+        let published = self.shortwave_scope.sample(bin, rssi, snr, complete);
         if self.status.view.screen == Screen::Shortwave && self.status.view.shortwave_scope {
-            self.pending_rows.mark(55, 240);
+            if reset {
+                self.pending_rows.mark(55, 283);
+            } else if published {
+                self.pending_rows.mark(96, 155);
+                self.pending_rows.mark(172, 236);
+            }
+            self.pending_rows.mark(168, 170);
         }
         Ok(())
     }
@@ -1017,8 +1039,10 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             self.list_anchor = None;
             self.list_len = 0;
         }
-        self.status.view = self.controller.view();
-        if change.channel_changed || change.slot_changed || change.zone_changed {
+        let view = self.controller.view();
+        let peer_cb_changed = view.active_slot == Slot::B && self.status.view.cb != view.cb;
+        self.status.view = view;
+        if change.channel_changed || change.slot_changed || change.zone_changed || peer_cb_changed {
             if let Some(index) = self.status.view.channel {
                 if self
                     .diagnostic
@@ -1031,7 +1055,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
                 }
             }
             self.refresh_peer()?;
-            if (change.slot_changed || change.zone_changed)
+            if (change.slot_changed || change.zone_changed || peer_cb_changed)
                 && self.status.view.screen == Screen::Home
             {
                 // The peer record/name is external model data, not a View field.
@@ -1063,8 +1087,27 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         self.pending_rows.any()
     }
 
+    /// Send up to max_rows across disjoint dirty ranges from the current model.
+    /// Check admission before each contiguous transfer. A transfer already
+    /// started runs synchronously; the caller still polls physical inputs
+    /// before the next batch.
+    pub fn render_batch(
+        &mut self,
+        max_rows: u16,
+        mut admit: impl FnMut() -> bool,
+    ) -> Result<RenderProgress, Error<N::Error, L::Error>> {
+        let mut progress = self.render_step(0)?;
+        while progress.pending && progress.rows < max_rows && admit() {
+            let next = self.render_step(max_rows - progress.rows)?;
+            progress.rows += next.rows;
+            progress.pending = next.pending;
+        }
+        Ok(progress)
+    }
+
     /// At most max_rows contiguous rows are sent. No NOR read or input polling
-    /// is hidden in this call; the foreground must sample keys before each step.
+    /// is hidden in this call; use render_batch to combine disjoint ranges
+    /// under one input-polling budget.
     pub fn render_step(
         &mut self,
         max_rows: u16,
@@ -1129,6 +1172,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             // One combined follow-up captures telemetry that changed while the
             // pass was rendering, including a value that changed and changed back.
             self.pending_rows.merge_take(&mut self.deferred_radio_rows);
+            self.render_radio = self.radio;
         }
         self.status.state = State::Ready;
         Ok(RenderProgress {
@@ -1408,6 +1452,24 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         Ok(())
     }
     fn draw(&mut self) -> Result<(), Error<N::Error, L::Error>> {
+        let view = self.status.view;
+        let selection = (
+            view.shortwave_mode,
+            view.shortwave_fraction_hz,
+            view.shortwave_bfo,
+            view.shortwave_filter,
+            view.shortwave_soft_mute,
+        );
+        if self
+            .shortwave_scope_selection
+            .is_some_and(|old| old != selection)
+        {
+            self.shortwave_scope = render::ShortwaveScope::new();
+            self.shortwave_scope_selection = None;
+            if view.screen == Screen::Shortwave && view.shortwave_scope {
+                self.pending_rows.mark(55, 283);
+            }
+        }
         // Radio-only reports cannot change a channel/zone window. Avoid the
         // catalog walks on every RSSI observation, especially in channel lists.
         if self.last_rendered != Some(self.status.view) {
@@ -1430,8 +1492,9 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         if self.last_rendered.is_none() && !self.pending_rows.any() {
             self.row_cursor = 0;
         }
-        let defer_telemetry =
-            self.pending_rows.any() && radio_controls_equal(self.last_radio, self.radio);
+        let defer_telemetry = !page_changed
+            && self.pending_rows.any()
+            && radio_controls_equal(self.last_radio, self.radio);
         let screen = self.status.view.screen;
         let snapshot = matches!(screen, Screen::Home | Screen::ChannelDetails)
             .then(|| self.diagnostic.snapshot())
@@ -1514,6 +1577,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             }
         } else {
             // State, power, modulation and monitor changes are never deferred.
+            self.render_radio = self.radio;
             self.pending_rows.merge_take(&mut self.deferred_radio_rows);
             for &(start, end) in radio_damage.ranges() {
                 self.pending_rows.mark(start, end);
@@ -1524,7 +1588,9 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         let badge_changed = screen == Screen::Home && old_tx != new_tx;
         if badge_changed {
             for slot in [old_tx, new_tx].into_iter().flatten() {
-                self.mark_priority(render::home_ptt_badge_rows(slot));
+                let start = render::home_slot_rows(slot).0;
+                let end = render::home_ptt_badge_rows(slot).1;
+                self.mark_priority((start, end));
             }
         }
         let off_ptt_changed = self.radio.state == render::RadioState::Off
@@ -1601,7 +1667,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             last_key: self.status.last_pressed,
             ptt_pressed: self.status.view.ptt_down,
             input_ready: self.status.input_ready,
-            radio: self.radio,
+            radio: self.render_radio,
             battery_mv: self.battery_mv,
             zone_name: self
                 .status

@@ -1,4 +1,5 @@
 //! Host-only protocol simulation. No serial, GPIO or RF backend is linked.
+#![recursion_limit = "256"]
 use sha2::{Digest, Sha256};
 use std::{
     cell::{Cell, RefCell},
@@ -9,14 +10,17 @@ use std::{
 use uv98_diag_app::PRESERVED_CALIBRATION_SHA256;
 use uv98_display::{Delay, DisplayBus};
 use uv98_handheld_app::{App, InputSample, SpectrumSnapshot, State, Update};
+use uv98_handheld_ui::cb::CbGrid;
 use uv98_handheld_ui::controller::{
-    menu_entries, menu_location, LightMode, MenuEntry, MenuGroup, MenuItem, Mode, Request,
-    ScanState, Screen, Setting, ShortcutAction, SideAction, Slot,
+    menu_entries, menu_location, LightMode, MdcDraft, MenuEntry, MenuGroup, MenuItem, Mode, Notice,
+    Request, ScanState, Screen, Setting, ShortcutAction, SideAction, Slot, MDC_ALIAS_LEN,
+    SHORTCUT_ACTIONS,
 };
 use uv98_handheld_ui::locale::Language;
 use uv98_handheld_ui::render::{
     Modulation, RadioRoute, RadioState, RadioView, SpectrumError, SpectrumState, HEIGHT, WIDTH,
 };
+use uv98_handheld_ui::text_entry::InputMode;
 use uv98_keys::{Key, Timing};
 use uv98_nor_read::Bus;
 
@@ -312,7 +316,8 @@ fn tap_request(app: &mut SimApp, now: &mut u32, key: Key) -> Option<Request> {
             && (view.shortwave_scope
                 || view.shortwave_scan
                 || view.shortwave_entry.is_some()
-                || view.shortwave_band_draft.is_some()));
+                || view.shortwave_band_draft.is_some()))
+        || matches!(view.screen, Screen::Cb | Screen::Mdc);
     for (bits, down) in [
         (0, false),
         (0, false),
@@ -496,6 +501,177 @@ fn capture(
         "render_pending_after_capture": app.render_pending(),
         "rf_metadata_provenance":"host-only simulated status; no RF hardware backend linked",
     }))
+}
+
+fn capture_r38_public(
+    app: &mut SimApp,
+    now: &mut u32,
+    panel: &Rc<RefCell<Panel>>,
+    output: &Path,
+    code: &str,
+    modeled_delay_ms: u64,
+) -> Result<[serde_json::Value; 5], Box<dyn std::error::Error>> {
+    let original_a_frequency = app.status().view.vfo_10hz;
+    let original_b_frequency = app.peer_radio_selection().0.vfo_10hz;
+    if app.status().view.bindings[5] != ShortcutAction::Cb {
+        menu(app, now, MenuItem::Shortcuts);
+        tap(app, now, Key::Digit6);
+        for _ in 0..SHORTCUT_ACTIONS.len() {
+            if SHORTCUT_ACTIONS[app.status().view.binding_action_index as usize]
+                == ShortcutAction::Cb
+            {
+                break;
+            }
+            tap(app, now, Key::Down);
+        }
+        tap(app, now, Key::Menu);
+        assert_eq!(app.status().view.bindings[5], ShortcutAction::Cb);
+        home(app, now);
+    }
+    assert_eq!(hold_request(app, now, Key::Digit6), None);
+    assert_eq!(app.status().view.screen, Screen::Cb);
+    let draft = app.status().view.cb_draft.unwrap();
+    assert_eq!(draft.grid, CbGrid::Cept);
+    if !draft.is_am() {
+        tap(app, now, Key::Star);
+    }
+    assert_eq!(
+        app.status().view.cb_draft.unwrap().frequency_10hz(),
+        2_713_500
+    );
+    let cb_grid = capture(
+        app,
+        panel,
+        output,
+        &format!("{code}-cb-grid.png"),
+        modeled_delay_ms,
+    )?;
+    tap(app, now, Key::Hash);
+    assert_eq!(
+        app.status().view.cb_draft.unwrap().frequency_10hz(),
+        2_713_000
+    );
+    tap(app, now, Key::Hash);
+    tap(app, now, Key::Star);
+    digits(app, now, "15");
+    tap(app, now, Key::Menu);
+    assert_eq!(app.status().view.vfo_10hz, 2_713_500);
+    app.select_slot(Slot::B).unwrap();
+    assert_eq!(app.status().view.vfo_10hz, original_b_frequency);
+    sample(app, now, 0, true);
+    let upper = sample(app, now, 0, true);
+    assert!(upper.ptt_tx_requested);
+    assert_eq!(upper.ptt_slot, Some(Slot::A));
+    let previous = app.radio_view();
+    app.set_radio_view(RadioView {
+        state: RadioState::Transmitting,
+        tx_slot: Some(Slot::A),
+        modulation: Modulation::Fm,
+        route: Some(RadioRoute::Hf),
+        power: Some(0),
+        ..RadioView::OFF
+    })
+    .unwrap();
+    let tx_a = capture(
+        app,
+        panel,
+        output,
+        &format!("{code}-cb-tx-a.png"),
+        modeled_delay_ms,
+    )?;
+    assert_eq!(app.status().view.active_slot, Slot::B);
+    let tx_a_top = uv98_handheld_ui::render::home_slot_rows(Slot::A).0 as usize;
+    let b_top = uv98_handheld_ui::render::home_slot_rows(Slot::B).0 as usize;
+    assert_eq!(panel.borrow().pixels[tx_a_top * WIDTH + 4], 0x001f);
+    assert_ne!(panel.borrow().pixels[b_top * WIDTH + 4], 0x001f);
+    release(app, now);
+    app.set_radio_view(previous).unwrap();
+    hold(app, now, Key::Digit6);
+    hold(app, now, Key::Exit);
+    assert!(app.status().view.cb.is_none());
+    assert_eq!(app.status().view.vfo_10hz, original_b_frequency);
+    assert_eq!(app.peer_radio_selection().0.vfo_10hz, original_a_frequency);
+
+    menu(app, now, MenuItem::Mdc);
+    assert_eq!(app.status().view.active_slot, Slot::B);
+    tap(app, now, Key::Menu);
+    for _ in 0..4 {
+        if app.status().view.mdc_draft == Some(MdcDraft::Timing(3)) {
+            break;
+        }
+        tap(app, now, Key::Down);
+    }
+    tap(app, now, Key::Menu);
+    assert_eq!(app.status().view.mdc_for_slot(Slot::B).mode, 3);
+    tap(app, now, Key::Down);
+    tap(app, now, Key::Menu);
+    if app.status().view.mdc_for_slot(Slot::B).id.is_some() {
+        for _ in 0..4 {
+            tap(app, now, Key::Star);
+        }
+    }
+    digits(app, now, "01");
+    hold(app, now, Key::Digit1);
+    tap(app, now, Key::Digit2);
+    tap(app, now, Key::Menu);
+    assert_eq!(app.status().view.mdc_for_slot(Slot::B).id, Some(0x01a2));
+
+    tap(app, now, Key::Down);
+    tap(app, now, Key::Menu);
+    let Some(MdcDraft::Alias(editor)) = app.status().view.mdc_draft else {
+        panic!("local alias editor");
+    };
+    for _ in editor.value().to_string().chars() {
+        tap(app, now, Key::Star);
+    }
+    if editor.mode() != InputMode::Russian {
+        tap(app, now, Key::Hash);
+    }
+    digits(app, now, "6277749999");
+    let alias_ru = capture(
+        app,
+        panel,
+        output,
+        &format!("{code}-mdc-alias-ru.png"),
+        modeled_delay_ms,
+    )?;
+    tap(app, now, Key::Hash);
+    digits(app, now, "02");
+    tap(app, now, Key::Up);
+    digits(app, now, "22");
+    let alias_en = capture(
+        app,
+        panel,
+        output,
+        &format!("{code}-mdc-alias-en.png"),
+        modeled_delay_ms,
+    )?;
+    tap(app, now, Key::Menu);
+    let saved = app.status().view.mdc_alias_for_slot(Slot::B);
+    assert_eq!(saved.to_string(), "РАЦИЯ AB");
+    let mdc = capture(
+        app,
+        panel,
+        output,
+        &format!("{code}-mdc.png"),
+        modeled_delay_ms,
+    )?;
+
+    tap(app, now, Key::Menu);
+    digits(app, now, "34567");
+    assert_eq!(app.status().view.notice, Notice::EntryFull);
+    let Some(MdcDraft::Alias(editor)) = app.status().view.mdc_draft else {
+        panic!("local alias draft");
+    };
+    let draft = editor.value().to_string();
+    assert_eq!(draft.chars().count(), MDC_ALIAS_LEN);
+    assert!(draft.len() > MDC_ALIAS_LEN); // UTF-8 bytes are distinct from character capacity.
+    tap(app, now, Key::Exit);
+    assert_eq!(app.status().view.mdc_alias_for_slot(Slot::B), saved);
+    assert!(app.status().view.mdc_alias_for_slot(Slot::A).is_empty());
+    home(app, now);
+    app.select_slot(Slot::A).unwrap();
+    Ok([cb_grid, tx_a, mdc, alias_ru, alias_en])
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -2518,6 +2694,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ..RadioView::OFF
             })
             .unwrap();
+        frames.extend(capture_r38_public(
+            &mut empty_app,
+            &mut empty_now,
+            &empty_panel,
+            output,
+            code,
+            empty_ms.get(),
+        )?);
 
         digits(&mut empty_app, &mut empty_now, "433500");
         tap(&mut empty_app, &mut empty_now, Key::Menu);
@@ -2635,7 +2819,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "empty_catalog":{"synthetic_only":true,"input_sha256":empty_hash,"ready_in_vfo":true,"calibration_match":true,"selection_remains_none":true,"bytes_unchanged":true},
         "localization":{"languages":["ru","en","de"],"default":"ru","runtime_setting":true,"persistent":false,
             "gallery_uses_empty_channel_catalog":true,"gallery_rf_values_are_simulated":true,
-            "files_per_language":["home","menu","spectrum","hf","tx-b","battery-low"]},
+            "files_per_language":["home","menu","spectrum","hf","tx-b","battery-low",
+                "cb-grid","cb-tx-a","mdc","mdc-alias-ru","mdc-alias-en"]},
         "reads":memory.reads,"render_work":performance,"frame_count":frame_count,"frames":frames,
         "acceptance":["first/adjacent active channels", "channel list choice", "explicit numeric channel confirm",
             "invalid channel does not navigate", "cancel does not commit", "VFO entry commits only on MENU", "six-digit MHz entry pads right",
@@ -2650,7 +2835,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "upper side assignment and normalized lower Aux16 input exercise distinct actions",
             "seven nested setting editors keep draft separate from current state and commit only on MENU",
             "setting EXIT cancels without RF request; SetPower/SetMonitor/SetModulation wait for explicit synthetic acknowledgement",
-            "running scan survives setting browsing; EXIT universally cancels scan and other temporary operations"],
+            "running scan survives setting browsing; ordinary EXIT cancels scan and other temporary operations",
+            "long digit opens the CB grid and the saved A context is recovered after CB",
+            "simulated upper TX lights a red A frame while focus remains B",
+            "MDC timing and hexadecimal ID are committed only to the chosen slot",
+            "local alias mixes Cyrillic and Latin within bounded character capacity; cancel preserves saved text"],
         "limitations":["synthetic host input/timestamps, not GPIO or MCU execution",
             "panel interpreter checks protocol/window bounds, not physical SPI timing/orientation/colors",
             "radio statuses and RSSI are explicitly injected mock data, not physical tuning/reception/transmission evidence",

@@ -13,9 +13,9 @@ Diese Anleitung beschreibt die erste Vorbereitung eines UV-98 Plus / der untersu
 3. Mit der originalen CPS für das eigene Modell das Gerät auslesen und die ursprüngliche `.880dmf`- oder `.98pdmf`-Datei speichern. Eine vorhandene Originaldatei wie `999.880dmf` unverändert aufbewahren.
 4. Original-CPS, Radio Tuning Software und andere Programme schließen, die das Kabel verwenden. Vor dem ersten Auslesen mit unserer CPS das Gerät für 3 Sekunden ausschalten und wieder normal starten.
 5. Einen Ordner anlegen, etwa `Dokumente/UV98-backup-2026-11-16`. Sinnvolle Unterordner: `01-original`, `02-calibration`, `03-nor`, `04-settings`, `05-recovery`. Die ursprüngliche CPS-Datei in `01-original` ablegen.
-6. Das [R37-Paket mit CPS 0.7.0](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37-CPS-0.7.0-2026-11-16.zip) vollständig entpacken. `UV98-CPS.exe` starten, unter **Язык / Language / Sprache** die Option **Deutsch** wählen und **Sicherungen** öffnen. Den tatsächlichen COM-Port über **Liste aktualisieren → Verfügbare Ports** wählen. Frühere Angaben wie COM20/COM21 sind keine Vorgabe für Ihren Rechner.
+6. Das [R38-Paket mit CPS 0.7.0](https://github.com/YaziAranea/uv98-rust/releases/download/r38/UV98-r38-2026-11-16.zip) vollständig entpacken. `UV98-CPS.exe` starten, unter **Язык / Language / Sprache** die Option **Deutsch** wählen und **Sicherungen** öffnen. Den tatsächlichen COM-Port über **Liste aktualisieren → Verfügbare Ports** wählen. Frühere Angaben wie COM20/COM21 sind keine Vorgabe für Ihren Rechner.
 
-Die Sprachwahl ist stets in der Symbolleiste sichtbar. Alle acht Reiter und bereits angezeigte Statusmeldungen wechseln sofort die Sprache. Ungespeicherte Änderungen bleiben erhalten. CPS speichert die Sprachwahl im Windows-Benutzerprofil. Titel und Filter der Dateidialoge folgen der CPS-Sprache. Die Standardschaltflächen folgen der Windows-Sprache. Das Paket enthält dieselbe R37-Firmware-BIN. Das CPS-Update erfordert kein erneutes Flashen.
+Die Sprachwahl ist stets in der Symbolleiste sichtbar. Alle acht Reiter und bereits angezeigte Statusmeldungen wechseln sofort die Sprache. Ungespeicherte Änderungen bleiben erhalten. CPS speichert die Sprachwahl im Windows-Benutzerprofil. Titel und Filter der Dateidialoge folgen der CPS-Sprache. Die Standardschaltflächen folgen der Windows-Sprache. Das R38-Paket enthält die veröffentlichte CPS 0.7.0.
 
 Modell, originale Firmwareversion und bekannte Platinenrevision in einer kurzen Textdatei bei den Sicherungen notieren.
 
@@ -77,11 +77,11 @@ Die Datei mit dem Namen `RT-880_Upgrade_V1_16_250915.bin` im Ordner `recovery` n
 
 ## 4. Kompatibilität vor dem Flashen prüfen
 
-R37 ist für das untersuchte AT32F423-Platinenprofil vorgesehen. Ein ähnliches Gehäuse oder die Aufschrift RT-880 belegt keine Kompatibilität mit einer anderen Revision. Die Vorbereitung anhand der Sicherung bindet das Image an die eigenen Kalibrierungen; sie ermittelt nicht automatisch die Hardwarekompatibilität.
+R38 ist für das untersuchte AT32F423-Platinenprofil vorgesehen. Vor dem Flashen die Platinenrevision prüfen. Die Vorbereitung anhand der Sicherung bindet das Image an die eigenen Kalibrierungen.
 
 Für eine bestätigte kompatible Platine eine persönliche BIN vorbereiten. **Ein Rust-Compiler wird dafür nicht benötigt.**
 
-1. **Firmware** in unserer CPS öffnen. Die ursprüngliche `UV98-r37.bin` aus dem aktuellen Paket auswählen.
+1. **Firmware** in unserer CPS öffnen. Die ursprüngliche `UV98-r38.bin` aus dem aktuellen Paket auswählen.
 2. **Image für mein Funkgerät vorbereiten…** anklicken.
 3. **`manifest.json` der vollständigen 4-MiB-NOR-Sicherung** auswählen, die mit „Einstellungsspeicher lesen (4 MiB)“ erstellt wurde. Das Manifest auswählen, nicht `storage-address-space.bin` selbst. Eine reine Kalibrierungssicherung reicht nicht aus.
 4. Einen übergeordneten Ordner für neue Images wählen, etwa `Dokumente/UV98-personal`. CPS erstellt darin ein neues Verzeichnis `UV98-personal-…`.
@@ -90,9 +90,9 @@ Für eine bestätigte kompatible Platine eine persönliche BIN vorbereiten. **Ei
 
 CPS prüft den Status der zwei Lesevorgänge, Größen und SHA-Werte der Sicherungsdateien, die Übereinstimmung des Kalibrierungsblocks mit dem NOR-Anfang sowie die Originalvorlage anhand ihres Versionskatalogs und der Kalibrierungsprofil-Markierung. In die neue BIN wird nur der erwartete **SHA der eigenen Kalibrierungen** eingetragen, nicht die Kalibrierungsdaten selbst. Originalimage und Sicherung bleiben unverändert. Beim Start vergleicht die Firmware diesen Hash mit den tatsächlichen Kalibrierungen im Gerät.
 
-Der SHA der persönlichen BIN unterscheidet sich vom SHA der ursprünglichen R37-Vorlage; das ist beabsichtigt. Zum Schreiben dient der von CPS erzeugte neue Katalog. Eine einzelne BIN nicht ohne ihren Katalog verschieben und keine Sicherung eines anderen Geräts verwenden.
+Die persönliche BIN hat einen eigenen SHA im neuen CPS-Katalog. BIN und Katalog zusammen aufbewahren und die Sicherung des eigenen Geräts verwenden.
 
-Wird die Vorbereitung abgelehnt, Manifest oder Katalog nicht zum Umgehen der Prüfung bearbeiten. Prüfen, ob die eigene vollständige und erfolgreich verglichene NOR-Sicherung sowie die ursprüngliche R37 aus demselben Paket gewählt wurden.
+Wird die Vorbereitung abgelehnt, Auswahl prüfen. Erforderlich sind die vollständige und erfolgreich verglichene NOR-Sicherung des eigenen Geräts sowie die ursprüngliche R38-BIN aus demselben Paket. Für die Prüfung das Originalmanifest und den Originalkatalog verwenden.
 
 Erst nach erfolgreicher Vorbereitung, bestätigter Platinenkompatibilität und Sicherung der geprüften Daten sowie der richtigen Werks-BIN an zwei Orten fortfahren.
 
@@ -107,9 +107,25 @@ Erst nach erfolgreicher Vorbereitung, bestätigter Platinenkompatibilität und S
 
 **Anzeigesprache wählen:** MENU → СИСТЕМА / TX → ЯЗЫК / LANGUAGE → DEUTSCH. Mit ↑/↓ wählen, mit MENU bestätigen, mit EXIT abbrechen. Zur Auswahl stehen РУССКИЙ, ENGLISH und DEUTSCH. Auf Deutsch lautet der Pfad MENU → SYSTEM / TX → SPRACHE. Nach dem Ausschalten wird derzeit wieder Russisch verwendet.
 
-In der Standardbelegung fordert die obere PTT eine Sendung über A an, die untere über B. Das sendende Feld zeigt TX. Beim Senden über B kann A ausgewählt bleiben. Die Leistung liegt je VFO im RAM und steht nach dem Einschalten auf LOW. Das Akkusymbol zeigt den ungefähren Stand mit bis zu vier Balken und die Spannung in Schritten von 0,1 V (`--.-V`, wenn kein Messwert verfügbar ist). [Nachweise zur PTT](../research/r37/ptt.md)
+In der Standardbelegung fordert die obere PTT eine Sendung über A an, die untere über B. Das tatsächlich sendende Feld zeigt TX und einen roten Rahmen, unabhängig vom ausgewählten VFO. Die Leistung liegt je VFO im RAM und steht nach dem Einschalten auf LOW. Das Akkusymbol zeigt den ungefähren Stand mit bis zu vier Balken und die Spannung in Schritten von 0,1 V (`--.-V`, wenn kein Messwert verfügbar ist). [Nachweise zur unteren PTT](../research/r37/ptt.md)
 
-Bootloader-Bestätigungen belegen die Dateiübertragung. Start und Funkbetrieb am Gerät prüfen. R33 ist die vom Besitzer akzeptierte Ausgangsversion. Die untere PTT, die Akkuanzeige und die Anzeigegeschwindigkeit von R37 sind noch am Gerät zu prüfen. Anzeigesprache und weitere Rust-Einstellungen werden nach dem Ausschalten zurückgesetzt.
+Bootloader-Bestätigungen belegen die Dateiübertragung. Start und Funkbetrieb am Gerät prüfen. R33 ist die vom Besitzer akzeptierte Ausgangsversion. Für R38 stehen Gerätetests der TX-Anzeige, der unteren PTT, der Akkuanzeige, des CB-/KW-Betriebs und der MDC1200-Dekodierung aus. [Nachweise und Prüfgrenzen für R38](../research/r38/EVIDENCE-RU.md)
+
+### CB-Kanalraster
+
+1. **MENU → KANÄLE / VFO → CB-RASTER** öffnen. Beim ersten Öffnen nach dem Einschalten ist **Kanal 15 AM auf 27,135 MHz** im CEPT-Raster mit 40 Kanälen ausgewählt.
+2. Mit ↑/↓ einen Kanal wählen oder die Nummer **1–40** eingeben. Mit MENU VFO A abstimmen. Mit `#` zwischen 5er- und 0er-Raster wechseln. Kanal 15 im 0er-Raster liegt auf **27,130 MHz**. Mit `*` zwischen AM und FM wechseln. CB-AM ist auf Empfang beschränkt. Für FM gelten die vorhandenen TX-Prüfungen.
+3. Für einen Direktaufruf **MENU → TASTEN → LANGDRUCK** öffnen, die gewünschte Ziffer drücken, **CB-RASTER** wählen und mit MENU bestätigen. Auf der Hauptanzeige die zugewiesene Ziffer gedrückt halten.
+4. Im Raster EXIT gedrückt halten, um CB zu verlassen und die vorherige Einstellung von VFO A wiederherzustellen. VFO B arbeitet unabhängig. Die letzte bestätigte CB-Auswahl bleibt bis zum Ausschalten verfügbar.
+
+### MDC1200 und lokaler Name
+
+1. Auf der Hauptanzeige A oder B wählen. Zum Umschalten zwischen den VFOs `*` gedrückt halten. **MENU → GPS / SIGNALE → MDC1200** öffnen und den VFO-Buchstaben in der Kopfzeile prüfen.
+2. Unter **MDC ZEITPUNKT** **AUS**, **TX-ANFANG**, **TX-ENDE** oder **TX-ANFANG UND -ENDE** wählen. Die Voreinstellung ist **AUS**. Mit MENU bestätigen.
+3. Unter **UNIT ID** vier Hexadezimalzeichen von `0001` bis `DEEE` eingeben. Für Ziffern 0–9 kurz drücken und für A–F die Tasten 1–6 gedrückt halten. Mit `*` löschen, mit MENU übernehmen und mit EXIT abbrechen. Zum Löschen der ID ein leeres Feld bestätigen.
+4. Unter **NAME (LOKAL)** eine Ziffer wiederholt drücken, um ihre Zeichen durchzugehen. Vor einem weiteren Zeichen auf derselben Taste ↑ drücken. Mit `#` RU/EN umschalten und mit `*` löschen. MENU speichert bis zu zwölf Zeichen. EXIT bricht die Bearbeitung ab.
+
+Das MDC1200-Paket überträgt die PTT-ID. Der Name dient als Beschriftung auf diesem Gerät. Zeitpunkt, ID, Name und weitere Firmware-Einstellungen liegen bis zum Ausschalten im RAM. [Simulierte Namenseingabe](images/r38/de-mdc-alias-en.png)
 
 ## 6. Bei Bedarf zur Originalfirmware zurückkehren
 

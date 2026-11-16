@@ -1,8 +1,11 @@
 //! Storage-independent UI state. Frequencies and settings here are a volatile
 //! preview; no effect tunes RF, transmits, or changes a saved channel record.
+use crate::cb::CbChannel;
 use crate::input::InputEvent;
 use crate::locale::Language;
+use crate::text_entry::{Editor, InputMode, TextValue};
 use uv98_keys::Key;
+use uv98_signaling::mdc1200::UnitId;
 
 pub const CHANNEL_COUNT: usize = 1024;
 // This is an editor bound, not a claim that the radio supports every frequency.
@@ -115,6 +118,8 @@ pub enum Screen {
     Gps,
     Aprs,
     TxId,
+    Cb,
+    Mdc,
 }
 
 /// Menu choice pages are drafts. Only MENU commits; opening, arrows and EXIT
@@ -203,10 +208,12 @@ pub enum MenuItem {
     TxId,
     Dtmf,
     Language,
+    Cb,
+    Mdc,
 }
 
 /// Full catalog for tooling. The visible menu uses `menu_entries`.
-pub const MENU_ITEMS: [MenuItem; 31] = [
+pub const MENU_ITEMS: [MenuItem; 33] = [
     MenuItem::Mode,
     MenuItem::Modulation,
     MenuItem::Channels,
@@ -238,6 +245,8 @@ pub const MENU_ITEMS: [MenuItem; 31] = [
     MenuItem::TxId,
     MenuItem::Dtmf,
     MenuItem::Language,
+    MenuItem::Cb,
+    MenuItem::Mdc,
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -269,6 +278,7 @@ pub const fn menu_entries(group: Option<MenuGroup>) -> &'static [MenuEntry] {
         ],
         Some(MenuGroup::Mode) => &[
             Item(MenuItem::BandPreset),
+            Item(MenuItem::Cb),
             Item(MenuItem::Mode),
             Item(MenuItem::ActiveSlot),
             Item(MenuItem::Channels),
@@ -300,6 +310,7 @@ pub const fn menu_entries(group: Option<MenuGroup>) -> &'static [MenuEntry] {
             Item(MenuItem::GpsEnable),
             Item(MenuItem::GpsBaud),
             Item(MenuItem::Aprs),
+            Item(MenuItem::Mdc),
         ],
         Some(MenuGroup::System) => &[
             Item(MenuItem::DisplayLight),
@@ -387,9 +398,10 @@ pub enum ShortcutAction {
     Spectrum,
     Crossband,
     DualWatch,
+    Cb,
 }
 
-pub const SHORTCUT_ACTIONS: [ShortcutAction; 16] = [
+pub const SHORTCUT_ACTIONS: [ShortcutAction; 17] = [
     ShortcutAction::None,
     ShortcutAction::Power,
     ShortcutAction::Monitor,
@@ -406,6 +418,7 @@ pub const SHORTCUT_ACTIONS: [ShortcutAction; 16] = [
     ShortcutAction::DualWatch,
     ShortcutAction::Crossband,
     ShortcutAction::Spectrum,
+    ShortcutAction::Cb,
 ];
 
 /// Indices 0..8 retain digits 1..9; index 9 is digit 0.
@@ -475,6 +488,17 @@ pub enum Request {
 pub enum EntryKind {
     Channel,
     Frequency,
+    CbChannel,
+}
+
+impl EntryKind {
+    pub const fn maximum_digits(self) -> u8 {
+        match self {
+            Self::Channel => 4,
+            Self::Frequency => 8,
+            Self::CbChannel => 2,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -498,6 +522,8 @@ pub enum Notice {
     ChannelOnly,
     RadioUnavailable,
     SpectrumUnavailable,
+    InvalidCbChannel,
+    InvalidMdcId,
 }
 
 pub const SW_MIN_KHZ: u16 = 1_700;
@@ -640,8 +666,32 @@ pub enum AprsStatus {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MdcSettings {
+    /// Off, begin, end, both. The runtime validates every command.
+    pub mode: u8,
+    pub id: Option<u16>,
+}
+
+pub const MDC_ALIAS_LEN: usize = 12;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MdcDraft {
+    Timing(u8),
+    UnitId(Editor<4>),
+    Alias(Editor<MDC_ALIAS_LEN>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct View {
     pub language: Language,
+    /// Committed channel grid context for slot A, independent of edit focus.
+    pub cb: Option<CbChannel>,
+    pub cb_draft: Option<CbChannel>,
+    pub mdc: [MdcSettings; 2],
+    /// Device-local labels, independent of transmitted MDC unit IDs.
+    pub mdc_alias: [TextValue<MDC_ALIAS_LEN>; 2],
+    pub mdc_option: u8,
+    pub mdc_draft: Option<MdcDraft>,
     pub gps_enabled: bool,
     pub gps_baud: u8,
     pub gps_status: GpsStatus,
@@ -729,6 +779,21 @@ pub struct View {
 }
 
 impl View {
+    pub const fn cb_for_slot(&self, slot: Slot) -> Option<CbChannel> {
+        match slot {
+            Slot::A => self.cb,
+            Slot::B => None,
+        }
+    }
+
+    pub const fn mdc_for_slot(&self, slot: Slot) -> MdcSettings {
+        self.mdc[slot.index()]
+    }
+
+    pub const fn mdc_alias_for_slot(&self, slot: Slot) -> TextValue<MDC_ALIAS_LEN> {
+        self.mdc_alias[slot.index()]
+    }
+
     pub fn shortwave_step_hz(&self, scanning: bool) -> u32 {
         let step = self.shortwave_mode.steps_hz()[usize::from(self.shortwave_step)];
         if scanning {
@@ -808,6 +873,9 @@ pub struct Controller {
     /// True when the Step page was opened from Home rather than from MENU.
     step_home: bool,
     contexts: [Context; 2],
+    cb_before: Option<Context>,
+    cb_last: CbChannel,
+    cb_from_home: bool,
     zones: [u8; 32],
     channel_order: [u16; 200],
     channel_order_len: u8,
@@ -844,6 +912,12 @@ impl Controller {
             spectrum_last_bin: SPECTRUM_INTERVALS[0],
             view: View {
                 language: Language::Russian,
+                cb: None,
+                cb_draft: None,
+                mdc: [MdcSettings { mode: 0, id: None }; 2],
+                mdc_alias: [TextValue::empty(); 2],
+                mdc_option: 0,
+                mdc_draft: None,
                 gps_enabled: false,
                 gps_baud: 1,
                 gps_status: GpsStatus::default(),
@@ -936,6 +1010,9 @@ impl Controller {
             step_before: None,
             step_home: false,
             contexts: [context; 2],
+            cb_before: None,
+            cb_last: CbChannel::default(),
+            cb_from_home: false,
             zones: [0; 32],
             channel_order: [0; 200],
             channel_order_len: 0,
@@ -960,6 +1037,7 @@ impl Controller {
             && !self.view.ptt_down
             && valid_frequency(frequency_10hz)
         {
+            self.leave_selected_cb();
             self.view.mode = Mode::Vfo;
             self.view.vfo_10hz = frequency_10hz;
             self.view.reverse = false;
@@ -1010,7 +1088,9 @@ impl Controller {
             Setting::Mode => u8::from(self.view.mode == Mode::Vfo),
             Setting::Power => self.radio_power.unwrap_or(0),
             Setting::Monitor => u8::from(self.radio_monitor),
-            Setting::Modulation => u8::from(self.radio_am),
+            Setting::Modulation => {
+                u8::from(self.selected_cb().map_or(self.radio_am, CbChannel::is_am))
+            }
             Setting::Reverse => u8::from(self.view.reverse),
             Setting::ActiveSlot => u8::from(self.view.active_slot == Slot::B),
             Setting::Scan => u8::from(matches!(
@@ -1051,6 +1131,7 @@ impl Controller {
                     2 => (2_713_500, true, 3),
                     _ => (85_000_000, false, 5),
                 };
+                self.leave_selected_cb();
                 self.view.mode = Mode::Vfo;
                 self.view.vfo_10hz = frequency;
                 self.view.step_index = step;
@@ -1094,6 +1175,7 @@ impl Controller {
                 } else {
                     Mode::Vfo
                 };
+                self.leave_selected_cb();
                 if self.view.mode != mode {
                     self.toggle_mode(bitmap);
                 }
@@ -1107,7 +1189,12 @@ impl Controller {
                 self.queue_request(Request::SetMonitor(selected != 0));
             }
             Setting::Modulation => {
-                self.queue_request(Request::SetModulation { am: selected != 0 });
+                if let Some(mut cb) = self.selected_cb() {
+                    cb.am = selected != 0;
+                    self.apply_cb_channel(cb);
+                } else {
+                    self.queue_request(Request::SetModulation { am: selected != 0 });
+                }
             }
             Setting::DisplayLight => {
                 self.queue_request(Request::SetDisplayLight(LIGHT_MODES[selected as usize]))
@@ -1248,8 +1335,18 @@ impl Controller {
             self.ptt_suppressed_until_release = true;
         }
         self.contexts[self.view.active_slot.index()] = self.current_context();
-        let context = self.contexts[slot.index()];
         self.view.active_slot = slot;
+        self.load_context(self.contexts[slot.index()]);
+        self.channel_order_len = 0;
+        self.view.entry = None;
+        self.view.cb_draft = None;
+        self.view.mdc_draft = None;
+        self.view.screen = Screen::Home;
+        self.view.setting = None;
+        self.request_scan_stop();
+    }
+
+    fn load_context(&mut self, context: Context) {
         self.view.mode = context.mode;
         self.view.channel = context.channel;
         self.view.list_channel = context.channel;
@@ -1260,11 +1357,6 @@ impl Controller {
         self.view.zone_cursor = context.zone;
         self.view.step_index = context.step_index;
         self.view.reverse = context.reverse;
-        self.channel_order_len = 0;
-        self.view.entry = None;
-        self.view.screen = Screen::Home;
-        self.view.setting = None;
-        self.request_scan_stop();
     }
 
     pub fn set_zone_catalog(&mut self, zones: &[u8; 32]) -> Change {
@@ -1346,6 +1438,7 @@ impl Controller {
         let before = self.view;
         self.ptt_tx_requested = false;
         if self.view.mode == Mode::Vfo
+            && self.selected_cb().is_none()
             && matches!(self.view.scan, ScanState::Requested | ScanState::Running)
             && valid_frequency(frequency_10hz)
         {
@@ -1411,12 +1504,19 @@ impl Controller {
         let before = self.view;
         self.ptt_tx_requested = false;
         self.apply(event, bitmap);
+        if self.view.screen != Screen::Cb {
+            self.view.cb_draft = None;
+        }
+        if self.view.screen != Screen::Mdc {
+            self.view.mdc_draft = None;
+        }
         if self.view.screen != Screen::Setting {
             self.view.setting = None;
         }
         // Reversal belongs to one current channel, never a later channel/VFO.
         // Centralize this invariant across arrows, direct entry and list commit.
         if self.view.active_slot == before.active_slot
+            && self.view.cb == before.cb
             && (self.view.mode != before.mode || self.view.channel != before.channel)
         {
             self.view.reverse = false;
@@ -1432,6 +1532,7 @@ impl Controller {
             && (self.view.mode != before.mode
                 || self.view.channel != before.channel
                 || self.view.vfo_10hz != before.vfo_10hz
+                || self.view.cb != before.cb
                 || (self.view.screen != before.screen && !browsing)
                 || self.view.entry != before.entry
                 || self.view.reverse != before.reverse
@@ -1454,6 +1555,7 @@ impl Controller {
             && (self.view.mode != before.mode
                 || self.view.channel != before.channel
                 || self.view.vfo_10hz != before.vfo_10hz
+                || self.view.cb != before.cb
                 || self.view.zone != before.zone
                 || self.view.active_slot != before.active_slot
                 || self.view.reverse != before.reverse
@@ -1967,11 +2069,16 @@ impl Controller {
             && self.view.screen == Screen::Spectrum
             && !self.view.spectrum_menu
             && self.view.spectrum_listening;
+        let modal_exit = matches!(self.view.screen, Screen::Cb | Screen::Mdc)
+            || (self.view.screen == Screen::Home
+                && self.selected_cb().is_some()
+                && event == InputEvent::Hold(Key::Exit));
         if matches!(
             event,
             InputEvent::Short(Key::Exit) | InputEvent::Hold(Key::Exit)
         ) && !closes_overlay_only
             && !stops_listen_only
+            && !modal_exit
         {
             self.cancel_spectrum_pending();
             self.cancel_temporary = true;
@@ -1999,6 +2106,21 @@ impl Controller {
             return;
         }
         self.view.notice = Notice::None;
+        if self.view.screen == Screen::Cb {
+            self.cb_input(event);
+            return;
+        }
+        if self.view.screen == Screen::Mdc {
+            self.mdc_input(event);
+            return;
+        }
+        if self.view.screen == Screen::Home
+            && self.selected_cb().is_some()
+            && event == InputEvent::Hold(Key::Exit)
+        {
+            self.leave_cb();
+            return;
+        }
         if self.view.screen == Screen::Spectrum {
             if let InputEvent::Short(key) = event {
                 if !self.view.spectrum_menu && self.view.spectrum_pending_listen.is_none() {
@@ -2147,7 +2269,13 @@ impl Controller {
         }
         if matches!(
             self.view.screen,
-            Screen::Shortwave | Screen::Crossband | Screen::Gps | Screen::Aprs | Screen::TxId
+            Screen::Shortwave
+                | Screen::Crossband
+                | Screen::Gps
+                | Screen::Aprs
+                | Screen::TxId
+                | Screen::Cb
+                | Screen::Mdc
         ) {
             self.view.ptt_slot = None;
             self.ptt_suppressed_until_release = true;
@@ -2226,7 +2354,14 @@ impl Controller {
             ShortcutAction::None => {}
             ShortcutAction::Power => self.queue_request(Request::CyclePower),
             ShortcutAction::Monitor => self.queue_request(Request::ToggleMonitor),
-            ShortcutAction::Modulation => self.queue_request(Request::CycleModulation),
+            ShortcutAction::Modulation => {
+                if let Some(mut cb) = self.selected_cb() {
+                    cb.am = !cb.am;
+                    self.apply_cb_channel(cb);
+                } else {
+                    self.queue_request(Request::CycleModulation);
+                }
+            }
             ShortcutAction::Scan => self.toggle_scan(bitmap),
             ShortcutAction::Reverse => self.toggle_reverse(),
             ShortcutAction::Mode => self.toggle_mode(bitmap),
@@ -2237,6 +2372,7 @@ impl Controller {
             ShortcutAction::Zones => self.open_zones(),
             ShortcutAction::SwitchSlot => self.switch_slot(self.view.active_slot.other()),
             ShortcutAction::Spectrum => self.open_spectrum(),
+            ShortcutAction::Cb => self.open_cb(),
             ShortcutAction::DualWatch => {
                 self.view.dual_watch = !self.view.dual_watch;
                 self.view.watch_rx = None;
@@ -2255,7 +2391,200 @@ impl Controller {
 
     /// The Step page edits a volatile draft. MENU commits it, EXIT restores the
     /// value that was active when the page opened.
+    fn selected_cb(&self) -> Option<CbChannel> {
+        self.view.cb_for_slot(self.view.active_slot)
+    }
+
+    fn open_cb(&mut self) {
+        self.cb_from_home = self.view.screen == Screen::Home;
+        self.view.cb_draft = Some(self.cb_last);
+        self.view.entry = None;
+        self.view.screen = Screen::Cb;
+    }
+
+    fn apply_cb_channel(&mut self, cb: CbChannel) {
+        self.switch_slot(Slot::A);
+        if self.cb_before.is_none() {
+            self.cb_before = Some(self.current_context());
+        }
+        self.cb_last = cb;
+        self.view.cb = Some(cb);
+        self.view.mode = Mode::Vfo;
+        self.view.vfo_10hz = cb.frequency_10hz();
+        self.view.shift_index = 0;
+        self.view.tx_tone_index = 0;
+        self.view.reverse = false;
+    }
+
+    fn leave_cb(&mut self) {
+        if let Some(context) = self.cb_before.take() {
+            if self.view.active_slot == Slot::A {
+                self.load_context(context);
+            } else {
+                self.contexts[Slot::A.index()] = context;
+            }
+            self.view.cb = None;
+        }
+        self.view.entry = None;
+    }
+
+    fn leave_selected_cb(&mut self) {
+        if self.selected_cb().is_some() {
+            self.leave_cb();
+        }
+    }
+
+    fn cb_input(&mut self, event: InputEvent) {
+        let Some(mut cb) = self.view.cb_draft else {
+            return;
+        };
+        match event {
+            InputEvent::Hold(Key::Exit) => {
+                self.leave_cb();
+                self.view.screen = Screen::Home;
+            }
+            InputEvent::Short(Key::Exit) => {
+                if self.view.entry.take().is_none() {
+                    self.view.screen = if self.cb_from_home {
+                        Screen::Home
+                    } else {
+                        Screen::Menu
+                    };
+                }
+            }
+            InputEvent::Short(Key::Menu) => {
+                if let Some(cb) = self.cb_with_entry(cb) {
+                    self.apply_cb_channel(cb);
+                    self.view.entry = None;
+                    self.view.screen = Screen::Home;
+                }
+            }
+            InputEvent::Short(Key::Up | Key::Down) | InputEvent::Repeat(Key::Up | Key::Down)
+                if self.view.entry.is_none() =>
+            {
+                cb = cb.adjacent(matches!(
+                    event,
+                    InputEvent::Short(Key::Up) | InputEvent::Repeat(Key::Up)
+                ));
+            }
+            InputEvent::Short(Key::Hash) if self.view.entry.is_none() => cb.grid = cb.grid.other(),
+            InputEvent::Short(Key::Star) if self.view.entry.is_none() => cb.am = !cb.am,
+            InputEvent::Short(key) => {
+                if let Some(number) = digit(key) {
+                    self.enter_digit(number);
+                }
+            }
+            _ => {}
+        }
+        if self.view.screen == Screen::Cb {
+            self.view.cb_draft = Some(cb);
+        }
+    }
+
+    fn cb_with_entry(&mut self, cb: CbChannel) -> Option<CbChannel> {
+        if let Some(entry) = self.view.entry {
+            let numbered = cb.with_number(entry.value as u8);
+            if numbered.is_none() {
+                self.view.notice = Notice::InvalidCbChannel;
+            }
+            numbered
+        } else {
+            Some(cb)
+        }
+    }
+
+    fn mdc_input(&mut self, event: InputEvent) {
+        if event == InputEvent::Hold(Key::Exit) {
+            self.view.screen = Screen::Home;
+            return;
+        }
+        let slot = self.view.active_slot.index();
+        let up = matches!(
+            event,
+            InputEvent::Short(Key::Up) | InputEvent::Repeat(Key::Up)
+        );
+        let down = matches!(
+            event,
+            InputEvent::Short(Key::Down) | InputEvent::Repeat(Key::Down)
+        );
+        let Some(mut draft) = self.view.mdc_draft.take() else {
+            match event {
+                InputEvent::Short(Key::Exit) => self.view.screen = Screen::Menu,
+                InputEvent::Short(Key::Menu) => {
+                    let settings = self.view.mdc[slot];
+                    self.view.mdc_draft = Some(match self.view.mdc_option {
+                        0 => MdcDraft::Timing(settings.mode),
+                        1 => MdcDraft::UnitId(Editor::new(
+                            InputMode::Hex,
+                            TextValue::from_hex(settings.id),
+                        )),
+                        _ => {
+                            let mode = if self.view.language == Language::Russian {
+                                InputMode::Russian
+                            } else {
+                                InputMode::English
+                            };
+                            MdcDraft::Alias(Editor::new(mode, self.view.mdc_alias[slot]))
+                        }
+                    });
+                }
+                _ if up || down => {
+                    self.view.mdc_option = adjacent_index(self.view.mdc_option, 3, down)
+                }
+                _ => {}
+            }
+            return;
+        };
+        match event {
+            InputEvent::Short(Key::Exit) => return,
+            InputEvent::Short(Key::Menu) => {
+                match draft {
+                    MdcDraft::Timing(mode) => self.view.mdc[slot].mode = mode,
+                    MdcDraft::UnitId(editor) => {
+                        let value = editor.value().to_hex().and_then(UnitId::new);
+                        if !editor.value().is_empty() && value.is_none() {
+                            self.view.notice = Notice::InvalidMdcId;
+                            self.view.mdc_draft = Some(draft);
+                            return;
+                        }
+                        self.view.mdc[slot].id = value.map(UnitId::get);
+                    }
+                    MdcDraft::Alias(editor) => self.view.mdc_alias[slot] = editor.value(),
+                }
+                return;
+            }
+            _ => {}
+        }
+        match &mut draft {
+            MdcDraft::Timing(mode) if up || down => *mode = adjacent_index(*mode, 4, down),
+            MdcDraft::Timing(_) => {}
+            MdcDraft::UnitId(editor) => self.mdc_text_input(event, editor),
+            MdcDraft::Alias(editor) => self.mdc_text_input(event, editor),
+        }
+        self.view.mdc_draft = Some(draft);
+    }
+
+    fn mdc_text_input<const N: usize>(&mut self, event: InputEvent, editor: &mut Editor<N>) {
+        match event {
+            InputEvent::Short(Key::Star) => editor.delete(),
+            InputEvent::Short(Key::Hash) => editor.cycle_language(),
+            InputEvent::Short(Key::Up) => editor.commit_character(),
+            InputEvent::Short(key) | InputEvent::Hold(key) => {
+                if let Some(digit) = digit(key) {
+                    if !editor.digit(digit, matches!(event, InputEvent::Hold(_))) {
+                        self.view.notice = Notice::EntryFull;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn open_step(&mut self, from_home: bool) {
+        if self.selected_cb().is_some() {
+            self.open_cb();
+            return;
+        }
         if self.view.screen != Screen::Step {
             self.step_before = Some(self.view.step_index);
             self.step_home = from_home;
@@ -2455,6 +2784,8 @@ impl Controller {
             self.request_scan_stop();
         } else if self.view.ptt_slot.is_some() {
             self.view.notice = Notice::TxDisabled;
+        } else if self.selected_cb().is_some() {
+            self.view.notice = Notice::RadioUnavailable;
         } else if self.view.mode == Mode::Channel
             && self
                 .view
@@ -2507,6 +2838,10 @@ impl Controller {
     fn toggle_mode(&mut self, bitmap: &[u8; 128]) {
         self.finish_step_cancel();
         self.view.screen = Screen::Home;
+        if self.selected_cb().is_some() {
+            self.leave_cb();
+            return;
+        }
         match self.view.mode {
             Mode::Channel => self.view.mode = Mode::Vfo,
             Mode::Vfo => {
@@ -2531,6 +2866,11 @@ impl Controller {
             return;
         }
         match self.view.screen {
+            Screen::Home if self.selected_cb().is_some() => {
+                if let Some(cb) = self.selected_cb() {
+                    self.apply_cb_channel(cb.adjacent(!forward));
+                }
+            }
             Screen::Home => match self.view.mode {
                 Mode::Channel => {
                     self.view.channel = self.ordered_channel(bitmap, self.view.channel, forward);
@@ -2659,6 +2999,15 @@ impl Controller {
                     self.view.reverse = false;
                     self.view.mode = Mode::Vfo;
                 }
+                EntryKind::CbChannel => {
+                    let Some(cb) = self.selected_cb() else {
+                        return;
+                    };
+                    let Some(cb) = self.cb_with_entry(cb) else {
+                        return;
+                    };
+                    self.apply_cb_channel(cb);
+                }
             }
             self.view.entry = None;
             self.view.screen = Screen::Home;
@@ -2680,6 +3029,11 @@ impl Controller {
                     return;
                 };
                 match item {
+                    MenuItem::Cb => self.open_cb(),
+                    MenuItem::Mdc => {
+                        self.view.mdc_option = 0;
+                        self.view.screen = Screen::Mdc;
+                    }
                     MenuItem::BandPreset => self.open_setting(Setting::BandPreset),
                     MenuItem::GpsEnable => self.open_setting(Setting::GpsEnable),
                     MenuItem::GpsBaud => self.open_setting(Setting::GpsBaud),
@@ -2696,10 +3050,14 @@ impl Controller {
                     MenuItem::Mode => self.open_setting(Setting::Mode),
                     MenuItem::Channels => self.open_channels(bitmap),
                     MenuItem::ChannelDetails => self.view.screen = Screen::ChannelDetails,
-                    MenuItem::Shift if self.view.mode == Mode::Vfo => {
+                    MenuItem::Shift
+                        if self.view.mode == Mode::Vfo && self.selected_cb().is_none() =>
+                    {
                         self.open_setting(Setting::Shift)
                     }
-                    MenuItem::TxTone if self.view.mode == Mode::Vfo => {
+                    MenuItem::TxTone
+                        if self.view.mode == Mode::Vfo && self.selected_cb().is_none() =>
+                    {
                         self.open_setting(Setting::TxTone)
                     }
                     MenuItem::Shift | MenuItem::TxTone => self.view.screen = Screen::ChannelDetails,
@@ -2742,6 +3100,7 @@ impl Controller {
                     .list_channel
                     .filter(|&slot| channel_active(bitmap, slot))
                 {
+                    self.leave_selected_cb();
                     self.view.channel = Some(slot);
                     self.view.mode = Mode::Channel;
                     self.view.screen = Screen::Home;
@@ -2761,8 +3120,10 @@ impl Controller {
                 self.view.screen = Screen::Shortcuts;
             }
             Screen::Zones => {
-                if self.view.zone != self.view.zone_cursor {
-                    self.view.zone = self.view.zone_cursor;
+                let selected = self.view.zone_cursor;
+                if self.view.zone != selected {
+                    self.leave_selected_cb();
+                    self.view.zone = selected;
                     self.view.reverse = false;
                     self.view.channel = None;
                     self.view.list_channel = None;
@@ -2780,7 +3141,13 @@ impl Controller {
             }
             Screen::Setting => self.commit_setting(bitmap),
             // A test page must allow MENU/EXIT to leave; other keys stay visible.
-            Screen::Shortwave | Screen::Crossband | Screen::Gps | Screen::Aprs | Screen::TxId => {}
+            Screen::Shortwave
+            | Screen::Crossband
+            | Screen::Gps
+            | Screen::Aprs
+            | Screen::TxId
+            | Screen::Cb
+            | Screen::Mdc => {}
             Screen::ChannelDetails
             | Screen::Calibration
             | Screen::Keys
@@ -2829,23 +3196,19 @@ impl Controller {
     }
 
     fn enter_digit(&mut self, digit: u8) {
-        if self.view.screen != Screen::Home {
-            return;
-        }
-        let kind = match self.view.mode {
-            Mode::Channel => EntryKind::Channel,
-            Mode::Vfo => EntryKind::Frequency,
+        let kind = match self.view.screen {
+            Screen::Cb => EntryKind::CbChannel,
+            Screen::Home if self.selected_cb().is_some() => EntryKind::CbChannel,
+            Screen::Home if self.view.mode == Mode::Channel => EntryKind::Channel,
+            Screen::Home => EntryKind::Frequency,
+            _ => return,
         };
         let mut entry = self.view.entry.unwrap_or(Entry {
             kind,
             value: 0,
             digits: 0,
         });
-        let max = match entry.kind {
-            EntryKind::Channel => 4,
-            EntryKind::Frequency => 8,
-        };
-        if entry.digits >= max {
+        if entry.digits >= entry.kind.maximum_digits() {
             self.view.notice = Notice::EntryFull;
             return;
         }
@@ -3262,6 +3625,174 @@ mod tests {
             MenuEntry::Item(item)
         );
         press(ui, Key::Menu, bitmap)
+    }
+
+    #[test]
+    fn cb_draft_keeps_b_unchanged_and_commits_a_simplex_until_explicit_exit() {
+        let bitmap = catalog(&[0, 2]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        ui.view.shift_index = 1;
+        ui.view.tx_tone_index = 9;
+        ui.view.reverse = true;
+        ui.view.step_index = 5;
+        let original_a = ui.context(Slot::A);
+        ui.select_slot(Slot::B);
+        ui.view.mode = Mode::Vfo;
+        ui.view.vfo_10hz = 43_350_000;
+        let original_b = ui.context(Slot::B);
+
+        assert_eq!(choose_menu(&mut ui, MenuItem::Cb, &bitmap).request, None);
+        assert_eq!(ui.view.cb_draft, Some(CbChannel::default()));
+        assert_eq!(ui.view.active_slot, Slot::B);
+        assert_eq!(ui.view.cb, None);
+        assert!(!ui.handle(InputEvent::Ptt(true), &bitmap).ptt_tx_requested);
+        ui.handle(InputEvent::Ptt(false), &bitmap);
+        press(&mut ui, Key::Hash, &bitmap);
+        assert_eq!(ui.view.cb_draft.unwrap().frequency_10hz(), 2_713_000);
+        press(&mut ui, Key::Star, &bitmap);
+        digits(&mut ui, &[Key::Digit9, Key::Digit9], &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(ui.view.notice, Notice::InvalidCbChannel);
+        assert_eq!(ui.view.screen, Screen::Cb);
+        press(&mut ui, Key::Exit, &bitmap);
+        press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(ui.view.screen, Screen::Menu);
+        assert_eq!(ui.context(Slot::A), original_a);
+        assert_eq!(ui.context(Slot::B), original_b);
+        assert_eq!(ui.view.active_slot, Slot::B);
+
+        press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(ui.view.cb_draft, Some(CbChannel::default()));
+        press(&mut ui, Key::Star, &bitmap);
+        digits(&mut ui, &[Key::Digit2, Key::Digit3], &bitmap);
+        let committed = press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(committed.request, None);
+        assert!(committed.slot_changed);
+        assert_eq!(ui.view.active_slot, Slot::A);
+        assert_eq!(ui.view.screen, Screen::Home);
+        assert_eq!(ui.view.cb.unwrap().number(), 23);
+        assert!(!ui.view.cb.unwrap().is_am());
+        assert_eq!(ui.view.vfo_10hz, 2_725_500);
+        assert_eq!(ui.view.mode, Mode::Vfo);
+        assert_eq!(ui.view.shift_index, 0);
+        assert_eq!(ui.view.tx_tone_index, 0);
+        assert!(!ui.view.reverse);
+        assert_eq!(ui.context(Slot::B), original_b);
+        assert_eq!(ui.view.cb_for_slot(Slot::B), None);
+
+        press(&mut ui, Key::Up, &bitmap);
+        assert_eq!(ui.view.vfo_10hz, 2_723_500); // Channel 24 after 23.
+        digits(&mut ui, &[Key::Digit0, Key::Digit1], &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        press(&mut ui, Key::Down, &bitmap);
+        assert_eq!(ui.view.cb.unwrap().number(), 40);
+        assert_eq!(ui.view.vfo_10hz, 2_740_500);
+        assert!(ui.set_binding(6, ShortcutAction::Cb));
+        ui.select_slot(Slot::B);
+        ui.handle(InputEvent::Hold(Key::Digit6), &bitmap);
+        let last = ui.view.cb_draft;
+        assert_eq!(last.unwrap().number(), 40);
+        ui.handle(InputEvent::Hold(Key::Exit), &bitmap);
+        assert_eq!(ui.view.cb, None);
+        assert_eq!(ui.view.cb_draft, None);
+        assert_eq!(ui.view.active_slot, Slot::B);
+        assert_eq!(ui.context(Slot::A), original_a);
+        assert_eq!(ui.context(Slot::B), original_b);
+        ui.handle(InputEvent::Hold(Key::Digit6), &bitmap);
+        assert_eq!(ui.view.cb_draft, last);
+    }
+
+    #[test]
+    fn mdc_modes_ids_and_local_aliases_commit_per_slot_and_drafts_block_ptt() {
+        extern crate std;
+        use std::string::ToString;
+
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        let disabled = MdcSettings { mode: 0, id: None };
+        assert_eq!(ui.view.mdc_for_slot(Slot::A), disabled);
+        assert_eq!(ui.view.mdc_for_slot(Slot::B), disabled);
+        choose_menu(&mut ui, MenuItem::Mdc, &bitmap);
+        assert_eq!(ui.view.screen, Screen::Mdc);
+        press(&mut ui, Key::Menu, &bitmap);
+        press(&mut ui, Key::Down, &bitmap);
+        assert_eq!(ui.view.mdc_draft, Some(MdcDraft::Timing(1)));
+        press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(ui.view.mdc_for_slot(Slot::A), disabled);
+        assert_eq!(ui.view.mdc_draft, None);
+        press(&mut ui, Key::Menu, &bitmap);
+        press(&mut ui, Key::Up, &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(ui.view.mdc_for_slot(Slot::A).mode, 3);
+
+        press(&mut ui, Key::Down, &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        for _ in 0..4 {
+            press(&mut ui, Key::Digit0, &bitmap);
+        }
+        press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(ui.view.notice, Notice::InvalidMdcId);
+        assert_eq!(ui.view.mdc_for_slot(Slot::A).id, None);
+        press(&mut ui, Key::Exit, &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        press(&mut ui, Key::Digit0, &bitmap);
+        ui.handle(InputEvent::Hold(Key::Digit1), &bitmap);
+        ui.handle(InputEvent::Hold(Key::Digit6), &bitmap);
+        press(&mut ui, Key::Digit1, &bitmap);
+        assert_eq!(press(&mut ui, Key::Menu, &bitmap).request, None);
+        let a = MdcSettings {
+            mode: 3,
+            id: Some(0x0af1),
+        };
+        assert_eq!(ui.view.mdc_for_slot(Slot::A), a);
+
+        press(&mut ui, Key::Down, &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        digits(&mut ui, &[Key::Digit2, Key::Digit2], &bitmap);
+        press(&mut ui, Key::Hash, &bitmap);
+        digits(&mut ui, &[Key::Digit2, Key::Digit2], &bitmap);
+        let ptt = ui.handle(InputEvent::PttB(true), &bitmap);
+        assert_eq!(ptt.ptt_slot, None);
+        assert!(!ptt.ptt_tx_requested);
+        ui.handle(InputEvent::PttB(false), &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        let saved_alias = ui.view.mdc_alias_for_slot(Slot::A);
+        assert_eq!(saved_alias.to_string(), "БB");
+        assert_eq!(ui.view.mdc_for_slot(Slot::A), a);
+        press(&mut ui, Key::Menu, &bitmap);
+        for index in 0..MDC_ALIAS_LEN - 2 {
+            let key = if index % 2 == 0 {
+                Key::Digit2
+            } else {
+                Key::Digit3
+            };
+            press(&mut ui, key, &bitmap);
+        }
+        press(&mut ui, Key::Digit4, &bitmap);
+        assert_eq!(ui.view.notice, Notice::EntryFull);
+        let Some(MdcDraft::Alias(editor)) = ui.view.mdc_draft else {
+            panic!("alias draft");
+        };
+        let draft = editor.value().to_string();
+        assert_eq!(draft.chars().count(), MDC_ALIAS_LEN);
+        assert!(draft.len() > MDC_ALIAS_LEN);
+        press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(ui.view.mdc_alias_for_slot(Slot::A), saved_alias);
+
+        ui.select_slot(Slot::B);
+        assert_eq!(ui.view.mdc_for_slot(Slot::A), a);
+        assert_eq!(ui.view.mdc_for_slot(Slot::B), disabled);
+        assert!(ui.view.mdc_alias_for_slot(Slot::B).is_empty());
+        choose_menu(&mut ui, MenuItem::Mdc, &bitmap);
+        assert_eq!(ui.view.active_slot, Slot::B);
+        press(&mut ui, Key::Menu, &bitmap);
+        press(&mut ui, Key::Down, &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(
+            ui.view.mdc_for_slot(Slot::B),
+            MdcSettings { mode: 1, id: None }
+        );
+        assert_eq!(ui.view.mdc_for_slot(Slot::A), a);
     }
 
     #[test]
@@ -3707,7 +4238,12 @@ mod tests {
         press(&mut ui, Key::Digit0, &bitmap);
         assert_eq!(ui.view.binding_index, 9);
         assert_eq!(ui.view.screen, Screen::ShortcutAction);
-        press(&mut ui, Key::Down, &bitmap); // Spectrum is last; wrap to None.
+        press(&mut ui, Key::Down, &bitmap);
+        assert_eq!(
+            SHORTCUT_ACTIONS[ui.view.binding_action_index as usize],
+            ShortcutAction::Cb,
+        );
+        press(&mut ui, Key::Down, &bitmap); // Wrap from CB to None.
         press(&mut ui, Key::Menu, &bitmap);
         assert_eq!(ui.binding(0), Some(ShortcutAction::None));
         assert_eq!(&ui.view.bindings[..9], &DEFAULT_BINDINGS[..9]);

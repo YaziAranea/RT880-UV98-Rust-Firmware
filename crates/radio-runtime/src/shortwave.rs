@@ -162,6 +162,7 @@ pub struct Session {
     patch_started: u32,
     tune_started: u32,
     cts_wait_started: Option<u32>,
+    sweep_mode: bool,
 }
 
 impl Session {
@@ -181,6 +182,7 @@ impl Session {
             patch_started: 0,
             tune_started: 0,
             cts_wait_started: None,
+            sweep_mode: false,
         }
     }
 
@@ -188,6 +190,13 @@ impl Session {
     /// at a time with CTS handling. Existing callers retain the old defaults.
     pub fn set_processing(&mut self, processing: Processing) {
         self.processing = Some(processing);
+    }
+
+    /// A sweep polls the documented STC completion flag sooner instead of
+    /// unconditionally sleeping 85 ms at every bin. This does not select FAST
+    /// (invalidated tuning), bypass CTS/STC, or shorten the 300 ms deadline.
+    pub fn set_sweep_mode(&mut self, enabled: bool) {
+        self.sweep_mode = enabled;
     }
 
     fn processing_pending(&self, mode: ShortwaveMode) -> bool {
@@ -388,7 +397,7 @@ impl Session {
                     self.tuned = Some(tuning);
                     self.tune_started = now;
                     update = Some(Update::Tuning);
-                    (Phase::QueryComplete, 85)
+                    (Phase::QueryComplete, if self.sweep_mode { 10 } else { 85 })
                 }
             }
             Phase::QueryComplete => {
@@ -424,7 +433,7 @@ impl Session {
                 }) {
                     return Err(0x65);
                 }
-                if Some(tuning) == self.tuned {
+                if Some(tuning) == self.tuned && !self.processing_pending(tuning.mode) {
                     update = Some(Update::Tuned {
                         part: self.part,
                         rssi: reply[4],
@@ -451,7 +460,7 @@ impl Session {
                     let reply = bus.read::<6>().map_err(|e| 0x70 | e)?;
                     (reply[4], reply[5])
                 };
-                if Some(tuning) == self.tuned {
+                if Some(tuning) == self.tuned && !self.processing_pending(tuning.mode) {
                     update = Some(Update::Quality {
                         part: self.part,
                         rssi,
@@ -552,6 +561,82 @@ mod tests {
             Ok(Some(Update::Tuning))
         );
         assert_eq!(&bus.writes[0][2..4], &[1, 1]); // SSB patch property, not AM 0x3102.
+    }
+
+    #[test]
+    fn sweep_polls_early_but_never_publishes_before_stc_or_bypasses_timeout() {
+        let tuning = am(7100);
+        let mut session = Session::new(0);
+        session.phase = Phase::Tune;
+        session.at = 0;
+        session.set_sweep_mode(true);
+        let mut bus = Mock::default();
+        assert_eq!(
+            session.tick(&mut bus, 0, tuning, |_, _| false),
+            Ok(Some(Update::Tuning))
+        );
+        assert_eq!(bus.writes[0], [0x40, 0, 0x1b, 0xbc, 0, 1]);
+        assert_eq!(session.tick(&mut bus, 9, tuning, |_, _| false), Ok(None));
+        assert_eq!(bus.writes.len(), 1);
+        assert_eq!(session.tick(&mut bus, 10, tuning, |_, _| false), Ok(None));
+        assert_eq!(bus.writes.last().unwrap(), &[0x14]);
+        bus.reply[0] = 0x80; // CTS is not STC: no measurement yet.
+        assert_eq!(session.tick(&mut bus, 13, tuning, |_, _| false), Ok(None));
+        assert!(matches!(session.phase, Phase::QueryComplete));
+        assert_eq!(session.tick(&mut bus, 23, tuning, |_, _| false), Ok(None));
+        bus.reply[0] = 0x81;
+        assert_eq!(session.tick(&mut bus, 26, tuning, |_, _| false), Ok(None));
+        assert_eq!(session.tick(&mut bus, 27, tuning, |_, _| false), Ok(None));
+        bus.reply = [0x80, 0, 0x1b, 0xbc, 40, 12, 0, 1, 0];
+        assert_eq!(
+            session.tick(&mut bus, 30, tuning, |_, _| false),
+            Ok(Some(Update::Tuned {
+                part: 0,
+                rssi: 40,
+                snr: 12
+            }))
+        );
+        // Returning to ordinary listening retains its conservative schedule.
+        session.set_sweep_mode(false);
+        assert_eq!(
+            session.tick(&mut bus, 31, am(7101), |_, _| false),
+            Ok(Some(Update::Tuning))
+        );
+        assert_eq!(session.at, 116);
+
+        let mut stuck = Session::new(0);
+        stuck.phase = Phase::Tune;
+        stuck.at = 0;
+        stuck.set_sweep_mode(true);
+        bus.reply[0] = 0x80;
+        stuck.tick(&mut bus, 0, tuning, |_, _| false).unwrap();
+        stuck.tick(&mut bus, 10, tuning, |_, _| false).unwrap();
+        assert_eq!(stuck.tick(&mut bus, 300, tuning, |_, _| false), Err(0x55));
+    }
+
+    #[test]
+    fn pending_measurement_from_old_filter_is_not_published() {
+        let tuning = am(7100);
+        for phase in [Phase::ReadTune, Phase::ReadQuality] {
+            let mut session = Session::new(0);
+            session.phase = phase;
+            session.at = 0;
+            session.tuned = Some(tuning);
+            session.configured_filter = Some(0);
+            session.configured_attenuation = Some(0);
+            session.set_processing(Processing {
+                filter: AmFilter::Narrow1k,
+                soft_mute: false,
+            });
+            let mut bus = Mock::default();
+            bus.reply = [0x80, 0, 0x1b, 0xbc, 40, 12, 0, 1, 0];
+            assert_eq!(session.tick(&mut bus, 0, tuning, |_, _| false), Ok(None));
+            assert_eq!(
+                session.tick(&mut bus, 1, tuning, |_, _| false),
+                Ok(Some(Update::Tuning))
+            );
+            assert_eq!(bus.writes.last().unwrap(), &[0x12, 0, 0x31, 2, 0, 4]);
+        }
     }
 
     #[test]

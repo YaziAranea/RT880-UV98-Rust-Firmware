@@ -43,11 +43,14 @@ impl ShortwaveScope {
         self.step_hz = step_hz;
     }
 
-    /// Only measured bins are drawn. A complete sweep advances time by one row.
-    pub fn sample(&mut self, bin: u8, rssi: u8, _snr: u8, complete: bool) {
+    /// Stage measurements separately from the visible graph. Only a complete
+    /// measured sweep publishes a new graph/history row; a partially acquired
+    /// row must never erase the last complete sweep while the LCD is drawing.
+    /// Returns true exactly when a complete row was published.
+    pub fn sample(&mut self, bin: u8, rssi: u8, _snr: u8, complete: bool) -> bool {
         let bin = usize::from(bin);
         if bin >= BINS || self.step_hz == 0 {
-            return;
+            return false;
         }
         if bin == 0 {
             self.valid = 0;
@@ -58,7 +61,9 @@ impl ShortwaveScope {
             self.newest = (self.newest + 1) % ROWS;
             self.history[self.newest] = self.samples;
             self.rows = (self.rows + 1).min(ROWS);
+            return true;
         }
+        false
     }
 
     pub fn measured_bins(&self) -> u32 {
@@ -66,6 +71,10 @@ impl ShortwaveScope {
     }
     pub fn history_rows(&self) -> usize {
         self.rows
+    }
+
+    pub fn displayed_samples(&self) -> Option<&[u8; BINS]> {
+        (self.rows > 0).then(|| &self.history[self.newest])
     }
 }
 
@@ -90,6 +99,28 @@ mod tests {
         scope.reset(14_100_000, 1_000);
         assert_eq!(scope.history_rows(), 0);
         assert_eq!(scope.measured_bins(), 0);
+    }
+
+    #[test]
+    fn unfinished_sweep_keeps_previous_graph_and_never_publishes_missing_bins() {
+        let mut scope = ShortwaveScope::new();
+        scope.reset(7_084_000, 1_000);
+        assert_eq!(scope.displayed_samples(), None);
+        for bin in 0..32 {
+            assert_eq!(scope.sample(bin, bin + 10, 4, bin == 31), bin == 31);
+        }
+        let complete = *scope.displayed_samples().unwrap();
+        for bin in 0..31 {
+            assert!(!scope.sample(bin, 60, 4, false));
+            assert_eq!(scope.displayed_samples(), Some(&complete));
+        }
+        assert!(scope.sample(31, 60, 4, true));
+        assert_eq!(scope.displayed_samples(), Some(&[60; 32]));
+        scope.sample(0, 4, 1, false);
+        assert!(!scope.sample(31, 4, 1, true));
+        assert!(!scope.sample(32, 4, 1, true));
+        assert_eq!(scope.displayed_samples(), Some(&[60; 32]));
+        assert_eq!(scope.history_rows(), 2);
     }
 }
 
@@ -142,11 +173,8 @@ pub(super) fn shortwave_scope_page(row: u16, out: &mut Row<'_>, model: &Model<'_
     const BOTTOM: u16 = 154;
     // Fixed RSSI scale keeps signals comparable across sweeps. A sliding floor
     // would make equal levels change colour as the receiver visits other bins.
-    for index in 0..BINS {
-        if scope.valid & (1 << index) == 0 {
-            continue;
-        }
-        let height = u16::from(scope.samples[index].min(63)) * (BOTTOM - TOP) / 63;
+    for (index, &sample) in scope.displayed_samples().into_iter().flatten().enumerate() {
+        let height = u16::from(sample.min(63)) * (BOTTOM - TOP) / 63;
         rect(
             row,
             out,
@@ -157,6 +185,10 @@ pub(super) fn shortwave_scope_page(row: u16, out: &mut Row<'_>, model: &Model<'_
             color::ACCENT,
         );
     }
+    // Two rows of acquisition progress, independent of the stable graph and
+    // waterfall. This is measured-bin progress, never interpolated RF data.
+    let progress = scope.measured_bins().count_ones() as usize * PITCH;
+    rect(row, out, X, 168, progress, 2, color::MUTED);
     for (index, x) in [(0, 12), (16, 98), (31, 194)] {
         let khz = (scope.first_hz + scope.step_hz * index) / 1000;
         let mut label = Text::new();

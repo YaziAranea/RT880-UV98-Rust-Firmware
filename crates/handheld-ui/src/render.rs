@@ -2,6 +2,7 @@
 //! measurements, frequency tuning, or storage writes. Radio activity is shown
 //! only from an explicit backend report, never inferred from a key or request.
 
+use crate::cb::{CbGrid, CHANNEL_COUNT as CB_CHANNEL_COUNT};
 use crate::locale::{self, Language};
 use core::fmt::{self, Write};
 use uv98_codeplug::channels::{Bandwidth, Power, Tone};
@@ -12,11 +13,13 @@ use uv98_spectrum::compact::{Plot, BINS as SPECTRUM_BINS};
 #[cfg(test)]
 use crate::controller::MENU_ITEMS;
 use crate::controller::{
-    binding_digit, menu_entries, CrossbandProbe, EntryKind, LightMode, MenuEntry, MenuGroup,
-    MenuItem, Mode, Notice, ScanState, Screen, Setting, ShortcutAction, SideAction, Slot, View,
-    LIGHT_MODES, SHORTCUT_ACTIONS, SIDE_ACTIONS, SPECTRUM_INTERVALS, STEP_10HZ, TX_CTCSS,
+    binding_digit, menu_entries, CrossbandProbe, EntryKind, LightMode, MdcDraft, MenuEntry,
+    MenuGroup, MenuItem, Mode, Notice, ScanState, Screen, Setting, ShortcutAction, SideAction,
+    Slot, View, LIGHT_MODES, SHORTCUT_ACTIONS, SIDE_ACTIONS, SPECTRUM_INTERVALS, STEP_10HZ,
+    TX_CTCSS,
 };
 use crate::meter::{receive_segments, transmit_segments, SEGMENTS as METER_SEGMENTS};
+use crate::text_entry::InputMode;
 
 #[path = "font.rs"]
 mod font;
@@ -72,6 +75,8 @@ pub mod color {
     pub const WARNING_BACKGROUND: u16 = 0x2901;
     pub const BAD: u16 = 0xfa08;
     pub(super) const TX: u16 = 0x319f;
+    // Pure red in the portrait panel's native BGR565 order.
+    pub(super) const TX_OUTLINE: u16 = 0x001f;
     // Portrait panel uses MADCTL BGR. These two badges are authored in
     // panel order; the established palette and the S-meter stay as before.
     pub const AM_BADGE: u16 = 0x421f;
@@ -324,7 +329,7 @@ pub const fn home_slot_rows(slot: Slot) -> (u16, u16) {
     }
 }
 
-/// The badge is serviced before the rest of the transmitting card.
+/// The badge and top outline are serviced before the rest of the card.
 pub const fn home_ptt_badge_rows(slot: Slot) -> (u16, u16) {
     let top = home_slot_rows(slot).0;
     (top + 5, top + 21)
@@ -673,6 +678,21 @@ pub fn dirty_ranges(model: &Model<'_>, previous: Option<View>) -> Result<DirtyRa
         }
         Screen::Home => {
             let top = home_slot_rows(new.active_slot).0;
+            match (old.cb, new.cb) {
+                (Some(old_cb), Some(new_cb))
+                    if old_cb.number() != new_cb.number() || old_cb.grid != new_cb.grid =>
+                {
+                    let (a, _) = home_slot_rows(Slot::A);
+                    dirty.push(a + 7, a + 14);
+                    let (a, b) = home_frequency_rows(Slot::A);
+                    dirty.push(a, b);
+                }
+                (Some(_), None) | (None, Some(_)) => {
+                    let (a, b) = home_slot_rows(Slot::A);
+                    dirty.push(a, b);
+                }
+                _ => {}
+            }
             if old.scan != new.scan
                 || old.dual_watch != new.dual_watch
                 || old.watch_rx != new.watch_rx
@@ -747,6 +767,41 @@ pub fn dirty_ranges(model: &Model<'_>, previous: Option<View>) -> Result<DirtyRa
         Screen::Gps | Screen::Aprs | Screen::TxId => {
             if old != new {
                 dirty.push(48, 296);
+            }
+        }
+        Screen::Cb => {
+            if old.cb_draft != new.cb_draft || old.entry != new.entry {
+                dirty.push(54, 70);
+            }
+            if old.cb_draft.map(|cb| cb.am) != new.cb_draft.map(|cb| cb.am) {
+                dirty.push(84, 91);
+            }
+            if old.entry.is_some() != new.entry.is_some() {
+                dirty.push(305, 312);
+            }
+            let old_number = old.cb_draft.map(|cb| cb.number());
+            let new_number = new.cb_draft.map(|cb| cb.number());
+            if old_number != new_number {
+                for number in [old_number, new_number].into_iter().flatten() {
+                    let y = cb_channel_rows(number).0;
+                    dirty.push(y, y + CB_CHANNEL_HEIGHT);
+                }
+            }
+            if old.cb.is_some() != new.cb.is_some() {
+                dirty.push(94, 101);
+            }
+        }
+        Screen::Mdc => {
+            if old.mdc_draft.is_some() != new.mdc_draft.is_some() {
+                dirty.push(48, 269);
+                dirty.push(305, 312);
+            } else if old.mdc_draft != new.mdc_draft {
+                dirty.push(75, 119);
+            } else if old.mdc_option != new.mdc_option {
+                for cursor in [old.mdc_option, new.mdc_option] {
+                    let top = mdc_option_top(cursor);
+                    dirty.push(top, top + 37);
+                }
             }
         }
         Screen::Shortwave => {
@@ -1055,6 +1110,8 @@ fn render_validated_row(row: u16, pixels: &mut [u16; WIDTH], model: &Model<'_>) 
             Screen::Shortwave => shortwave(row, out, model),
             Screen::Crossband => crossband(row, out, model.view),
             Screen::Gps | Screen::Aprs | Screen::TxId => utility_page(row, out, model),
+            Screen::Cb => cb_grid(row, out, model.view),
+            Screen::Mdc => mdc_page(row, out, model.view),
         }
         notice(row, out, model.view.notice);
     } else {
@@ -1064,7 +1121,10 @@ fn render_validated_row(row: u16, pixels: &mut [u16; WIDTH], model: &Model<'_>) 
 
 fn validate(model: &Model<'_>) -> Result<(), Error> {
     let view = model.view;
-    if view.spectrum_cursor as usize >= SPECTRUM_BINS {
+    if view.spectrum_cursor as usize >= SPECTRUM_BINS
+        || (view.screen == Screen::Cb && view.cb_draft.is_none())
+        || (view.screen == Screen::Mdc && view.mdc_option > 2)
+    {
         return Err(Error::InvalidView);
     }
     if view.screen == Screen::Spectrum {
@@ -1124,10 +1184,7 @@ fn validate(model: &Model<'_>) -> Result<(), Error> {
         return Err(Error::InvalidView);
     }
     if let Some(entry) = view.entry {
-        let maximum_digits = match entry.kind {
-            EntryKind::Channel => 4,
-            EntryKind::Frequency => 8,
-        };
+        let maximum_digits = entry.kind.maximum_digits();
         if entry.digits == 0
             || entry.digits > maximum_digits
             || entry.value >= 10u32.pow(u32::from(entry.digits))
@@ -1345,13 +1402,229 @@ fn page_title(view: View) -> &'static str {
         Screen::Gps => "\x1f019",
         Screen::Aprs => "\x1f00A",
         Screen::TxId => "\x1f0E8",
+        Screen::Cb => cb_label(),
+        Screen::Mdc if view.active_slot == Slot::A => "MDC1200 A",
+        Screen::Mdc => "MDC1200 B",
+    }
+}
+
+fn cb_label() -> &'static str {
+    "\x1f15B"
+}
+
+fn cb_grid_label(grid: CbGrid) -> &'static str {
+    match grid {
+        CbGrid::Zeros => "\x1f15C",
+        CbGrid::Cept => "\x1f15D",
+    }
+}
+
+const CB_COLUMNS: u8 = 5;
+const CB_CHANNEL_HEIGHT: u16 = 18;
+
+fn cb_channel_rows(number: u8) -> (u16, u16) {
+    let y = 108 + u16::from((number - 1) / CB_COLUMNS) * 20;
+    (y, y + CB_CHANNEL_HEIGHT)
+}
+
+fn cb_grid(row: u16, out: &mut Row<'_>, view: View) {
+    let Some(cb) = view.cb_draft else {
+        return;
+    };
+    if (54..70).contains(&row) {
+        let entered = view
+            .entry
+            .map(|entry| entry_text(entry.value, entry.digits, entry.kind));
+        let frequency = frequency(cb.frequency_10hz());
+        let value = entered.as_ref().map_or(frequency.as_str(), Text::as_str);
+        text(row, out, 14, 54, 2, value, color::ACCENT);
+        text(row, out, 131, 54, 1, cb_grid_label(cb.grid), color::TEXT);
+        text(
+            row,
+            out,
+            131,
+            63,
+            1,
+            if cb.am { "AM" } else { "FM" },
+            if cb.am {
+                color::AM_BADGE
+            } else {
+                color::FM_BADGE
+            },
+        );
+    } else {
+        text(row, out, 14, 74, 1, "\x1f15E", color::MUTED);
+        if cb.am {
+            text(row, out, 14, 84, 1, "\x1f160", color::TEXT);
+        }
+        if view.cb.is_some() {
+            text(row, out, 14, 94, 1, "\x1f15F", color::MUTED);
+        }
+    }
+    if !(108..268).contains(&row) {
+        return;
+    }
+    let first = 1 + ((row - 108) / 20) as u8 * CB_COLUMNS;
+    for number in first..(first + CB_COLUMNS).min(CB_CHANNEL_COUNT + 1) {
+        let (top, end) = cb_channel_rows(number);
+        let x = 11 + usize::from((number - 1) % CB_COLUMNS) * 44;
+        let selected = number == cb.number();
+        rect(
+            row,
+            out,
+            x,
+            top,
+            42,
+            end - top,
+            if selected {
+                color::ACCENT
+            } else {
+                color::PANEL
+            },
+        );
+        if (top + 2..top + 16).contains(&row) {
+            let mut label = Text::new();
+            let _ = write!(label, "{:02}", number);
+            text(
+                row,
+                out,
+                x + 10,
+                top + 2,
+                2,
+                label.as_str(),
+                if selected {
+                    color::BACKGROUND
+                } else {
+                    color::TEXT
+                },
+            );
+        }
+    }
+}
+
+const fn mdc_option_top(option: u8) -> u16 {
+    57 + option as u16 * 45
+}
+
+fn mdc_option_label(option: u8) -> &'static str {
+    match option {
+        0 => "\x1f163",
+        1 => "UNIT ID",
+        _ => "\x1f164",
+    }
+}
+
+fn mdc_timing_label(timing: u8) -> &'static str {
+    match timing {
+        1 => "\x1f165",
+        2 => "\x1f166",
+        3 => "\x1f167",
+        _ => "\x1f05E",
+    }
+}
+
+fn mdc_page(row: u16, out: &mut Row<'_>, view: View) {
+    let mut value = Text::new();
+    if let Some(draft) = view.mdc_draft {
+        text(
+            row,
+            out,
+            16,
+            56,
+            2,
+            mdc_option_label(view.mdc_option),
+            color::TEXT,
+        );
+        match draft {
+            MdcDraft::Timing(timing) => {
+                text(
+                    row,
+                    out,
+                    16,
+                    105,
+                    1,
+                    mdc_timing_label(timing),
+                    color::ACCENT,
+                );
+            }
+            MdcDraft::UnitId(editor) => {
+                let _ = write!(value, "{}_", editor.value());
+                text(row, out, 16, 105, 2, value.as_str(), color::ACCENT);
+                text(row, out, 16, 138, 1, "\x1f168", color::MUTED);
+                text(row, out, 16, 153, 1, "\x1f169", color::MUTED);
+                text(row, out, 16, 168, 1, "\x1f16B", color::MUTED);
+            }
+            MdcDraft::Alias(editor) => {
+                let _ = write!(value, "{}_", editor.value());
+                text(row, out, 16, 105, 2, value.as_str(), color::ACCENT);
+                text(
+                    row,
+                    out,
+                    16,
+                    75,
+                    1,
+                    if editor.mode() == InputMode::Russian {
+                        "RU"
+                    } else {
+                        "EN"
+                    },
+                    color::ACCENT,
+                );
+                text(row, out, 16, 138, 1, "\x1f16A", color::MUTED);
+                text(row, out, 16, 153, 1, "\x1f169", color::MUTED);
+                text(row, out, 16, 183, 1, "\x1f16C", color::MUTED);
+            }
+        }
+        return;
+    }
+    let settings = view.mdc_for_slot(view.active_slot);
+    for option in 0..3 {
+        let top = mdc_option_top(option);
+        if !(top..top + 37).contains(&row) {
+            continue;
+        }
+        let selected = option == view.mdc_option;
+        rect(row, out, 12, top, 216, 37, color::PANEL);
+        if selected {
+            rect(row, out, 12, top, 3, 37, color::ACCENT);
+        }
+        text(
+            row,
+            out,
+            21,
+            top + 7,
+            1,
+            mdc_option_label(option),
+            color::TEXT,
+        );
+        match option {
+            0 => {
+                let _ = value.write_str(mdc_timing_label(settings.mode));
+            }
+            1 => {
+                if let Some(id) = settings.id {
+                    let _ = write!(value, "{:04X}", id);
+                } else {
+                    let _ = value.write_str("----");
+                }
+            }
+            _ => {
+                let alias = view.mdc_alias_for_slot(view.active_slot);
+                if alias.is_empty() {
+                    let _ = value.write_str("----");
+                } else {
+                    let _ = write!(value, "{}", alias);
+                }
+            }
+        }
+        text(row, out, 21, top + 22, 1, value.as_str(), color::ACCENT);
     }
 }
 
 /// One user-visible build identity for the header and the About page.
-pub const VERSION: &str = "0.1.8-r37";
+pub const VERSION: &str = "0.1.8-r38";
 /// Header has a fixed 42 px slot; About shows the full string.
-pub const VERSION_SHORT: &str = "R37";
+pub const VERSION_SHORT: &str = "R38";
 
 fn crossband(row: u16, out: &mut Row<'_>, view: View) {
     let (status, tint) = match view.crossband_probe {
@@ -1959,7 +2232,17 @@ fn home(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     } else {
         Slot::B
     };
+    let (top, end) = home_slot_rows(slot);
+    let transmitting = model.radio.transmitting_slot() == Some(slot);
+    if transmitting && ((top..top + 3).contains(&row) || (end - 3..end).contains(&row)) {
+        rect(row, out, 4, row, 232, 1, color::TX_OUTLINE);
+        return;
+    }
     slot_card(row, out, model, slot);
+    if transmitting {
+        rect(row, out, 4, top, 3, end - top, color::TX_OUTLINE);
+        rect(row, out, 233, top, 3, end - top, color::TX_OUTLINE);
+    }
 }
 
 fn slot_content<'a>(model: &Model<'a>, slot: Slot) -> PeerView<'a> {
@@ -2005,12 +2288,9 @@ fn slot_card(row: u16, out: &mut Row<'_>, model: &Model<'_>, slot: Slot) {
     }
     let active = slot == model.view.active_slot;
     let transmitting = model.radio.transmitting_slot() == Some(slot);
+    let cb = model.view.cb_for_slot(slot);
     let content = slot_content(model, slot);
-    let border = if transmitting {
-        color::TX
-    } else {
-        home_frame_ink(model.view, slot)
-    };
+    let border = home_frame_ink(model.view, slot);
     let background = if active {
         color::PANEL
     } else {
@@ -2060,12 +2340,18 @@ fn slot_card(row: u16, out: &mut Row<'_>, model: &Model<'_>, slot: Slot) {
                 }
             }
             Mode::Vfo => {
-                let _ = mode.write_str("VFO");
+                if let Some(cb) = cb {
+                    let _ = write!(mode, "CB {:02}", cb.number());
+                } else {
+                    let _ = mode.write_str("VFO");
+                }
             }
         }
         text(row, out, 38, top + 7, 1, mode.as_str(), color::TEXT);
         let mut zone = Text::new();
-        if content.zone.is_none() {
+        if let Some(cb) = cb {
+            let _ = zone.write_str(cb_grid_label(cb.grid));
+        } else if content.zone.is_none() {
             let _ = zone.write_str("\x1f07F");
         } else if let Some(name) = content.zone_name {
             let decoded = channel_name(name);
@@ -2110,7 +2396,7 @@ fn slot_card(row: u16, out: &mut Row<'_>, model: &Model<'_>, slot: Slot) {
     if (name_y..name_y + 14).contains(&row) {
         let decoded = channel_name(content.name);
         let label = match entry.map(|entry| entry.kind) {
-            Some(EntryKind::Channel) => "\x1f0C0",
+            Some(EntryKind::Channel | EntryKind::CbChannel) => "\x1f0C0",
             Some(EntryKind::Frequency) => "\x1f04B",
             None if content.mode == Mode::Vfo => "",
             None if content.channel.is_none() => "\x1f0B5",
@@ -2188,7 +2474,10 @@ fn slot_card(row: u16, out: &mut Row<'_>, model: &Model<'_>, slot: Slot) {
                 text(row, out, 14, top + 104, 1, line.as_str(), color::MUTED);
             }
         }
-        if content.mode == Mode::Vfo && (top + HOME_META_Y..top + HOME_META_Y + 7).contains(&row) {
+        if cb.is_none()
+            && content.mode == Mode::Vfo
+            && (top + HOME_META_Y..top + HOME_META_Y + 7).contains(&row)
+        {
             let mut info = Text::new();
             let _ = write!(
                 info,
@@ -2739,6 +3028,8 @@ fn setting(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
 
 pub fn menu_label(item: MenuItem) -> &'static str {
     match item {
+        MenuItem::Cb => cb_label(),
+        MenuItem::Mdc => "MDC1200",
         MenuItem::BandPreset => "\x1f069",
         MenuItem::Gps => "\x1f01B",
         MenuItem::GpsEnable => "\x1f0E1",
@@ -2779,7 +3070,7 @@ pub fn menu_group_label(group: MenuGroup) -> &'static str {
         MenuGroup::Receive => "\x1f0F1",
         MenuGroup::Scanning => "\x1f0EA",
         MenuGroup::Keys => "\x1f095",
-        MenuGroup::Navigation => "GPS / APRS",
+        MenuGroup::Navigation => "\x1f162",
         MenuGroup::System => "\x1f117",
     }
 }
@@ -2814,7 +3105,7 @@ fn menu(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
         };
         let glyph = match item {
             Some(MenuItem::Mode | MenuItem::Modulation) => Symbol::Wave,
-            Some(MenuItem::Channels | MenuItem::ChannelDetails) => Symbol::Channels,
+            Some(MenuItem::Cb | MenuItem::Channels | MenuItem::ChannelDetails) => Symbol::Channels,
             Some(MenuItem::Zones) => Symbol::Bank,
             Some(MenuItem::Scan | MenuItem::Spectrum) => Symbol::Scan,
             Some(MenuItem::Monitor) => Symbol::Monitor,
@@ -2881,6 +3172,7 @@ pub fn shortcut_label(action: ShortcutAction) -> &'static str {
         ShortcutAction::Spectrum => "\x1f125",
         ShortcutAction::Crossband => "\x1f097",
         ShortcutAction::DualWatch => "DUAL WATCH A/B",
+        ShortcutAction::Cb => cb_label(),
     }
 }
 
@@ -3418,6 +3710,8 @@ fn notice_label(value: Notice) -> Option<&'static str> {
         Notice::None => return None,
         Notice::AuxBinding => "\x1f0A7",
         Notice::InvalidChannel => "\x1f0C1",
+        Notice::InvalidCbChannel => "\x1f161",
+        Notice::InvalidMdcId => "\x1f16B",
         Notice::InactiveChannel => "\x1f049",
         Notice::InvalidFrequency => "\x1f139",
         Notice::EntryFull => "\x1f098",
@@ -3450,7 +3744,7 @@ fn footer(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
             Screen::Home if model.view.scan != ScanState::Stopped => ("\x1f020", "\x1f014"),
             Screen::Home if model.radio.monitor => ("\x1f020", "\x1f011"),
             Screen::Home => ("", ""),
-            Screen::Menu | Screen::Channels => ("\x1f01E", "\x1f012"),
+            Screen::Menu | Screen::Channels | Screen::Cb => ("\x1f01E", "\x1f012"),
             Screen::Step => ("\x1f026", "\x1f013"),
             Screen::Shortcuts => ("\x1f01F", "\x1f012"),
             Screen::ShortcutAction => ("\x1f027", "\x1f013"),
@@ -3469,6 +3763,8 @@ fn footer(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
             }
             Screen::Shortwave => ("\x1f028", "\x1f012"),
             Screen::Crossband => ("\x1f075", "EXIT"),
+            Screen::Mdc if model.view.mdc_draft.is_some() => ("\x1f027", "\x1f013"),
+            Screen::Mdc => ("\x1f01F", "\x1f012"),
             _ => ("\x1f021", "\x1f012"),
         }
     };
@@ -3865,7 +4161,7 @@ fn entry_text(value: u32, digits: u8, kind: EntryKind) -> Text {
             }
             let _ = result.write_char('_');
         }
-    } else {
+    } else if kind != EntryKind::CbChannel || digits < kind.maximum_digits() {
         let _ = result.write_char('_');
     }
     result
@@ -3989,6 +4285,12 @@ mod tests {
     fn view(screen: Screen) -> View {
         View {
             language: Language::Russian,
+            cb: None,
+            cb_draft: (screen == Screen::Cb).then(crate::cb::CbChannel::default),
+            mdc: [crate::controller::MdcSettings { mode: 0, id: None }; 2],
+            mdc_alias: [crate::text_entry::TextValue::empty(); 2],
+            mdc_option: 0,
+            mdc_draft: None,
             gps_enabled: false,
             gps_baud: 1,
             gps_status: crate::controller::GpsStatus::default(),
@@ -4732,6 +5034,73 @@ mod tests {
     }
 
     #[test]
+    fn cb_grid_incremental_matches_full_frame_in_each_language() {
+        for language in [Language::Russian, Language::English, Language::German] {
+            let mut old = model(Screen::Cb);
+            old.view.language = language;
+            let cb = old.view.cb_draft.unwrap();
+            let mut new = old;
+            new.view.cb_draft = Some(cb.adjacent(true)); // Wrap to the next row.
+            assert_eq!(compare_incremental(old, new), WIDTH * (16 + 18 * 2));
+            old = new;
+            new.view.cb_draft.as_mut().unwrap().grid = CbGrid::Zeros;
+            new.view.cb_draft.as_mut().unwrap().am = false;
+            assert_eq!(compare_incremental(old, new), WIDTH * (16 + 7));
+            old = new;
+            new.view.entry = Some(Entry {
+                kind: EntryKind::CbChannel,
+                value: 9,
+                digits: 1,
+            });
+            compare_incremental(old, new);
+            new.view.entry.as_mut().unwrap().value = 99;
+            new.view.entry.as_mut().unwrap().digits = 2;
+            new.view.notice = Notice::InvalidCbChannel;
+            compare_incremental(old, new);
+            compare_incremental(new, old);
+            let mut committed = model(Screen::Home);
+            committed.view.language = language;
+            committed.view.mode = Mode::Vfo;
+            committed.view.cb = old.view.cb_draft;
+            committed.view.vfo_10hz = committed.view.cb.unwrap().frequency_10hz();
+            compare_incremental(new, committed);
+            let mut stepped = committed;
+            stepped.view.cb = stepped.view.cb.map(|cb| cb.adjacent(false));
+            stepped.view.vfo_10hz = stepped.view.cb.unwrap().frequency_10hz();
+            assert_eq!(compare_incremental(committed, stepped), WIDTH * (7 + 48));
+        }
+    }
+
+    #[test]
+    fn mdc_selection_edit_and_text_language_updates_match_complete_frames() {
+        use crate::text_entry::{Editor, TextValue};
+        for language in [Language::Russian, Language::English, Language::German] {
+            let mut old = model(Screen::Mdc);
+            old.view.language = language;
+            old.view.active_slot = Slot::B;
+            assert_eq!(page_title(old.view), "MDC1200 B");
+            let mut new = old;
+            new.view.mdc_option = 2;
+            assert_eq!(compare_incremental(old, new), WIDTH * 74);
+            old = new;
+            let mut editor = Editor::new(InputMode::Russian, TextValue::empty());
+            new.view.mdc_draft = Some(MdcDraft::Alias(editor));
+            compare_incremental(old, new);
+            old = new;
+            editor.digit(2, false);
+            editor.cycle_language();
+            editor.digit(2, false);
+            new.view.mdc_draft = Some(MdcDraft::Alias(editor));
+            assert_eq!(compare_incremental(old, new), WIDTH * 44);
+            old = new;
+            new.view.mdc_draft = None;
+            new.view.mdc_alias[1] = editor.value();
+            compare_incremental(old, new);
+            compare_incremental(new, old);
+        }
+    }
+
+    #[test]
     fn home_notices_render_on_clean_background() {
         let normal = model(Screen::Home);
         for notice in [
@@ -5144,7 +5513,13 @@ mod tests {
             assert_ne!(row[176], color::TX);
             render_row(start, &mut row, &transmitting).unwrap();
             assert_eq!(row[176], color::TX);
-            assert_eq!(row[4], color::TX);
+            assert_eq!(&row[4..7], &[color::TX_OUTLINE; 3]);
+            assert_eq!(&row[233..236], &[color::TX_OUTLINE; 3]);
+            let (top, end) = home_slot_rows(tx_slot);
+            for y in [top, top + 2, end - 3, end - 1] {
+                render_row(y, &mut row, &transmitting).unwrap();
+                assert_eq!(&row[4..236], &[0x001f; 232]);
+            }
             render_row(home_slot_rows(focus).0, &mut row, &transmitting).unwrap();
             assert_eq!(row[4], color::ACCENT);
             render_row(6, &mut row, &transmitting).unwrap();

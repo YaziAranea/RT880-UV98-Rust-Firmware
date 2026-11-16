@@ -1,4 +1,7 @@
 extern crate std;
+mod render_batch;
+mod shortwave_redraw;
+
 use super::*;
 use std::vec;
 use std::vec::Vec;
@@ -325,6 +328,94 @@ fn menu(app: &mut App<Memory, Panel, NoDelay>, item: controller::MenuItem) -> Up
         controller::MenuEntry::Item(item)
     );
     event(app, InputEvent::Short(Key::Menu))
+}
+
+#[test]
+fn cb_peer_selection_keeps_b_unchanged_and_restores_a_channel_from_nor_read_only() {
+    let mut memory = Memory::new();
+    add_channel(&mut memory, 1, 43_350_000);
+    let original = memory.bytes.clone();
+    let mut app = app(memory, PRESERVED_CALIBRATION_SHA256);
+    app.start(0).unwrap();
+    app.select_slot(Slot::B).unwrap();
+    event(&mut app, InputEvent::Short(Key::Down));
+    assert_eq!(app.status.view.channel, Some(1));
+
+    assert!(app
+        .controller
+        .set_binding(6, controller::ShortcutAction::Cb));
+    event(&mut app, InputEvent::Hold(Key::Digit6));
+    assert_eq!(app.status.view.screen, Screen::Cb);
+    assert_eq!(app.status.view.active_slot, Slot::B);
+    event(&mut app, InputEvent::Short(Key::Menu));
+    assert_eq!(app.status.view.active_slot, Slot::A);
+    assert_eq!(app.status.view.vfo_10hz, 2_713_500);
+    let (b, b_channel) = app.peer_radio_selection();
+    assert_eq!(b.active_slot, Slot::B);
+    assert_eq!(b.cb_for_slot(b.active_slot), None);
+    assert_eq!(b_channel.unwrap().rx_frequency_code(), 43_350_000);
+
+    app.select_slot(Slot::B).unwrap();
+    let (a, a_channel) = app.peer_radio_selection();
+    assert_eq!(a.active_slot, Slot::A);
+    assert_eq!(a.cb_for_slot(a.active_slot).unwrap().number(), 15);
+    assert!(a_channel.is_none());
+    let settings = uv98_radio_runtime::policy::Settings {
+        squelch: 1,
+        mic_gain: 31,
+        fm_volume: [58, 15],
+        am_volume: [50, 12],
+        squelch_delay: 10,
+    };
+    let stale_fm = uv98_radio_runtime::policy::Overrides {
+        modulation: Some(uv98_rf_sequence::Modulation::Fm),
+        ..Default::default()
+    };
+    let am = uv98_radio_runtime::policy::profile(a, a_channel, settings, stale_fm).unwrap();
+    assert!(am.transmit.is_none());
+    // Choose FM explicitly in the CB grid, then request upper PTT while B
+    // remains selected. This exercises app projection, policy and authority.
+    event(&mut app, InputEvent::Hold(Key::Digit6));
+    event(&mut app, InputEvent::Short(Key::Star));
+    event(&mut app, InputEvent::Short(Key::Menu));
+    app.select_slot(Slot::B).unwrap();
+    event(&mut app, InputEvent::Ptt(true));
+    assert_eq!(app.status.view.active_slot, Slot::B);
+    let (a, a_channel) = app.peer_radio_selection();
+    let fm = uv98_radio_runtime::policy::profile(
+        a,
+        a_channel,
+        settings,
+        uv98_radio_runtime::policy::Overrides {
+            modulation: Some(uv98_rf_sequence::Modulation::Am),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let upper = uv98_radio_runtime::ptt::Input {
+        upper: true,
+        lower: false,
+        clean: true,
+    };
+    let allowed =
+        uv98_radio_runtime::tx_policy::authorize_target(app.status.view, a, fm, upper).unwrap();
+    assert_eq!(allowed.slot, Slot::A);
+    assert_eq!(allowed.transmit.frequency_10hz, 2_713_500);
+    assert_eq!(allowed.transmit.tone, 0);
+    assert!(allowed.still_held_target(app.status.view, a, fm, upper));
+    event(&mut app, InputEvent::Ptt(false));
+    event(&mut app, InputEvent::Hold(Key::Digit6));
+    event(&mut app, InputEvent::Hold(Key::Exit));
+    assert_eq!(app.status.view.active_slot, Slot::B);
+    assert_eq!(
+        app.selected_channel().unwrap().rx_frequency_code(),
+        43_350_000
+    );
+    let (restored, a_channel) = app.peer_radio_selection();
+    assert_eq!(restored.active_slot, Slot::A);
+    assert_eq!(restored.cb_for_slot(restored.active_slot), None);
+    assert_eq!(a_channel.unwrap().rx_frequency_code(), 14_550_000);
+    assert_eq!(app.nor.bytes, original);
 }
 
 #[test]
@@ -930,7 +1021,8 @@ fn off_focus_tx_badges_preempt_page_work_and_clear_after_tail() {
         })
         .unwrap();
         app.render_step(4).unwrap();
-        let (start, end) = render::home_ptt_badge_rows(tx_slot);
+        let start = render::home_slot_rows(tx_slot).0;
+        let end = render::home_ptt_badge_rows(tx_slot).1;
         assert_eq!(windows.borrow()[0], (start, start + 4));
         assert!(app.priority_rows.has(end - 1));
         assert_eq!(app.status.view.active_slot, focus);

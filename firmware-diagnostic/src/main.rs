@@ -55,6 +55,9 @@ compile_error!("Select exactly one TX profile");
 const LIVE_TX: bool = cfg!(any(feature = "upper-exo-tx-trial", feature = "channel-tx"));
 const LIVE_RELAY: bool = cfg!(feature = "channel-tx");
 const LOWER_PTT_ENABLED: bool = cfg!(feature = "channel-tx");
+// Keep the same first 32 UI events as the radio logger's per-boot quota.
+const UI_LOG_LIMIT: usize = 32;
+const LCD_BATCH_ADMISSION_CYCLES: u32 = CORE_NOMINAL_HZ / 500;
 
 /// CPS may personalize only this digest, after verifying two identical stock
 /// NOR reads. Calibration itself stays in the radio and is never overwritten.
@@ -219,7 +222,10 @@ impl uv98_display::Delay for Timing {
 }
 impl uv98_lcd_at32::BusTiming for Timing {
     fn wait(&mut self, _: uv98_lcd_at32::TimingPhase) {
-        self.us(1);
+        // Serviced feeds once before each bounded LCD transaction. Keep the
+        // same minimum CS/DC timing without rereading watchdog state at each
+        // of the three bus phases.
+        self.0.wait_us(1);
     }
 }
 impl uv98_keyscan_at32::ScanTiming for Timing {
@@ -883,6 +889,10 @@ fn main() -> ! {
     let mut active_loop_us = 0u32;
     let mut redraw_since = None;
     let mut max_redraw_ms = 0u32;
+    let mut ui_log = [[0; 3]; UI_LOG_LIMIT];
+    let mut ui_log_len = 0;
+    let mut ui_log_sent = 0;
+    let mut throughput_log = None;
     loop {
         let loop_started = DWT::cycle_count();
         feed();
@@ -1024,20 +1034,50 @@ fn main() -> ! {
         let tx_held = if beacon.active() {
             beacon_held
         } else {
+            let mut signal_voice = physical_held;
+            let mut signal_tail = allow_tail;
+            if radio.mdc_progress().is_some() {
+                // Modem preparation/arming/voice restoration each consume a
+                // short guarded step. Never commit against a physical input
+                // sampled before GPS/UI/other foreground work in this pass.
+                let fresh_adc = checked(&mut log, side.sample(), 0xE055);
+                let guard = keys.guard_scan();
+                let input = ptt::Input {
+                    upper: guard.as_ref().is_ok_and(|s| s.ptt_pressed()),
+                    lower: LOWER_PTT_ENABLED && ptt::lower_pressed(fresh_adc.raw),
+                    clean: guard.as_ref().is_ok_and(|s| s.matrix_clear())
+                        && (ptt::side_idle(fresh_adc.raw)
+                            || (LOWER_PTT_ENABLED && ptt::lower_pressed(fresh_adc.raw))),
+                };
+                let same_source = ptt_guard.observe(
+                    input,
+                    scanner.active() || scope.active() || receive_tool_blocks_tx,
+                );
+                signal_voice &= same_source && input.clean;
+                signal_tail &=
+                    input.clean && !input.upper && !input.lower && ptt::side_idle(fresh_adc.raw);
+            }
+            let signal_now = require(time.sample(DWT::cycle_count()), 0xE016);
+            let within_limit =
+                tx_started_at.is_some_and(|start| tx_hold_within_limit(start, signal_now));
             checked(
                 &mut log,
                 tx_tones.step(
                     &mut radio,
-                    now,
-                    physical_held,
-                    allow_tail,
+                    signal_now,
+                    signal_voice && within_limit,
+                    signal_tail && within_limit,
                     dtmf_key,
                     view.tx_tail,
                     view.tx_id,
+                    signaling::mdc_config(view, tx_slot.unwrap_or(view.active_slot)),
                 ),
                 0xE065,
             )
         };
+        // Foreground signaling may perform bounded SPI work. Re-evaluate TOT
+        // against elapsed time rather than the timestamp before that work.
+        let now = require(time.sample(DWT::cycle_count()), 0xE016);
         let mut polled = checked(&mut log, radio.tick(now, tx_held), 0xE056);
         // Drain a small amount of configuration work without LCD/NOR/UART or
         // idle work between register operations. The 2ms admission budget is
@@ -1157,17 +1197,19 @@ fn main() -> ! {
         }
         scope.event(now, spectrum::Event::Ptt(side_activity));
         let update = checked(&mut log, app.sample(now, sample), 0xE032);
-        if let Some(key) = update.pressed.filter(|_| !beacon.active()) {
+        if let Some(key) = update
+            .pressed
+            .filter(|_| !beacon.active() && ui_log_len < ui_log.len())
+        {
             let v = app.status().view;
-            event(
-                &mut log,
-                0x132,
-                [
-                    uv98_handheld_app::key_code(key),
-                    v.screen as u32,
-                    v.channel.map(u32::from).unwrap_or(u32::MAX),
-                ],
-            );
+            // USART6 waits for all 47 bytes to finish. Queue the snapshot at
+            // the event so key repeats do not stall the LCD pass or RF work.
+            ui_log[ui_log_len] = [
+                uv98_handheld_app::key_code(key),
+                v.screen as u32,
+                v.channel.map(u32::from).unwrap_or(u32::MAX),
+            ];
+            ui_log_len += 1;
         }
         // Preserve the explicitly historical trial's selected-A allowlist.
         // The ordinary channel-TX build never changes focus for a PTT press.
@@ -1929,6 +1971,15 @@ fn main() -> ! {
             tuner_view.shortwave_bfo,
         );
         let scope_enabled = tuner_open && tuner_view.shortwave_scope;
+        let tuner_processing = shortwave::Processing {
+            filter: match tuner_view.shortwave_filter {
+                1 => shortwave::AmFilter::Voice3k,
+                2 => shortwave::AmFilter::Narrow1k,
+                _ => shortwave::AmFilter::Wide6k,
+            },
+            soft_mute: tuner_view.shortwave_soft_mute,
+        };
+        tuner_sweep.set_processing(tuner_processing);
         let requested_tuning = tuner_sweep.request(tuning, scope_enabled);
         if scope_enabled {
             checked(&mut log, radio.shortwave_audio(false), 0xE05D);
@@ -1972,23 +2023,13 @@ fn main() -> ! {
                 tuner_session = Some(shortwave::Session::new(now));
                 tuner_function = tuner_mode.tuner_function();
             }
-            tuner_session
-                .as_mut()
-                .unwrap()
-                .set_processing(shortwave::Processing {
-                    filter: match tuner_view.shortwave_filter {
-                        1 => shortwave::AmFilter::Voice3k,
-                        2 => shortwave::AmFilter::Narrow1k,
-                        _ => shortwave::AmFilter::Wide6k,
-                    },
-                    soft_mute: tuner_view.shortwave_soft_mute,
+            let session = tuner_session.as_mut().unwrap();
+            session.set_sweep_mode(scope_enabled);
+            session.set_processing(tuner_processing);
+            let tuner_result =
+                session.tick(&mut tuner_bus, now, requested_tuning, |offset, bytes| {
+                    app.read_shortwave_patch(offset, bytes)
                 });
-            let tuner_result = tuner_session.as_mut().unwrap().tick(
-                &mut tuner_bus,
-                now,
-                requested_tuning,
-                |offset, bytes| app.read_shortwave_patch(offset, bytes),
-            );
             if let Ok(Some(update)) = tuner_result {
                 if let Some(sample) = tuner_sweep.observe(requested_tuning, update) {
                     let window = uv98_radio_runtime::shortwave_scope::Window::around(tuning);
@@ -2158,7 +2199,13 @@ fn main() -> ! {
                         checked(&mut log, radio.stop(), 0xE057);
                         checked(
                             &mut log,
-                            radio.transmit(&calibration, tx, now, true),
+                            radio.transmit_with_mdc(
+                                &calibration,
+                                tx,
+                                now,
+                                true,
+                                signaling::mdc_config(target, slot),
+                            ),
                             0xE059,
                         );
                         tx_slot = Some(slot);
@@ -2461,6 +2508,7 @@ fn main() -> ! {
             && (!scope.active() || scope.listening())
             && telemetry_samples > 0
             && now.wrapping_sub(telemetry_at) >= 500
+            && !app.render_pending()
         {
             if let (Some(p), Some(signal)) = (current, last_signal) {
                 let is_am = p.audio.modulation == Modulation::Am;
@@ -2659,21 +2707,26 @@ fn main() -> ! {
             redraw_since = Some(now);
         }
         // Keep the foreground return to physical PTT polling short during the
-        // TX trial. The bound is on row count; electrical latency is unmeasured.
+        // TX trial. The row cap covers the whole batch, including disjoint
+        // windows. Cycle admission does not interrupt an in-flight transfer.
         let row_budget = if beacon.active() {
             1
-        } else if radio.tx_active_or_starting() {
+        } else if radio.tx_active_or_starting() || relay_active {
             2
         } else if scope.active()
             || current.is_some_and(|profile| profile.audio.modulation == Modulation::Am)
         {
             4
-        } else if app.status().view.entry.is_some() || raw.is_some_and(|(matrix, _)| matrix != 0) {
-            3
         } else {
             6
         };
-        let drawn = checked(&mut log, app.render_step(row_budget), 0xE032);
+        let drawn = checked(
+            &mut log,
+            app.render_batch(row_budget, || {
+                DWT::cycle_count().wrapping_sub(render_start) < LCD_BATCH_ADMISSION_CYCLES
+            }),
+            0xE032,
+        );
         max_render_cycles = max_render_cycles.max(DWT::cycle_count().wrapping_sub(render_start));
         render_rows += u32::from(drawn.rows);
         max_loop_cycles = max_loop_cycles.max(DWT::cycle_count().wrapping_sub(loop_started));
@@ -2689,23 +2742,36 @@ fn main() -> ! {
                 redraw_since = None;
             }
         }
-        if now.wrapping_sub(heartbeat_at) >= 2000
+        // At most one deferred frame in a quiet loop. Fault frames still
+        // take the direct checked/stop path irrespective of these conditions.
+        if drawn.rows == 0
+            && !drawn.pending
+            && raw == Some((0, false))
+            && ptt::side_idle(adc.raw)
             && !radio.tx_active_or_starting()
+            && !relay_active
             && !beacon.active()
         {
-            event(
-                &mut log,
-                0x172,
-                [max_loop_cycles / 48, max_render_cycles / 48, render_rows],
-            );
-            event(&mut log, 0x176, [loop_count, active_loop_us, max_redraw_ms]);
-            max_loop_cycles = 0;
-            max_render_cycles = 0;
-            render_rows = 0;
-            loop_count = 0;
-            active_loop_us = 0;
-            max_redraw_ms = 0;
-            heartbeat_at = now;
+            if let Some(details) = throughput_log.take() {
+                event(&mut log, 0x176, details);
+            } else if ui_log_sent < ui_log_len {
+                event(&mut log, 0x132, ui_log[ui_log_sent]);
+                ui_log_sent += 1;
+            } else if now.wrapping_sub(heartbeat_at) >= 2000 {
+                throughput_log = Some([loop_count, active_loop_us, max_redraw_ms]);
+                event(
+                    &mut log,
+                    0x172,
+                    [max_loop_cycles / 48, max_render_cycles / 48, render_rows],
+                );
+                max_loop_cycles = 0;
+                max_render_cycles = 0;
+                render_rows = 0;
+                loop_count = 0;
+                active_loop_us = 0;
+                max_redraw_ms = 0;
+                heartbeat_at = now;
+            }
         }
         // Debounce, AGC and scan deadlines use the monotonic clock, not loop
         // counts. A fixed 1ms sleep previously delayed every UI batch.

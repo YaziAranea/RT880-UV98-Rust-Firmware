@@ -34,6 +34,15 @@ license does not relicense manufacturer drawings or firmware excerpts.
 Manufacturer firmware is not included in the public release kit; the recovery
 guide links to a separately hosted copy with an exact SHA256.
 
+## MDC1200 protocol references
+
+The Rust MDC1200 encoder and BK4819 driver are independent implementations.
+Protocol framing and known-answer checks reference the Apache-2.0 project
+[OneOfEleven/uv-k5-firmware-custom](https://github.com/OneOfEleven/uv-k5-firmware-custom),
+particularly `mdc1200.c` and `driver/bk4819.c`. No upstream C source is bundled
+or linked. Register documentation and other primary sources are listed in
+[`research/r38/EVIDENCE-RU.md`](research/r38/EVIDENCE-RU.md).
+
 ## Rust dependencies
 
 `Cargo.lock` fixes dependency versions. Each dependency retains the license

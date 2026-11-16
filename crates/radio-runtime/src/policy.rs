@@ -114,7 +114,13 @@ pub fn profile(
     if setting.power > 2 {
         return Err(Error::Power);
     }
-    let (mut rx, mut tx, mut rx_tone, mut tx_tone, width, modulation, mode, tone_mode, option) =
+    let cb = view.cb_for_slot(view.active_slot);
+    if let Some(cb) = cb {
+        if view.mode != Mode::Vfo || view.vfo_10hz != cb.frequency_10hz() {
+            return Err(Error::Frequency);
+        }
+    }
+    let (mut rx, mut tx, mut rx_tone, mut tx_tone, mut width, modulation, mode, tone_mode, option) =
         match view.mode {
             Mode::Vfo => (
                 view.vfo_10hz,
@@ -163,7 +169,22 @@ pub fn profile(
         core::mem::swap(&mut rx, &mut tx);
         core::mem::swap(&mut rx_tone, &mut tx_tone);
     }
-    let modulation = if aviation_band(rx) {
+    let modulation = if let Some(cb) = cb {
+        // CB is an explicit per-A mode; a stale generic A/B override must not
+        // silently turn AM reception into FM transmission on this channel.
+        rx = cb.frequency_10hz();
+        tx = rx;
+        rx_tone = 0;
+        tx_tone = 0;
+        // Use the existing narrow calibration branch for CB FM. This is not
+        // a claim of measured CB deviation or regulatory RF qualification.
+        width = Width::Narrow;
+        if cb.is_am() {
+            Modulation::Am
+        } else {
+            Modulation::Fm
+        }
+    } else if aviation_band(rx) {
         Modulation::Am
     } else {
         setting.modulation.unwrap_or(modulation)
@@ -246,6 +267,10 @@ pub const fn range(f: u32) -> Option<(u32, u32)> {
     }
 }
 pub fn scan_target(view: View) -> Result<scan::Target, Error> {
+    if view.cb_for_slot(view.active_slot).is_some() {
+        // A general +/-500 kHz VFO sweep is not the irregular CB channel grid.
+        return Err(Error::Options);
+    }
     if view.mode == Mode::Channel {
         return Ok(scan::Target::Channels);
     }
@@ -272,6 +297,65 @@ mod tests {
             am_volume: [50, 12],
             squelch_delay: 10,
         }
+    }
+
+    #[test]
+    fn cb_a_is_simplex_explicit_mode_and_does_not_leak_into_b() {
+        use uv98_handheld_ui::{cb::CbChannel, controller::Slot};
+        let mut v = view();
+        v.mode = Mode::Vfo;
+        v.active_slot = Slot::A;
+        v.cb = Some(CbChannel::default());
+        v.vfo_10hz = v.cb.unwrap().frequency_10hz();
+        // Conflicting ordinary VFO settings never escape the CB grid.
+        v.shift_index = 5;
+        v.tx_tone_index = 1;
+        v.reverse = true;
+        let am = profile(
+            v,
+            None,
+            cfg(),
+            Overrides {
+                modulation: Some(Modulation::Fm),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(am.receive.unwrap().frequency_10hz, 2_713_500);
+        assert_eq!(am.receive.unwrap().modulation, Modulation::Am);
+        assert!(am.transmit.is_none());
+        assert_eq!(scan_target(v), Err(Error::Options));
+        v.cb.as_mut().unwrap().am = false;
+        let fm = profile(
+            v,
+            None,
+            cfg(),
+            Overrides {
+                modulation: Some(Modulation::Am),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let tx = fm.transmit.unwrap();
+        assert_eq!(tx.frequency_10hz, 2_713_500);
+        assert_eq!(tx.tone, 0);
+        assert_eq!(tx.width, Width::Narrow);
+        assert_eq!(fm.receive.unwrap().tone, 0);
+        // A's CB metadata is global in View, but B keeps its own normal VFO.
+        v.active_slot = Slot::B;
+        v.vfo_10hz = 43_500_000;
+        v.reverse = false;
+        v.shift_index = 0;
+        let b = profile(v, None, cfg(), Overrides::default()).unwrap();
+        assert_eq!(b.transmit.unwrap().frequency_10hz, 43_500_000);
+        assert_eq!(b.transmit.unwrap().width, Width::Wide);
+        assert_ne!(b.transmit.unwrap().tone, 0);
+        assert!(scan_target(v).is_ok());
+        v.active_slot = Slot::A;
+        assert_eq!(
+            profile(v, None, cfg(), Overrides::default()),
+            Err(Error::Frequency)
+        );
     }
 
     #[test]

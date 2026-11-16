@@ -8,3 +8,4 @@ uv98-spectrum = { path = "../spectrum" }
 uv98-keys = { path = "../keys" }
 uv98-display = { path = "../display" }
 uv98-codeplug = { path = "../codeplug" }
+uv98-signaling = { path = "../signaling" }
