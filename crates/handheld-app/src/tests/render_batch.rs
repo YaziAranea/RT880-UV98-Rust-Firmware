@@ -276,4 +276,33 @@ fn interrupted_outline_and_tx_updates_converge_after_navigation() {
     assert_eq!(capture.borrow().pixels[..28 * render::WIDTH], header);
     assert_eq!(capture.borrow().pixels[b_top + 4], 0x07e0);
     assert_ne!(capture.borrow().pixels[28 * render::WIDTH + 4], 0x07e0);
+    for slot in [Slot::A, Slot::B] {
+        let popup = RadioView {
+            rx_slot: Some(slot),
+            dtmf: render::DtmfReception::new(slot, "11AB*#"),
+            ..receiving_b
+        };
+        app.set_radio_view(popup).unwrap();
+        app.render_batch(7, || true).unwrap();
+        let closed = RadioView {
+            squelch_open: false,
+            rx_slot: None,
+            ..popup
+        };
+        app.set_radio_view(closed).unwrap();
+        assert_matches_complete_frame(&mut app, &capture);
+        app.set_radio_view(popup).unwrap();
+        app.render_batch(1, || true).unwrap();
+        app.set_radio_view(RadioView {
+            state: render::RadioState::Transmitting,
+            tx_slot: Some(slot),
+            ..popup
+        })
+        .unwrap();
+        assert_matches_complete_frame(&mut app, &capture);
+        app.set_radio_view(closed).unwrap();
+        app.render_batch(3, || true).unwrap();
+        app.set_radio_view(idle).unwrap();
+        assert_matches_complete_frame(&mut app, &capture);
+    }
 }
