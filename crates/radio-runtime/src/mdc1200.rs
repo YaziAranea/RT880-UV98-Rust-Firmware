@@ -54,7 +54,7 @@ pub enum Input {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
-    /// Let the ordinary voice/DTMF/Select V path run.
+    /// Let the ordinary voice/DTMF path run.
     Idle,
     Start(PttId),
     Keep,

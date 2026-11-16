@@ -1,4 +1,4 @@
-//! Frequencies/timing: ITU DTMF, FunkTronic FT634a TRC p17 and Wavecom ZVEI1.
+//! DTMF frequencies follow ITU-T Q.23.
 //! BK oscillator words use 10.32444 units/Hz with the radio's 26 MHz reference.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,92 +41,6 @@ pub const fn oscillator_word(hz: u16) -> u16 {
         u16::MAX
     } else {
         word as u16
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Standard {
-    Zvei1,
-    Ccir,
-}
-impl Standard {
-    pub const fn duration_ms(self) -> u32 {
-        match self {
-            Self::Zvei1 => 70,
-            Self::Ccir => 100,
-        }
-    }
-    const fn frequency(self, index: usize) -> u16 {
-        match self {
-            Self::Zvei1 => [
-                2400, 1060, 1160, 1270, 1400, 1530, 1670, 1830, 2000, 2200, 2600,
-            ][index],
-            Self::Ccir => [
-                1981, 1124, 1197, 1275, 1358, 1446, 1540, 1640, 1747, 1860, 2110,
-            ][index],
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct FiveTone {
-    frequencies: [u16; 5],
-    duration_ms: u32,
-    started_ms: u32,
-    active: bool,
-}
-impl FiveTone {
-    /// Numeric ANI only. An arbitrary station name is not a standard 5-tone ID.
-    /// Repeated digits alternate digit/repeat/digit, including runs of 3+ digits.
-    pub fn new(standard: Standard, digits: [u8; 5]) -> Option<Self> {
-        if digits.iter().any(|d| *d > 9) {
-            return None;
-        }
-        let mut frequencies = [0; 5];
-        let mut previous = 255;
-        for (i, digit) in digits.into_iter().enumerate() {
-            let transmitted = if digit == previous { 10 } else { digit };
-            frequencies[i] = standard.frequency(transmitted as usize);
-            previous = transmitted;
-        }
-        Some(Self {
-            frequencies,
-            duration_ms: standard.duration_ms(),
-            started_ms: 0,
-            active: false,
-        })
-    }
-    pub fn from_number(standard: Standard, mut number: u32) -> Option<Self> {
-        if number > 99_999 {
-            return None;
-        }
-        let mut digits = [0; 5];
-        for digit in digits.iter_mut().rev() {
-            *digit = (number % 10) as u8;
-            number /= 10;
-        }
-        Self::new(standard, digits)
-    }
-    pub fn start(&mut self, now_ms: u32) {
-        self.started_ms = now_ms;
-        self.active = true;
-    }
-    pub fn cancel(&mut self) {
-        self.active = false;
-    }
-    pub fn tone(&mut self, now_ms: u32) -> Option<Tone> {
-        let elapsed = now_ms.wrapping_sub(self.started_ms);
-        if !self.active || elapsed >= self.duration_ms * 5 {
-            self.active = false;
-            return None;
-        }
-        Some(Tone {
-            low_hz: self.frequencies[(elapsed / self.duration_ms) as usize],
-            high_hz: None,
-        })
-    }
-    pub const fn active(&self) -> bool {
-        self.active
     }
 }
 
@@ -246,21 +160,6 @@ mod tests {
         // Integer reference words may differ by one oscillator LSB on rounding.
         assert!((i32::from(oscillator_word(697)) - 0x1c1c).abs() <= 1);
         assert!((i32::from(oscillator_word(1477)) - 0x3b91).abs() <= 1);
-    }
-    #[test]
-    fn repeated_digits_alternate_and_deadline_wraps() {
-        let mut seq = FiveTone::new(Standard::Zvei1, [2; 5]).unwrap();
-        seq.start(u32::MAX - 10);
-        for (i, hz) in [1160, 2600, 1160, 2600, 1160].into_iter().enumerate() {
-            assert_eq!(
-                seq.tone((u32::MAX - 10).wrapping_add(i as u32 * 70))
-                    .unwrap()
-                    .low_hz,
-                hz
-            );
-        }
-        assert_eq!(seq.tone((u32::MAX - 10).wrapping_add(350)), None);
-        assert!(FiveTone::from_number(Standard::Ccir, 100000).is_none());
     }
     struct Mock {
         regs: [u16; 128],

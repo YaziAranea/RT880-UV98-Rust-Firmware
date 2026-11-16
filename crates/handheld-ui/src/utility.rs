@@ -337,32 +337,6 @@ pub(super) fn utility_page(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
             centered(row, out, 207, 1, help, color::MUTED);
             centered(row, out, 250, 1, "\x1f109", color::ACCENT);
         }
-        Screen::TxId => {
-            centered(row, out, 62, 2, "\x1f0F9", color::ACCENT);
-            let mut draft = Text::new();
-            if view.tx_id_digits > 0 {
-                let _ = write!(
-                    draft,
-                    "{:0width$}",
-                    view.tx_id_draft,
-                    width = usize::from(view.tx_id_digits)
-                );
-            }
-            for _ in view.tx_id_digits..5 {
-                let _ = draft.write_char('_');
-            }
-            centered(row, out, 112, 4, draft.as_str(), color::TEXT);
-            let mut current = Text::new();
-            if let Some(id) = view.tx_id {
-                let _ = write!(current, "\x1f110 {id:05}");
-            } else {
-                let _ = current.write_str("\x1f01C");
-            }
-            centered(row, out, 166, 2, current.as_str(), color::MUTED);
-            centered(row, out, 212, 1, "\x1f02F", color::ACCENT);
-            centered(row, out, 238, 1, "\x1f016", color::MUTED);
-            centered(row, out, 264, 1, "\x1f039", color::MUTED);
-        }
         _ => {}
     }
 }

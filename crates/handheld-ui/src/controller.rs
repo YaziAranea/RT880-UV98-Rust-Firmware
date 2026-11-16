@@ -117,7 +117,6 @@ pub enum Screen {
     Crossband,
     Gps,
     Aprs,
-    TxId,
     Cb,
     Mdc,
 }
@@ -142,7 +141,6 @@ pub enum Setting {
     BandPreset,
     GpsEnable,
     GpsBaud,
-    TxTail,
     Dtmf,
 }
 
@@ -156,8 +154,6 @@ impl Setting {
             10
         } else if matches!(self, Self::BandPreset) {
             4
-        } else if matches!(self, Self::TxTail) {
-            3
         } else if self.is_tx_tone() {
             TX_CTCSS.len() as u8
         } else if matches!(self, Self::Shift) {
@@ -203,15 +199,13 @@ pub enum MenuItem {
     GpsEnable,
     GpsBaud,
     Aprs,
-    TxTail,
-    TxId,
     Dtmf,
     Cb,
     Mdc,
 }
 
 /// Full catalog for tooling. The visible menu uses `menu_entries`.
-pub const MENU_ITEMS: [MenuItem; 32] = [
+pub const MENU_ITEMS: [MenuItem; 30] = [
     MenuItem::Mode,
     MenuItem::Modulation,
     MenuItem::Channels,
@@ -239,8 +233,6 @@ pub const MENU_ITEMS: [MenuItem; 32] = [
     MenuItem::GpsEnable,
     MenuItem::GpsBaud,
     MenuItem::Aprs,
-    MenuItem::TxTail,
-    MenuItem::TxId,
     MenuItem::Dtmf,
     MenuItem::Cb,
     MenuItem::Mdc,
@@ -314,8 +306,6 @@ pub const fn menu_entries(group: Option<MenuGroup>) -> &'static [MenuEntry] {
             Item(MenuItem::KeyLight),
             Item(MenuItem::About),
             Item(MenuItem::Dtmf),
-            Item(MenuItem::TxTail),
-            Item(MenuItem::TxId),
         ],
     }
 }
@@ -696,10 +686,6 @@ pub struct View {
     pub aprs_callsign: [u8; 6],
     pub aprs_ssid: u8,
     pub dtmf_enabled: bool,
-    pub tx_tail: u8,
-    pub tx_id: Option<u32>,
-    pub tx_id_draft: u32,
-    pub tx_id_digits: u8,
     pub shortwave_scope: bool,
     pub shortwave_filter: u8,
     pub shortwave_soft_mute: bool,
@@ -934,10 +920,6 @@ impl Controller {
                 aprs_callsign: [b' '; 6],
                 aprs_ssid: 0,
                 dtmf_enabled: true,
-                tx_tail: 0,
-                tx_id: None,
-                tx_id_draft: 0,
-                tx_id_digits: 0,
                 shortwave_scope: false,
                 shortwave_filter: 1,
                 shortwave_soft_mute: false,
@@ -1091,7 +1073,6 @@ impl Controller {
             Setting::BandPreset => 0,
             Setting::GpsEnable => u8::from(self.view.gps_enabled),
             Setting::GpsBaud => self.view.gps_baud,
-            Setting::TxTail => self.view.tx_tail,
             Setting::Dtmf => u8::from(self.view.dtmf_enabled),
             Setting::TopKey => {
                 self.view.top_draft = self.view.top_key;
@@ -1137,7 +1118,6 @@ impl Controller {
         match setting {
             Setting::GpsEnable => self.view.gps_enabled = selected != 0,
             Setting::GpsBaud => self.view.gps_baud = selected,
-            Setting::TxTail => self.view.tx_tail = selected,
             Setting::Dtmf => self.view.dtmf_enabled = selected != 0,
             Setting::BandPreset => {
                 // Presets select frequency, modulation and step together. The
@@ -1971,38 +1951,6 @@ impl Controller {
             }
             _ => {}
         }
-        if self.view.screen == Screen::TxId {
-            match event {
-                InputEvent::Hold(Key::Exit) => {
-                    self.view.screen = Screen::Home;
-                    self.cancel_temporary = true;
-                }
-                InputEvent::Short(Key::Exit) => self.view.screen = Screen::Menu,
-                InputEvent::Short(Key::Hash) => {
-                    self.view.tx_id_draft = 0;
-                    self.view.tx_id_digits = 0;
-                }
-                InputEvent::Short(Key::Menu) => {
-                    if self.view.tx_id_digits == 5 {
-                        self.view.tx_id = Some(self.view.tx_id_draft);
-                        self.view.screen = Screen::Menu;
-                    } else if self.view.tx_id_digits == 0 {
-                        self.view.tx_id = None;
-                        self.view.screen = Screen::Menu;
-                    }
-                }
-                InputEvent::Short(key) => {
-                    if let Some(digit) = digit(key) {
-                        if self.view.tx_id_digits < 5 {
-                            self.view.tx_id_draft = self.view.tx_id_draft * 10 + u32::from(digit);
-                            self.view.tx_id_digits += 1;
-                        }
-                    }
-                }
-                _ => {}
-            }
-            return;
-        }
         if self.view.screen == Screen::Gps || self.view.screen == Screen::Aprs {
             match event {
                 InputEvent::Hold(Key::Exit) => {
@@ -2290,7 +2238,6 @@ impl Controller {
                 | Screen::Crossband
                 | Screen::Gps
                 | Screen::Aprs
-                | Screen::TxId
                 | Screen::Cb
                 | Screen::Mdc
         ) {
@@ -3056,15 +3003,9 @@ impl Controller {
                     MenuItem::BandPreset => self.open_setting(Setting::BandPreset),
                     MenuItem::GpsEnable => self.open_setting(Setting::GpsEnable),
                     MenuItem::GpsBaud => self.open_setting(Setting::GpsBaud),
-                    MenuItem::TxTail => self.open_setting(Setting::TxTail),
                     MenuItem::Dtmf => self.open_setting(Setting::Dtmf),
                     MenuItem::Gps => self.view.screen = Screen::Gps,
                     MenuItem::Aprs => self.view.screen = Screen::Aprs,
-                    MenuItem::TxId => {
-                        self.view.tx_id_draft = 0;
-                        self.view.tx_id_digits = 0;
-                        self.view.screen = Screen::TxId;
-                    }
                     MenuItem::Mode => self.open_setting(Setting::Mode),
                     MenuItem::Channels => self.open_channels(bitmap),
                     MenuItem::ChannelDetails => self.view.screen = Screen::ChannelDetails,
@@ -3163,7 +3104,6 @@ impl Controller {
             | Screen::Crossband
             | Screen::Gps
             | Screen::Aprs
-            | Screen::TxId
             | Screen::Cb
             | Screen::Mdc => {}
             Screen::ChannelDetails

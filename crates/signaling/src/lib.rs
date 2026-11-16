@@ -9,4 +9,4 @@ pub mod dtmf_rx;
 pub mod mdc1200;
 pub mod tones;
 
-pub use tones::{dtmf, BkToneSession, FiveTone, Standard, Tone, ToneRegisters};
+pub use tones::{dtmf, BkToneSession, Tone, ToneRegisters};

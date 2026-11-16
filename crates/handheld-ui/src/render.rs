@@ -808,7 +808,7 @@ pub fn dirty_ranges(model: &Model<'_>, previous: Option<View>) -> Result<DirtyRa
                 }
             }
         }
-        Screen::Gps | Screen::Aprs | Screen::TxId => {
+        Screen::Gps | Screen::Aprs => {
             if old != new {
                 dirty.push(48, 296);
             }
@@ -1154,7 +1154,7 @@ fn render_validated_row(
             Screen::Spectrum => spectrum(row, out, model),
             Screen::Shortwave => shortwave(row, out, model),
             Screen::Crossband => crossband(row, out, &model.view),
-            Screen::Gps | Screen::Aprs | Screen::TxId => utility_page(row, out, model),
+            Screen::Gps | Screen::Aprs => utility_page(row, out, model),
             Screen::Cb => cb_grid(row, out, &model.view),
             Screen::Mdc => mdc_page(row, out, &model.view),
         }
@@ -1419,7 +1419,6 @@ fn page_title(view: View) -> &'static str {
         Screen::Crossband => "\x1f097",
         Screen::Gps => "\x1f019",
         Screen::Aprs => "\x1f00A",
-        Screen::TxId => "\x1f0E8",
         Screen::Cb => cb_label(),
         Screen::Mdc if view.active_slot == Slot::A => "MDC1200 A",
         Screen::Mdc => "MDC1200 B",
@@ -2829,7 +2828,6 @@ fn setting_title(setting: Setting) -> &'static str {
         Setting::BandPreset => "\x1f069",
         Setting::GpsEnable => "\x1f0E1",
         Setting::GpsBaud => "\x1f11C",
-        Setting::TxTail => "\x1f111",
         Setting::Dtmf => "\x1f00F",
         Setting::TopKey => "\x1f091",
         Setting::BottomKey => "\x1f092",
@@ -2860,7 +2858,6 @@ fn setting_options(setting: Setting) -> &'static [&'static str] {
             "4800", "9600", "14400", "19200", "38400", "56000", "57600", "115200", "128000",
             "256000",
         ],
-        Setting::TxTail => &["\x1f05E", "5-TONE ZVEI-1", "5-TONE CCIR"],
         Setting::TopKey | Setting::BottomKey => &["\x1f05D", "\x1f09F", "\x1f118", "\x1f123"],
         Setting::TxTone => &[],
         Setting::Shift => &[
@@ -2923,7 +2920,6 @@ fn current_setting_label(model: &Model<'_>, setting: Setting) -> &'static str {
         Setting::BandPreset => return "\x1f05C",
         Setting::GpsEnable => usize::from(model.view.gps_enabled),
         Setting::GpsBaud => usize::from(model.view.gps_baud),
-        Setting::TxTail => usize::from(model.view.tx_tail),
         Setting::Dtmf => usize::from(model.view.dtmf_enabled),
         Setting::TopKey => usize::from(model.view.top_action),
         Setting::BottomKey => usize::from(model.view.bottom_action),
@@ -3059,8 +3055,6 @@ pub fn menu_label(item: MenuItem) -> &'static str {
         MenuItem::GpsEnable => "\x1f0E1",
         MenuItem::GpsBaud => "\x1f11C",
         MenuItem::Aprs => "\x1f00B",
-        MenuItem::TxTail => "\x1f112",
-        MenuItem::TxId => "\x1f0BF",
         MenuItem::Dtmf => "\x1f00E",
         MenuItem::Mode => "\x1f087",
         MenuItem::Channels => "\x1f126",
@@ -4332,10 +4326,6 @@ mod tests {
             aprs_callsign: [b' '; 6],
             aprs_ssid: 0,
             dtmf_enabled: true,
-            tx_tail: 0,
-            tx_id: None,
-            tx_id_draft: 0,
-            tx_id_digits: 0,
             shortwave_scope: false,
             shortwave_filter: 1,
             shortwave_soft_mute: false,

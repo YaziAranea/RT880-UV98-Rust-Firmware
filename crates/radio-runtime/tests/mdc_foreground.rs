@@ -176,8 +176,6 @@ impl Harness {
                 held,
                 allow_tail,
                 key,
-                1, // ZVEI1, competing for the same tail.
-                Some(12345),
                 self.config,
             )
             .unwrap();
@@ -220,7 +218,7 @@ impl Harness {
 }
 
 #[test]
-fn both_edges_are_once_per_real_tx_and_never_share_the_legacy_tail() {
+fn both_edges_are_once_per_real_tx() {
     let mut h = Harness::keyed(3);
     assert_eq!(h.bus.reg(0x30) & (MIC_ADC | TX_DSP), TX_DSP);
     assert_eq!(h.bus.fifo_words(), 0);
@@ -242,7 +240,6 @@ fn both_edges_are_once_per_real_tx_and_never_share_the_legacy_tail() {
     h.advance_until_air(false, true);
     assert_eq!(h.bus.reg(0x59), 0x0838);
     assert_eq!(h.bus.fifo_words(), 22);
-    assert!(!h.foreground.tail_active());
     assert!(h.finish_air(200, false, true).tx_ended);
     h.assert_off();
 }

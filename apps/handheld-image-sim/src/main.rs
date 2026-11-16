@@ -2543,17 +2543,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tap_request(&mut app, &mut now, Key::Menu),
         Some(Request::SendAprs)
     );
-    menu(&mut app, &mut now, MenuItem::TxId);
-    digits(&mut app, &mut now, "01234");
-    frames.push(capture(
-        &mut app,
-        &panel,
-        output,
-        "84-SIMULATED-selectv-id.png",
-        milliseconds.get(),
-    )?);
-    tap(&mut app, &mut now, Key::Menu);
-    assert_eq!(app.status().view.tx_id, Some(1234));
     home(&mut app, &mut now);
     let (memory, _display) = app.into_parts();
     assert!(!memory.selected, "NOR CS left selected");
