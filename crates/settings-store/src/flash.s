@@ -76,10 +76,7 @@ __uv98_flash_op:
     str     r1, [r0]                /* program one aligned word */
     b       .Lwait
 .Lsector:
-    str     r0, [r5, #0x14]
-    ldr     r1, [r5, #0x14]
-    cmp     r1, r0
-    bne     .Lbad_mode
+    str     r0, [r5, #0x14]         /* FLASH_ADDR is write-only (RM §5.8.6) */
     movs    r1, #0x42               /* SECERS | ERSTR */
     str     r1, [r5, #0x10]
 .Lwait:
