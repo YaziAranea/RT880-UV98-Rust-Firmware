@@ -8,14 +8,16 @@
 .syntax unified
 .thumb
 .macro diag_load reg, value
+    /* MOVW zero-extends the immediate without changing flags. */
     movw \reg, #(\value & 0xffff)
-    movt \reg, #((\value >> 16) & 0xffff)
+    .if ((\value >> 16) & 0xffff) != 0
+        movt \reg, #((\value >> 16) & 0xffff)
+    .endif
 .endm
 
 .macro diag_send_r0
-    movw r3, #:lower16:.Ltx_return\@
-    movt r3, #:upper16:.Ltx_return\@
-    orr r3, r3, #1
+    /* The nearby continuation already includes the Thumb bit for BX r3. */
+    adr.w r3, .Ltx_return\@+1
     b.w __diag_uart_byte
 .Ltx_return\@:
 .endm
