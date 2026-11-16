@@ -10,11 +10,13 @@
 
 [English](README.md) · [Deutsch](README.de.md) · **Русский**
 
-[**Выпуск R41**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r41) · [**Начать здесь — бэкап и установка**](docs/GETTING-STARTED.ru.md)
+[**Выпуск R42**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r42) · [**Начать здесь — бэкап и установка**](docs/GETTING-STARTED.ru.md)
 
-[**CPS 0.8.0 для Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r41/UV98-CPS-0.8.0.zip) · BIN R41 [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r41/UV98-r41-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r41/UV98-r41-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r41/UV98-r41-de.bin)
+[**CPS 0.8.0 для Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r42/UV98-CPS-0.8.0.zip) · BIN R42 [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r42/UV98-r42-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r42/UV98-r42-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r42/UV98-r42-de.bin)
 
-> **Экспериментальная прошивка для исследованного профиля платы AT32F423.** Сначала проверьте совместимость платы. Перед записью подготовьте в CPS персональный образ R41 по проверенному NOR-бэкапу своей станции. CPS привяжет образ к вашим заводским калибровкам. [Инструкция резервирования и подготовки](docs/GETTING-STARTED.ru.md#4-проверьте-совместимость-перед-прошивкой)
+> **Экспериментальная прошивка для исследованного профиля платы AT32F423.** Сначала проверьте совместимость платы. Перед записью подготовьте в CPS персональный образ R42 по проверенному NOR-бэкапу своей станции. CPS привяжет образ к вашим заводским калибровкам. [Инструкция резервирования и подготовки](docs/GETTING-STARTED.ru.md#4-проверьте-совместимость-перед-прошивкой)
+
+В R42 добавлена «СИСТЕМА / TX → МИКРОФОН»: 0–31, MENU сохраняет, EXIT отменяет. 0 — минимум, не отключение. Имя, Roger и усиление сохраняются во внутренней Flash; перепрошивка стирает журнал. В КВ-обзоре короткое `#` выбирает 8/16/32 измерения, по умолчанию 8. CPS0.8 не менялась; скачивать её повторно не нужно. [Проверка R42](R42-NOTES-RU.txt).
 
 ## CPS 0.8.0 для Windows
 
@@ -30,34 +32,34 @@
 
 <table>
 <tr>
-<td align="center"><img src="docs/images/r41/ru-home.png" width="240" alt="Две частоты A/B и шкалы уровня сигнала"><br><b>Каналы и VFO A/B</b></td>
-<td align="center"><img src="docs/images/r41/ru-spectrum.png" width="240" alt="Цветной спектр диапазона и водопад"><br><b>Спектр и водопад</b></td>
+<td align="center"><img src="docs/images/r42/ru-home.png" width="240" alt="Две частоты A/B и шкалы уровня сигнала"><br><b>Каналы и VFO A/B</b></td>
+<td align="center"><img src="docs/images/r42/ru-spectrum.png" width="240" alt="Цветной спектр диапазона и водопад"><br><b>Спектр и водопад</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r41/ru-hf.png" width="240" alt="КВ-приёмник с обзором RSSI"><br><b>Инструменты КВ</b></td>
-<td align="center"><img src="docs/images/r41/ru-menu.png" width="240" alt="Русское меню рации"><br><b>Русское меню R41</b></td>
+<td align="center"><img src="docs/images/r42/ru-hf.png" width="240" alt="КВ-приёмник с обзором RSSI"><br><b>Инструменты КВ</b></td>
+<td align="center"><img src="docs/images/r42/ru-menu.png" width="240" alt="Русское меню рации"><br><b>Русское меню R42</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r41/ru-tx-b.png" width="240" alt="Красная рамка TX на VFO B при выбранном VFO A"><br><b>PTT B при выбранной строке A</b></td>
-<td align="center"><img src="docs/images/r41/ru-battery-low.png" width="240" alt="Индикация низкого заряда на главном экране"><br><b>Низкий заряд</b></td>
+<td align="center"><img src="docs/images/r42/ru-tx-b.png" width="240" alt="Красная рамка TX на VFO B при выбранном VFO A"><br><b>PTT B при выбранной строке A</b></td>
+<td align="center"><img src="docs/images/r42/ru-battery-low.png" width="240" alt="Индикация низкого заряда на главном экране"><br><b>Низкий заряд</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r41/ru-cb-grid.png" width="240" alt="40 каналов CB с выбранным каналом 15 AM"><br><b>Сетка CB</b></td>
-<td align="center"><img src="docs/images/r41/ru-mdc.png" width="240" alt="Числовой MDC1200 для слота B"><br><b>MDC1200</b></td>
+<td align="center"><img src="docs/images/r42/ru-cb-grid.png" width="240" alt="40 каналов CB с выбранным каналом 15 AM"><br><b>Сетка CB</b></td>
+<td align="center"><img src="docs/images/r42/ru-mdc.png" width="240" alt="Числовой MDC1200 для слота B"><br><b>MDC1200</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r41/ru-dtmf-rx.png" width="240" alt="Входящий DTMF"><br><b>Входящий DTMF</b></td>
-<td align="center"><img src="docs/images/r41/ru-radio-name.png" width="240" alt="Редактор имени рации R41"><br><b>Ввод имени рации</b></td>
+<td align="center"><img src="docs/images/r42/ru-dtmf-rx.png" width="240" alt="Входящий DTMF"><br><b>Входящий DTMF</b></td>
+<td align="center"><img src="docs/images/r42/ru-radio-name.png" width="240" alt="Редактор имени рации R42"><br><b>Ввод имени рации</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r41/ru-radio-name-rx.png" width="240" alt="Имя рации, принятое после PTT"><br><b>Принятое имя</b></td>
-<td align="center"><img src="docs/images/r41/ru-cb-tx-a.png" width="240" alt="Экран передачи CB для VFO A"><br><b>CB TX по A</b></td>
+<td align="center"><img src="docs/images/r42/ru-radio-name-rx.png" width="240" alt="Имя рации, принятое после PTT"><br><b>Принятое имя</b></td>
+<td align="center"><img src="docs/images/r42/ru-cb-tx-a.png" width="240" alt="Экран передачи CB для VFO A"><br><b>CB TX по A</b></td>
 </tr>
 </table>
 
-*Кадры R41 из Rust-рендерера. Сигналы и показания смоделированы.*
+*Кадры R42 из Rust-рендерера. Сигналы и показания смоделированы.*
 
-## Возможности R41
+## Возможности R42
 
 - **Имя рации после PTT.** В меню **СИСТЕМА / TX** задайте **ИМЯ РАЦИИ** и включите **ИМЯ ПОСЛЕ PTT**. Имя содержит до 16 латинских заглавных букв, цифр и пробелов. В эфире используется штатный формат Roger RT880 1.16. Имя и переключатель сохраняются после выключения. Полная перепрошивка очищает внутренний журнал, после чего используются допустимые значения из стока. [Ввод и сохранение имени](docs/GETTING-STARTED.ru.md#имя-рации-после-ptt)
 - **Индикатор мощности.** Крупная красная **L**, жёлтая **M** или зелёная **H** показывает установленную ступень мощности передающего слота, в том числе B при выбранной строке A.
@@ -66,10 +68,10 @@
 - **Меню и индикация A/B.** Выбранный пункт меню выделяется заливкой. Зелёная рамка отмечает принимающий слот A/B, красная — передающий и имеет приоритет. Верхняя полоска RX убрана.
 - **Приём DTMF.** При обычном FM-приёме с открытым звуком рация показывает до 16 символов, распознанных BK4819, на главном экране. Окно закрывается через 3 секунды после последнего символа. Декодер отключён в AM, спектре, КВ и кроссбенде. DTMF с клавиатуры при PTT сохранён. Select V, ZVEI и CCIR удалены.
 - **Числовой MDC1200.** Для каждого слота отдельно задаются 16-битный PTT-ID и момент отправки. Если включена передача имени, оно занимает место числовой посылки в конце TX. Отправка числового ID в начале сохраняется по своей настройке. [Настройка числового MDC1200](docs/GETTING-STARTED.ru.md#числовой-mdc1200)
-- **КВ AM.** На Si4732 смена фильтра 6, 3 или 1 кГц и soft mute при прослушивании сохраняет текущую частоту. Водопад проходит по 32 частотам и перерисовывает изменившиеся строки.
+- **КВ AM.** На Si4732 смена фильтра 6, 3 или 1 кГц и soft mute при прослушивании сохраняет текущую частоту. Водопад проходит по 8, 16 или 32 частотам (по умолчанию 8; короткое # в обзоре меняет детализацию) и перерисовывает изменившиеся строки.
 - **Приём после PTT.** После отпускания PTT настройка приёмника получает приоритет. Захват короткого ответа репитера предстоит проверить на рации.
 
-[Заметки R41](R41-NOTES-RU.txt) · [Проверка PA5 в отдельном RX-only образе](research/r41/PA5-TEST-RU.txt)
+[Заметки R42](R42-NOTES-RU.txt) · [Проверка PA5 в отдельном RX-only образе](research/r42/PA5-TEST-RU.txt)
 
 ## Что есть в проекте
 
@@ -90,13 +92,13 @@
 1. Оставьте стоковую прошивку и сохраните исходный `.880dmf` / `.98pdmf` своей станции.
 2. Через нашу CPS считайте **калибровки**, **4 МиБ NOR** и **секции настроек/каналов**. Каждая операция читает данные дважды и сравнивает их.
 3. Сохраните целые папки снимков и подходящий заводской BIN в двух местах. Публичный комплект не содержит прошивку производителя.
-4. Проверьте совместимость платы, затем подготовьте в CPS персональный образ R41 по проверенному снимку NOR. Компилятор Rust для этого не нужен.
+4. Проверьте совместимость платы, затем подготовьте в CPS персональный образ R42 по проверенному снимку NOR. Компилятор Rust для этого не нужен.
 
 В [пошаговой инструкции](docs/GETTING-STARTED.ru.md) указаны кнопки CPS, ожидаемые файлы, проверка результата и откат. **Дамп NOR 4 МиБ не содержит прошивку MCU и загрузчик.**
 
 ## Текущие границы
 
-Для R41 предстоит проверить на рации передачу имени и его сохранение после выключения, скорость экрана, возврат приёма после PTT, декодирование DTMF и смену КВ-фильтров.
+Для R42 предстоит проверить на рации передачу имени и его сохранение после выключения, скорость экрана, возврат приёма после PTT, декодирование DTMF и смену КВ-фильтров.
 
 - Dual Watch поочерёдно слушает A/B. Одновременного звука двух BK4819 нет.
 - КВ-водопад перестраивает единственный Si4732 и прерывает звук на время обзора. Это не FFT.

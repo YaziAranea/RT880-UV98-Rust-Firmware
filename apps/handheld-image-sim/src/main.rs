@@ -508,7 +508,7 @@ fn capture_r38_public(
     output: &Path,
     code: &str,
     modeled_delay_ms: u64,
-) -> Result<[serde_json::Value; 5], Box<dyn std::error::Error>> {
+) -> Result<[serde_json::Value; 6], Box<dyn std::error::Error>> {
     let original_a_frequency = app.status().view.vfo_10hz;
     let original_b_frequency = app.peer_radio_selection().0.vfo_10hz;
     if app.status().view.bindings[5] != ShortcutAction::Cb {
@@ -671,7 +671,21 @@ fn capture_r38_public(
         modeled_delay_ms,
     )?;
     app.set_radio_view(before_name).unwrap();
-    Ok([cb_grid, tx_a, mdc, name_editor, name_popup])
+    home(app, now);
+    let original_gain = app.status().view.microphone_gain;
+    open_setting(app, now, MenuItem::MicrophoneGain, Setting::MicrophoneGain);
+    choose_setting(app, now, 31);
+    let microphone = capture(
+        app,
+        panel,
+        output,
+        &format!("{code}-microphone.png"),
+        modeled_delay_ms,
+    )?;
+    assert_eq!(app.status().view.microphone_gain, original_gain);
+    tap(app, now, Key::Exit);
+    home(app, now);
+    Ok([cb_grid, tx_a, mdc, name_editor, name_popup, microphone])
 }
 
 fn hex(bytes: &[u8]) -> String {

@@ -3015,6 +3015,7 @@ fn main() -> ! {
         {
             (4, LCD_BATCH_ADMISSION_CYCLES)
         } else if app.status().view.screen == Screen::Menu
+            && !scanner.active()
             && raw.is_some_and(|(_, ptt)| !ptt)
             && ptt::side_idle(adc.raw)
         {

@@ -1,8 +1,8 @@
 use super::*;
 
 #[test]
-fn held_menu_key_drains_filled_selection_in_five_receive_batches() {
-    fn navigate(batched: bool) -> (u16, usize, Vec<u16>) {
+fn menu_batch_can_drain_both_filled_rows_without_extra_foreground_passes() {
+    fn navigate(budget: u16) -> (u16, usize, Vec<u16>) {
         let capture = Rc::new(RefCell::new(CapturedFrame::new()));
         let panel = Panel {
             capture: Some(capture.clone()),
@@ -25,14 +25,9 @@ fn held_menu_key_drains_filled_selection_in_five_receive_batches() {
         let mut rows = 0;
         let mut polls = 0;
         while app.render_pending() {
-            let progress = if batched {
-                app.render_batch(16, || true)
-            } else {
-                app.render_batch(6, || true)
-            }
-            .unwrap();
+            let progress = app.render_batch(budget, || true).unwrap();
             assert!(progress.rows > 0);
-            assert!(progress.rows <= if batched { 16 } else { 6 });
+            assert!(progress.rows <= budget);
             rows += progress.rows;
             polls += 1;
         }
@@ -42,11 +37,15 @@ fn held_menu_key_drains_filled_selection_in_five_receive_batches() {
         (rows, polls, pixels)
     }
 
-    let (old_rows, old_polls, old_frame) = navigate(false);
-    let (new_rows, new_polls, new_frame) = navigate(true);
+    let (old_rows, old_polls, old_frame) = navigate(6);
+    let (new_rows, new_polls, new_frame) = navigate(16);
     assert_eq!((old_rows, old_polls), (67, 12));
     assert_eq!((new_rows, new_polls), (67, 5));
     assert_eq!(old_frame, new_frame);
+    let (menu_rows, menu_batches, menu_frame) = navigate(67);
+    assert_eq!((menu_rows, menu_batches), (67, 1));
+    assert_eq!(new_frame, menu_frame);
+    // This counts admitted windows, not elapsed time on a physical LCD.
 }
 
 #[test]

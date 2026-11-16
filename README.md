@@ -10,11 +10,13 @@ Independent A/B operation, a colour spectrum display, shortwave tools and access
 
 **English** · [Deutsch](README.de.md) · [Русский](README.ru.md)
 
-[**R41 release**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r41) · [**Start here — backup and installation**](docs/GETTING-STARTED.en.md)
+[**R42 release**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r42) · [**Start here — backup and installation**](docs/GETTING-STARTED.en.md)
 
-[**CPS 0.8.0 for Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r41/UV98-CPS-0.8.0.zip) · R41 BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r41/UV98-r41-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r41/UV98-r41-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r41/UV98-r41-de.bin)
+[**CPS 0.8.0 for Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r42/UV98-CPS-0.8.0.zip) · R42 BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r42/UV98-r42-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r42/UV98-r42-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r42/UV98-r42-de.bin)
 
-> **Experimental firmware for the investigated AT32F423 board profile.** Verify board compatibility. Use CPS to prepare a personal R41 image from your radio's verified NOR backup before flashing. CPS binds the image to your factory calibration. [Backup and preparation guide](docs/GETTING-STARTED.en.md#4-check-compatibility-before-flashing)
+> **Experimental firmware for the investigated AT32F423 board profile.** Verify board compatibility. Use CPS to prepare a personal R42 image from your radio's verified NOR backup before flashing. CPS binds the image to your factory calibration. [Backup and preparation guide](docs/GETTING-STARTED.en.md#4-check-compatibility-before-flashing)
+
+R42 adds SYSTEM / TX → MIC GAIN: 0–31, MENU saves and EXIT cancels. 0 is minimum sensitivity, not mute. Name, Roger and gain share internal Flash storage; a full firmware update erases it. Short `#` in HF scope selects 8/16/32 measurements, with 8 by default. CPS0.8 is unchanged; no new download is required. [R42 device checks (Russian)](R42-NOTES-RU.txt).
 
 ## Windows CPS 0.8.0
 
@@ -30,34 +32,34 @@ In **Firmware → Select BIN…**, open a compatible application BIN with a cali
 
 <table>
 <tr>
-<td align="center"><img src="docs/images/r41/en-home.png" width="240" alt="English dual A/B frequency screen with signal meters"><br><b>A/B channels and VFOs</b></td>
-<td align="center"><img src="docs/images/r41/en-spectrum.png" width="240" alt="Colour frequency spectrum and waterfall"><br><b>Spectrum and waterfall</b></td>
+<td align="center"><img src="docs/images/r42/en-home.png" width="240" alt="English dual A/B frequency screen with signal meters"><br><b>A/B channels and VFOs</b></td>
+<td align="center"><img src="docs/images/r42/en-spectrum.png" width="240" alt="Colour frequency spectrum and waterfall"><br><b>Spectrum and waterfall</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r41/en-hf.png" width="240" alt="Shortwave receiver with an RSSI waterfall"><br><b>Shortwave tools</b></td>
-<td align="center"><img src="docs/images/r41/en-menu.png" width="240" alt="English radio menu"><br><b>English menu in R41</b></td>
+<td align="center"><img src="docs/images/r42/en-hf.png" width="240" alt="Shortwave receiver with an RSSI waterfall"><br><b>Shortwave tools</b></td>
+<td align="center"><img src="docs/images/r42/en-menu.png" width="240" alt="English radio menu"><br><b>English menu in R42</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r41/en-tx-b.png" width="240" alt="Red TX outline on VFO B while VFO A is selected"><br><b>PTT B with A selected</b></td>
-<td align="center"><img src="docs/images/r41/en-battery-low.png" width="240" alt="Low battery indication on the main screen"><br><b>Low battery</b></td>
+<td align="center"><img src="docs/images/r42/en-tx-b.png" width="240" alt="Red TX outline on VFO B while VFO A is selected"><br><b>PTT B with A selected</b></td>
+<td align="center"><img src="docs/images/r42/en-battery-low.png" width="240" alt="Low battery indication on the main screen"><br><b>Low battery</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r41/en-cb-grid.png" width="240" alt="40-channel CB grid at channel 15 AM"><br><b>CB grid</b></td>
-<td align="center"><img src="docs/images/r41/en-mdc.png" width="240" alt="Numeric MDC1200 settings for slot B"><br><b>MDC1200</b></td>
+<td align="center"><img src="docs/images/r42/en-cb-grid.png" width="240" alt="40-channel CB grid at channel 15 AM"><br><b>CB grid</b></td>
+<td align="center"><img src="docs/images/r42/en-mdc.png" width="240" alt="Numeric MDC1200 settings for slot B"><br><b>MDC1200</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r41/en-dtmf-rx.png" width="240" alt="Incoming DTMF"><br><b>Incoming DTMF</b></td>
-<td align="center"><img src="docs/images/r41/en-radio-name.png" width="240" alt="R41 radio-name editor"><br><b>Radio-name entry</b></td>
+<td align="center"><img src="docs/images/r42/en-dtmf-rx.png" width="240" alt="Incoming DTMF"><br><b>Incoming DTMF</b></td>
+<td align="center"><img src="docs/images/r42/en-radio-name.png" width="240" alt="R42 radio-name editor"><br><b>Radio-name entry</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r41/en-radio-name-rx.png" width="240" alt="Radio name received after PTT"><br><b>Received name</b></td>
-<td align="center"><img src="docs/images/r41/en-cb-tx-a.png" width="240" alt="CB transmit display for VFO A"><br><b>CB TX on A</b></td>
+<td align="center"><img src="docs/images/r42/en-radio-name-rx.png" width="240" alt="Radio name received after PTT"><br><b>Received name</b></td>
+<td align="center"><img src="docs/images/r42/en-cb-tx-a.png" width="240" alt="CB transmit display for VFO A"><br><b>CB TX on A</b></td>
 </tr>
 </table>
 
-*R41 screenshots from the Rust renderer. Signals and readings are simulated.*
+*R42 screenshots from the Rust renderer. Signals and readings are simulated.*
 
-## R41 features
+## R42 features
 
 - **Radio name after PTT.** Set **RADIO NAME** and **NAME AFTER PTT** in **SYSTEM / TX**. The name uses up to 16 uppercase Latin letters, digits and spaces. The radio sends it in the stock RT880 1.16 Roger format when enabled. These settings survive power-off. A full firmware update clears the internal journal, and startup then loads usable stock settings. [Name entry and saving](docs/GETTING-STARTED.en.md#radio-name-after-ptt)
 - **Power indicator.** A large red **L**, yellow **M** or green **H** indicates the configured power of the transmitting slot, including B while A is selected.
@@ -66,10 +68,10 @@ In **Firmware → Select BIN…**, open a compatible application BIN with a cali
 - **Menu and A/B status.** A solid fill highlights the selected menu item. A green outline marks the receiving A/B slot. The transmitting slot has a red outline, which takes priority. RX no longer uses the top status strip.
 - **DTMF reception.** On ordinary BK4819 FM reception with audio open, the home-screen popup keeps up to 16 symbols for three seconds after the last detected symbol. AM, spectrum, shortwave and crossband modes do not use this decoder. Keypad DTMF during PTT is still available. Select V, ZVEI and CCIR were removed.
 - **Numeric MDC1200.** Each slot has its own 16-bit PTT ID and timing. When name transmission is enabled, the name takes the end-of-TX slot. Numeric start-of-TX transmission follows its own setting. [Numeric MDC1200 controls](docs/GETTING-STARTED.en.md#numeric-mdc1200)
-- **Shortwave AM.** During listening on Si4732, changing the 6, 3 or 1 kHz filter or soft mute keeps the current frequency. The waterfall steps through 32 frequencies and redraws changed rows.
+- **Shortwave AM.** During listening on Si4732, changing the 6, 3 or 1 kHz filter or soft mute keeps the current frequency. The waterfall steps through 8, 16 or 32 frequencies (8 by default; short # in scope changes resolution) and redraws changed rows.
 - **RX after PTT.** The firmware prioritizes receiver setup after PTT release. Pickup of a short repeater reply still needs testing on the radio.
 
-[R41 notes (Russian)](R41-NOTES-RU.txt) · [Separate RX-only PA5 audio test guide (Russian)](research/r41/PA5-TEST-RU.txt)
+[R42 notes (Russian)](R42-NOTES-RU.txt) · [Separate RX-only PA5 audio test guide (Russian)](research/r42/PA5-TEST-RU.txt)
 
 ## What is included
 
@@ -90,13 +92,13 @@ The stock “800 MHz” mode starts at **840 MHz**. The preset uses 850.000 MHz.
 1. Keep the radio on its stock firmware and save its original `.880dmf` / `.98pdmf` file.
 2. Use our CPS to save **calibration**, **4 MiB NOR** and **settings/channel sections**. Each operation reads twice and compares the results.
 3. Keep the complete snapshot folders and a matching factory recovery file in two places. The public package does not include the manufacturer's firmware.
-4. Check board compatibility, then prepare your personal R41 image in CPS from the verified NOR snapshot. No Rust compiler is needed for this step.
+4. Check board compatibility, then prepare your personal R42 image in CPS from the verified NOR snapshot. No Rust compiler is needed for this step.
 
 The [file checklist and step-by-step guide](docs/GETTING-STARTED.en.md) names every CPS button and expected file. **The 4 MiB NOR backup is not an MCU firmware or bootloader dump.**
 
 ## Current limits
 
-R41 still needs on-radio checks of name signalling and saving across power-off, display timing, reception after PTT, DTMF decoding and shortwave filter changes.
+R42 still needs on-radio checks of name signalling and saving across power-off, display timing, reception after PTT, DTMF decoding and shortwave filter changes.
 
 - Dual Watch alternates the receiver. Simultaneous audio from two BK4819 receivers is not implemented.
 - The HF waterfall retunes one Si4732 and interrupts audio during the sweep; it is not an FFT.
