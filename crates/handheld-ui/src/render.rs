@@ -536,11 +536,12 @@ pub fn render_rows<B: DisplayBus, D: Delay>(
         .begin_window(0, start_y, WIDTH as u16, end_y - start_y)
         .map_err(RenderError::Display)?;
     let mut pixels = [0u16; WIDTH];
+    let mut menu_label = None;
     for y in start_y..end_y {
         // The immutable model and complete row interval were checked before
         // begin_window. Do not walk cached lists or recheck numeric entry for
         // every row in an incremental batch.
-        render_validated_row(y, &mut pixels, model);
+        render_validated_row(y, &mut pixels, model, &mut menu_label);
         display
             .write_pixels(&pixels)
             .map_err(RenderError::Display)?;
@@ -1107,13 +1108,18 @@ pub fn render_row(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) -> Result
         return Err(Error::RowOutOfRange { row });
     }
     validate(model)?;
-    render_validated_row(row, out, model);
+    render_validated_row(row, out, model, &mut None);
     Ok(())
 }
 
 /// Internal fast path: caller has validated the immutable model and row range.
 #[inline(never)]
-fn render_validated_row(row: u16, pixels: &mut [u16; WIDTH], model: &Model<'_>) {
+fn render_validated_row(
+    row: u16,
+    pixels: &mut [u16; WIDTH],
+    model: &Model<'_>,
+    menu_label: &mut Option<MenuLabel>,
+) {
     let mut row_context = Row {
         pixels,
         language: model.view.language(),
@@ -1131,7 +1137,7 @@ fn render_validated_row(row: u16, pixels: &mut [u16; WIDTH], model: &Model<'_>) 
     } else if row < 296 {
         match model.view.screen {
             Screen::Home => unreachable!(),
-            Screen::Menu => menu(row, out, model),
+            Screen::Menu => menu(row, out, model, menu_label),
             Screen::Channels => channels(row, out, model),
             Screen::ChannelDetails => details(row, out, model),
             Screen::Step => steps(row, out, model),
@@ -3092,7 +3098,20 @@ pub fn menu_group_label(group: MenuGroup) -> &'static str {
     }
 }
 
-fn menu(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
+/// Consecutive scanlines of one immutable LCD window reuse the decoded
+/// label and fitted font scale. A new window starts with an empty cache.
+struct MenuLabel {
+    index: usize,
+    message: locale::Message,
+    scale: u16,
+}
+
+fn menu(
+    row: u16,
+    out: &mut Row<'_>,
+    model: &Model<'_>,
+    label: &mut Option<MenuLabel>,
+) {
     let entries = menu_entries(model.view.menu_group);
     if (LIST_Y..LIST_Y + LIST_ROWS as u16 * LIST_ROW_HEIGHT).contains(&row) {
         let offset = (row - LIST_Y) / LIST_ROW_HEIGHT;
@@ -3136,18 +3155,24 @@ fn menu(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
         let ink = item_color(selected);
         let icon_ink = if selected { ink } else { color::ACCENT };
         symbol(row, out, 20, y + 7, glyph, icon_ink);
-        text(
-            row,
-            out,
-            44,
-            y + 8,
-            2,
-            match entry {
-                MenuEntry::Item(item) => menu_label(item),
-                MenuEntry::Group(group) => menu_group_label(group),
-            },
-            ink,
-        );
+        if row >= y + 8 && row < y + 22 {
+            if label.as_ref().is_none_or(|cached| cached.index != index) {
+                let value = match entry {
+                    MenuEntry::Item(item) => menu_label(item),
+                    MenuEntry::Group(group) => menu_group_label(group),
+                };
+                let message = locale::resolve(value, out.language);
+                let scale = fitting_scale(message.as_str(), 2, WIDTH - 44);
+                *label = Some(MenuLabel {
+                    index,
+                    message,
+                    scale,
+                });
+            }
+            if let Some(cached) = label {
+                raw_text(row, out, 44, y + 8, cached.scale, cached.message.as_str(), ink);
+            }
+        }
         if matches!(entry, MenuEntry::Group(_)) {
             text(row, out, 216, y + 8, 2, ">", ink);
         }
@@ -4786,7 +4811,7 @@ mod tests {
                 (0..HEIGHT)
                     .map(|y| {
                         let mut row = [0; WIDTH];
-                        render_validated_row(y, &mut row, model);
+                        render_validated_row(y, &mut row, model, &mut None);
                         row
                     })
                     .collect()

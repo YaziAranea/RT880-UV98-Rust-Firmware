@@ -208,3 +208,72 @@ fn pending_home_pass_paints_one_radio_snapshot_until_telemetry_repair() {
     assert_ne!(capture.borrow().pixels, baseline);
     assert_matches_complete_frame(&mut app, &capture);
 }
+
+#[test]
+fn interrupted_outline_and_tx_updates_converge_after_navigation() {
+    let capture = Rc::new(RefCell::new(CapturedFrame::new()));
+    let panel = Panel {
+        capture: Some(capture.clone()),
+        ..Panel::default()
+    };
+    let writes = panel.observed_writes.clone();
+    let mut app = App::new(
+        Memory::new(),
+        panel,
+        NoDelay,
+        Timing::new(30, 600).unwrap(),
+        PRESERVED_CALIBRATION_SHA256,
+    );
+    app.start(0).unwrap();
+    app.select_slot(Slot::A).unwrap();
+    let idle = RadioView {
+        state: render::RadioState::Receiving,
+        ..RadioView::OFF
+    };
+    app.set_radio_view(idle).unwrap();
+    while app.render_pending() {
+        app.render_batch(16, || true).unwrap();
+    }
+    let header = capture.borrow().pixels[..28 * render::WIDTH].to_vec();
+    let b_top = usize::from(render::home_slot_rows(Slot::B).0) * render::WIDTH;
+    let receiving_b = RadioView {
+        rx_slot: Some(Slot::B),
+        squelch_open: true,
+        ..idle
+    };
+    let reads = app.nor.reads;
+    let before = writes.get();
+    app.set_radio_view(receiving_b).unwrap();
+    assert_eq!(app.pending_outlines.count_ones(), 4);
+    assert_eq!(app.render_batch(1, || true).unwrap().rows, 1);
+    assert_eq!(writes.get() - before, 11 + 232 * 2);
+    assert_eq!(capture.borrow().pixels[b_top + 4], 0x07e0);
+
+    app.set_radio_view(RadioView {
+        state: render::RadioState::Transmitting,
+        tx_slot: Some(Slot::B),
+        ..receiving_b
+    })
+    .unwrap();
+    assert_eq!(app.render_batch(2, || true).unwrap().rows, 2);
+    assert_eq!(capture.borrow().pixels[b_top + 4], 0x001f);
+
+    app.set_radio_view(receiving_b).unwrap();
+    app.set_radio_view(RadioView {
+        rx_slot: Some(Slot::A),
+        ..receiving_b
+    })
+    .unwrap();
+    app.render_batch(3, || true).unwrap();
+    event(&mut app, InputEvent::Short(Key::Menu));
+    assert_eq!(app.pending_outlines, 0);
+    app.render_batch(12, || true).unwrap();
+    event(&mut app, InputEvent::Short(Key::Exit));
+    app.set_radio_view(receiving_b).unwrap();
+    assert_matches_complete_frame(&mut app, &capture);
+    assert_eq!(app.status().view.active_slot, Slot::A);
+    assert_eq!(app.nor.reads, reads);
+    assert_eq!(capture.borrow().pixels[..28 * render::WIDTH], header);
+    assert_eq!(capture.borrow().pixels[b_top + 4], 0x07e0);
+    assert_ne!(capture.borrow().pixels[28 * render::WIDTH + 4], 0x07e0);
+}

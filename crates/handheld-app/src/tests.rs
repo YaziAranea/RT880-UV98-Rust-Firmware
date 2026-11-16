@@ -853,13 +853,16 @@ fn navigation_keeps_unpainted_unlock_banner_and_deferred_damage_pixel_exact() {
     let mut radio = RadioView {
         state: render::RadioState::Receiving,
         rssi: Some(165),
+        meter_floor: 150,
         ..RadioView::OFF
     };
     app.set_radio_view(radio).unwrap();
     radio.squelch_open = true;
     radio.rssi = Some(271);
     app.set_radio_view(radio).unwrap();
-    assert!(app.deferred_radio_rows.has(6));
+    let meter = render::home_slot_rows(app.status.view.active_slot).0 + render::HOME_METER_Y;
+    assert!(app.deferred_radio_rows.has(meter));
+    assert!(!app.deferred_radio_rows.has(6));
     let pending = app.pending_rows;
     let deferred = app.deferred_radio_rows;
     event(&mut app, InputEvent::Short(Key::Menu));
@@ -1153,6 +1156,7 @@ fn continuously_replaced_banner_cannot_starve_footer_or_consume_rssi_priority() 
                 render::RadioState::Receiving
             },
             rssi: Some(165 + batch % 2),
+            meter_floor: 150,
             ..RadioView::OFF
         })
         .unwrap();
@@ -1174,8 +1178,10 @@ fn continuously_replaced_banner_cannot_starve_footer_or_consume_rssi_priority() 
     radio.rssi = Some(170);
     radio.squelch_open = !radio.squelch_open;
     app.set_radio_view(radio).unwrap();
-    assert!(!app.priority_rows.any()); // Even SQL banner updates are coalesced.
-    assert!(app.deferred_radio_rows.has(0));
+    assert!(!app.priority_rows.any());
+    assert!(!app.deferred_radio_rows.has(0)); // SQL changes no longer affect the header.
+    let meter = render::home_slot_rows(app.status.view.active_slot).0 + render::HOME_METER_Y;
+    assert!(app.deferred_radio_rows.has(meter));
 }
 
 #[test]
