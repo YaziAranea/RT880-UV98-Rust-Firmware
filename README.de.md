@@ -79,7 +79,7 @@ Die [Schritt-für-Schritt-Anleitung](docs/GETTING-STARTED.de.md) nennt die CPS-S
 
 ## Aktuelle Grenzen
 
-R33 bleibt die vom Besitzer am Gerät akzeptierte Ausgangsversion. Bei R39 stehen Gerätetests für den TX-Rahmen, die LCD-Zeiten, CB/Kurzwelle, den Empfang des versetzten FM-Signals und die MDC1200-Dekodierung aus. [Build- und Simulationsergebnisse für R39](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r39)
+Bei R39 stehen Gerätetests für den TX-Rahmen, die LCD-Zeiten, CB/Kurzwelle, den Empfang des versetzten FM-Signals und die MDC1200-Dekodierung aus. [Build- und Simulationsergebnisse für R39](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r39)
 
 - Dual Watch hört A/B abwechselnd ab. Gleichzeitige Audiowiedergabe beider BK4819-Empfänger ist nicht implementiert.
 - Der KW-Wasserfall stimmt den einzigen Si4732 nacheinander ab und unterbricht dabei die Audiowiedergabe. Er ist keine FFT.

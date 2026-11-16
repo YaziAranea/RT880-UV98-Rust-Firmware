@@ -16,13 +16,13 @@
 
 132 tests passed across 17 suites; 48 headless UI combinations (8 tabs × 3 languages × 2 window sizes), native release build and independent code review passed. Computer Use and radio access were not performed; the complete native GUI workflow is still not hardware acceptance.
 
-[CPS 0.7.0 source](https://github.com/YaziAranea/uv98-rust/tree/cps-v0.7.0) · [Detailed report / Подробный отчёт](https://github.com/YaziAranea/uv98-rust/blob/cps-v0.7.0/CPS-0.7-REPORT-RU.txt) · [Инструкция RU](https://github.com/YaziAranea/uv98-rust/blob/cps-v0.7.0/docs/GETTING-STARTED.ru.md) · [English](https://github.com/YaziAranea/uv98-rust/blob/cps-v0.7.0/docs/GETTING-STARTED.en.md) · [Deutsch](https://github.com/YaziAranea/uv98-rust/blob/cps-v0.7.0/docs/GETTING-STARTED.de.md)
+[CPS 0.7.0 source](https://github.com/YaziAranea/uv98-rust/tree/cps-v0.7.0) · [Detailed report / Подробный отчёт](https://github.com/YaziAranea/uv98-rust/blob/main/CPS-0.7-REPORT-RU.txt) · [Инструкция RU](https://github.com/YaziAranea/uv98-rust/blob/main/docs/GETTING-STARTED.ru.md) · [English](https://github.com/YaziAranea/uv98-rust/blob/main/docs/GETTING-STARTED.en.md) · [Deutsch](https://github.com/YaziAranea/uv98-rust/blob/main/docs/GETTING-STARTED.de.md)
 
 ## Firmware R37 / Прошивка R37
 
 Battery level icon and voltage readout; `PTT A/B` inside the transmitting card; lower PTT can transmit B while A stays selected. Same-page menu movement renders 15 rows instead of 67 (about 78% less pixel payload, not a measured on-radio FPS gain).
 
-The original firmware validation remains: 572 Rust tests passed, 1 ignored; 80 Python tests; 59 linked ARM scenarios and 59 log decodes; two calibration-profile checks. **R37 has not been tested on the radio; R33 remains the owner's accepted hardware baseline.** Battery accuracy, lower PTT and LCD responsiveness await on-radio acceptance.
+The original firmware validation remains: 572 Rust tests passed, 1 ignored; 80 Python tests; 59 linked ARM scenarios and 59 log decodes; two calibration-profile checks. **R37 has not been tested on the radio.** Battery accuracy, lower PTT and LCD responsiveness await on-radio acceptance.
 
 R37 is a template: use CPS and your own verified NOR backup before installing on another compatible unit. This does not establish board compatibility. Radio settings remain in RAM; per-slot power starts at LOW. APRS RX/automatic beacons, simultaneous audio from both BK receivers and main-BK NR/NB remain unfinished. Manufacturer firmware and personal radio data are not bundled.
 

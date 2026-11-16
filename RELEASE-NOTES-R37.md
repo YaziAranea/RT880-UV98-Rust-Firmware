@@ -18,7 +18,7 @@
 
 572 Rust tests passed, 1 ignored; 127 CPS tests; 80 Python tests; 59 linked ARM scenarios and 59 log decodes; 2 linked calibration-profile checks; 101 simulated frames. Independent code review passed. Original private NOR/calibration files are unchanged.
 
-**No radio was accessed or flashed for R37. R33 remains the owner's accepted hardware baseline.** Battery accuracy, the lower PTT mapping and actual LCD responsiveness require hardware acceptance. Passing host tests does not establish RF operation or recovery.
+**No radio was accessed or flashed for R37.** Battery accuracy, the lower PTT mapping and actual LCD responsiveness require hardware acceptance. Passing host tests does not establish RF operation or recovery.
 
 **R37 is a template.** Before installing on another unit, use CPS to prepare an image from that unit's verified NOR backup. This does not prove compatibility with another board revision. Manufacturer firmware and personal radio data are not bundled.
 

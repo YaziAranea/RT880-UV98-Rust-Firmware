@@ -109,7 +109,7 @@ Proceed only after successful preparation, confirmation of board compatibility, 
 
 With the default bindings, the upper PTT requests A and the lower PTT requests B. During transmission, the transmitting card shows TX and a red outline, regardless of the selected slot. Each slot's current power setting is held in RAM and starts at LOW. The battery icon shows up to four approximate level bars and the numeric voltage in 0.1 V steps (`--.-V` when unavailable). [Lower PTT hardware evidence](../research/r37/ptt.md)
 
-Loader acknowledgements confirm file transfer. Check boot and operation on the device. R33 is the owner's accepted baseline. R39's TX display, lower PTT, battery readings, CB/HF operation, reception of offset FM and external MDC1200 decoding still need on-radio checks. [R39 evidence and test limits](../research/r39/EVIDENCE-RU.md)
+Loader acknowledgements confirm file transfer. Check boot and operation on the device. R39's TX display, lower PTT, battery readings, CB/HF operation, reception of offset FM and external MDC1200 decoding still need on-radio checks. [R39 evidence and test limits](../research/r39/EVIDENCE-RU.md)
 
 ### CB grid
 

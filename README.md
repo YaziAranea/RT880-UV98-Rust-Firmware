@@ -79,7 +79,7 @@ The [file checklist and step-by-step guide](docs/GETTING-STARTED.en.md) names ev
 
 ## Current limits
 
-R33 is the owner's accepted hardware baseline. R39 still needs on-radio checks of TX indication, display timing, CB/HF operation, reception of the offset FM signal and MDC1200 decoding. Build and simulation results are in the [R39 release notes](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r39).
+R39 still needs on-radio checks of TX indication, display timing, CB/HF operation, reception of the offset FM signal and MDC1200 decoding. Build and simulation results are in the [R39 release notes](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r39).
 
 - Dual Watch alternates the receiver. Simultaneous audio from two BK4819 receivers is not implemented.
 - The HF waterfall retunes one Si4732 and interrupts audio during the sweep; it is not an FFT.

@@ -34,4 +34,4 @@ or flashed. Prepare your own image in CPS from your verified NOR backup.
 
 [Отчёт](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/blob/r39/R39-REPORT-RU.txt) ·
 [Принцип и проверки](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/blob/r39/research/r39/EVIDENCE-RU.md) ·
-[Подготовка своего образа](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/blob/r39/docs/GETTING-STARTED.ru.md)
+[Подготовка своего образа](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/blob/main/docs/GETTING-STARTED.ru.md)

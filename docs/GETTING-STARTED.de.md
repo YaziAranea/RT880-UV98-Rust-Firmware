@@ -109,7 +109,7 @@ Erst nach erfolgreicher Vorbereitung, bestätigter Platinenkompatibilität und S
 
 In der Standardbelegung fordert die obere PTT eine Sendung über A an, die untere über B. Das tatsächlich sendende Feld zeigt TX und einen roten Rahmen, unabhängig vom ausgewählten VFO. Die Leistung liegt je VFO im RAM und steht nach dem Einschalten auf LOW. Das Akkusymbol zeigt den ungefähren Stand mit bis zu vier Balken und die Spannung in Schritten von 0,1 V (`--.-V`, wenn kein Messwert verfügbar ist). [Nachweise zur unteren PTT](../research/r37/ptt.md)
 
-Bootloader-Bestätigungen belegen die Dateiübertragung. Start und Funkbetrieb am Gerät prüfen. R33 ist die vom Besitzer akzeptierte Ausgangsversion. Für R39 stehen Gerätetests der TX-Anzeige, der unteren PTT, der Akkuanzeige, des CB-/KW-Betriebs, des Empfangs des versetzten FM-Signals und der MDC1200-Dekodierung aus. [R39-Nachweise und Prüfgrenzen](../research/r39/EVIDENCE-RU.md)
+Bootloader-Bestätigungen belegen die Dateiübertragung. Start und Funkbetrieb am Gerät prüfen. Für R39 stehen Gerätetests der TX-Anzeige, der unteren PTT, der Akkuanzeige, des CB-/KW-Betriebs, des Empfangs des versetzten FM-Signals und der MDC1200-Dekodierung aus. [R39-Nachweise und Prüfgrenzen](../research/r39/EVIDENCE-RU.md)
 
 ### CB-Kanalraster
 

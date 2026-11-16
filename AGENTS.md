@@ -6,3 +6,5 @@
 - Preserve original stock calibration, NOR backups, `999.880dmf` and immutable release artifacts. Edits use separate working copies. Firmware settings remain in RAM until an evidenced storage layout and write/recovery scheme are implemented.
 - In the current multi-agent workflow, only the root agent runs Cargo or accesses COM/the radio. Other agents follow assigned file ownership and report evidence to root.
 - Record the exact artifact/hash, verification report and limits of each result. An unobserved or failed acceptance criterion stays open.
+
+- Public documentation and release descriptions must describe features, reproducible validation and limitations without assigning a release special status based on personal acceptance or private coordination.

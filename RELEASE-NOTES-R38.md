@@ -49,4 +49,4 @@ MENU — сохранить, EXIT — отменить. В эфир уходит
 Плавность на настоящем LCD и MDC с другой рацией ещё не проверены.
 Подробности: [отчёт](R38-REPORT-RU.txt),
 [исследование](research/r38/EVIDENCE-RU.md),
-[подготовка своего образа](docs/GETTING-STARTED.ru.md).
+[подготовка своего образа](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/blob/main/docs/GETTING-STARTED.ru.md).
