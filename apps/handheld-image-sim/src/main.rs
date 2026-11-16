@@ -2278,22 +2278,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?);
     hold_request(&mut app, &mut now, Key::Digit0);
     assert!(app.status().view.shortwave_scope);
+    let points = app.status().view.shortwave_scope_points;
     for age in 0..16u8 {
-        for bin in 0..32u8 {
-            let peak = if bin == 16 {
+        for bin in 0..points {
+            let peak = if bin == points / 2 {
                 32
-            } else if bin.abs_diff(16) <= 2 {
+            } else if bin.abs_diff(points / 2) <= 1 {
                 16
             } else {
                 0
             };
             app.shortwave_scope_sample(
                 9_470_000,
-                5_000,
+                5_000 * u32::from(32 / points),
+                points,
                 bin,
                 12 + (bin + age) % 7 + peak,
                 8,
-                bin == 31,
+                bin + 1 == points,
             )
             .unwrap();
         }
@@ -2773,17 +2775,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap();
         hold_request(&mut empty_app, &mut empty_now, Key::Digit0);
         assert!(empty_app.status().view.shortwave_scope);
+        let points = empty_app.status().view.shortwave_scope_points;
         for age in 0..16u8 {
-            for bin in 0..32u8 {
-                let peak = 32u8.saturating_sub(bin.abs_diff(16) * 8);
+            for bin in 0..points {
+                let peak = 32u8.saturating_sub(bin.abs_diff(points / 2) * 8);
                 empty_app
                     .shortwave_scope_sample(
                         7_020_000,
-                        5_000,
+                        5_000 * u32::from(32 / points),
+                        points,
                         bin,
                         12 + (bin + age) % 7 + peak,
                         8,
-                        bin == 31,
+                        bin + 1 == points,
                     )
                     .unwrap();
             }

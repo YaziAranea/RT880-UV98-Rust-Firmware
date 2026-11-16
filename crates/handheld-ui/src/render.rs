@@ -928,6 +928,7 @@ pub fn dirty_ranges(model: &Model<'_>, previous: Option<View>) -> Result<DirtyRa
                     || old.shortwave_fraction_hz != new.shortwave_fraction_hz
                     || old.shortwave_mode != new.shortwave_mode
                     || old.shortwave_bfo != new.shortwave_bfo
+                    || old.shortwave_scope_points != new.shortwave_scope_points
                     || old.shortwave_band != new.shortwave_band)
             {
                 dirty.push(48, 296);

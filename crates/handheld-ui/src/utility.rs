@@ -37,6 +37,7 @@ impl ShortwaveDamage {
 pub struct ShortwaveScope {
     pub first_hz: u32,
     pub step_hz: u32,
+    points: u8,
     samples: [u8; BINS],
     valid: u32,
     history: [[u8; BINS]; ROWS],
@@ -55,6 +56,7 @@ impl ShortwaveScope {
         Self {
             first_hz: 0,
             step_hz: 0,
+            points: 0,
             samples: [0; BINS],
             valid: 0,
             history: [[0; BINS]; ROWS],
@@ -64,10 +66,17 @@ impl ShortwaveScope {
     }
 
     /// Clear history whenever the physical sampling grid changes.
-    pub fn reset(&mut self, first_hz: u32, step_hz: u32) {
+    pub fn reset(&mut self, first_hz: u32, step_hz: u32, points: u8) {
         *self = Self::new();
-        self.first_hz = first_hz;
-        self.step_hz = step_hz;
+        if matches!(points, 8 | 16 | 32) {
+            self.first_hz = first_hz;
+            self.step_hz = step_hz;
+            self.points = points;
+        }
+    }
+
+    pub fn point_count(&self) -> u8 {
+        self.points
     }
 
     /// Stage measurements separately from the visible graph. Only a complete
@@ -83,7 +92,8 @@ impl ShortwaveScope {
     ) -> impl Iterator<Item = (u16, u16)> {
         let bin = usize::from(bin);
         let mut damage = ShortwaveDamage::default();
-        if bin >= BINS || self.step_hz == 0 {
+        let count = usize::from(self.points);
+        if bin >= count || self.step_hz == 0 {
             return damage.ranges();
         }
         let old_progress = self.valid.count_ones();
@@ -93,9 +103,9 @@ impl ShortwaveScope {
         self.samples[bin] = rssi;
         self.valid |= 1 << bin;
         damage.progress = self.valid.count_ones() != old_progress;
-        if complete && self.valid == u32::MAX {
+        if complete && bin + 1 == count && self.valid == u32::MAX >> (BINS - count) {
             let previous = self.displayed_samples();
-            for (bin, &sample) in self.samples.iter().enumerate() {
+            for (bin, &sample) in self.samples[..count].iter().enumerate() {
                 let old_bar = previous.map_or(0, |old| graph_mask(old[bin]));
                 damage.graph |= old_bar ^ graph_mask(sample);
             }
@@ -104,7 +114,7 @@ impl ShortwaveScope {
                 // Compare at the visible age, before the ring overwrites the
                 // oldest sample row. A changed RSSI in the same color is free.
                 let incoming = if age == 0 {
-                    &self.samples
+                    &self.samples[..count]
                 } else {
                     self.history_row(age - 1).unwrap()
                 };
@@ -130,12 +140,13 @@ impl ShortwaveScope {
         self.rows
     }
 
-    pub fn displayed_samples(&self) -> Option<&[u8; BINS]> {
+    pub fn displayed_samples(&self) -> Option<&[u8]> {
         self.history_row(0)
     }
 
-    fn history_row(&self, age: usize) -> Option<&[u8; BINS]> {
-        (age < self.rows).then(|| &self.history[(self.newest + ROWS - age) % ROWS])
+    fn history_row(&self, age: usize) -> Option<&[u8]> {
+        (age < self.rows)
+            .then(|| &self.history[(self.newest + ROWS - age) % ROWS][..usize::from(self.points)])
     }
 }
 
@@ -160,7 +171,7 @@ mod tests {
     #[test]
     fn waterfall_contains_only_complete_measured_sweeps_and_resets_grid() {
         let mut scope = ShortwaveScope::new();
-        scope.reset(7_020_000, 5_000);
+        scope.reset(7_020_000, 5_000, 32);
         let _ = scope.sample(31, 40, 8, true);
         assert_eq!(scope.history_rows(), 0);
         for bin in 0..32 {
@@ -171,7 +182,7 @@ mod tests {
         let _ = scope.sample(0, 30, 5, false);
         let _ = scope.sample(31, 40, 8, true);
         assert_eq!(scope.history_rows(), 1);
-        scope.reset(14_100_000, 1_000);
+        scope.reset(14_100_000, 1_000, 32);
         assert_eq!(scope.history_rows(), 0);
         assert_eq!(scope.measured_bins(), 0);
     }
@@ -179,24 +190,44 @@ mod tests {
     #[test]
     fn unfinished_sweep_keeps_previous_graph_and_never_publishes_missing_bins() {
         let mut scope = ShortwaveScope::new();
-        scope.reset(7_084_000, 1_000);
+        scope.reset(7_084_000, 1_000, 32);
         assert_eq!(scope.displayed_samples(), None);
         for bin in 0..32 {
             let _ = scope.sample(bin, bin + 10, 4, bin == 31);
             assert_eq!(scope.history_rows(), usize::from(bin == 31));
         }
-        let complete = *scope.displayed_samples().unwrap();
+        let mut complete = [0; 32];
+        complete.copy_from_slice(scope.displayed_samples().unwrap());
         for bin in 0..31 {
             let _ = scope.sample(bin, 60, 4, false);
-            assert_eq!(scope.displayed_samples(), Some(&complete));
+            assert_eq!(scope.displayed_samples(), Some(complete.as_slice()));
         }
         let _ = scope.sample(31, 60, 4, true);
-        assert_eq!(scope.displayed_samples(), Some(&[60; 32]));
+        assert_eq!(scope.displayed_samples(), Some([60; 32].as_slice()));
         let _ = scope.sample(0, 4, 1, false);
         let _ = scope.sample(31, 4, 1, true);
         assert_eq!(scope.sample(32, 4, 1, true).count(), 0);
-        assert_eq!(scope.displayed_samples(), Some(&[60; 32]));
+        assert_eq!(scope.displayed_samples(), Some([60; 32].as_slice()));
         assert_eq!(scope.history_rows(), 2);
+    }
+
+    #[test]
+    fn each_resolution_publishes_only_its_measured_columns() {
+        let mut scope = ShortwaveScope::new();
+        for points in [8, 16, 32] {
+            scope.reset(7_020_000, 5_000, points);
+            assert_eq!(scope.history_rows(), 0);
+            assert_eq!(scope.sample(points, 63, 0, true).count(), 0);
+            let _ = scope.sample(points - 1, 40, 0, true);
+            assert_eq!(scope.history_rows(), 0);
+            for bin in 0..points {
+                let _ = scope.sample(bin, bin + 20, 8, bin + 1 == points);
+                assert_eq!(scope.history_rows(), usize::from(bin + 1 == points));
+            }
+            let row = scope.displayed_samples().unwrap();
+            assert_eq!(row.len(), usize::from(points));
+            assert!(row.iter().copied().eq(20..20 + points));
+        }
     }
 }
 
@@ -233,21 +264,35 @@ pub(super) fn shortwave_scope_page(row: u16, out: &mut Row<'_>, model: &Model<'_
         centered(row, out, 55, 2, title.as_str(), color::TEXT);
         return;
     }
-    let Some(scope) = model.shortwave_scope.filter(|scope| scope.step_hz > 0) else {
+    if (252..259).contains(&row) {
+        centered(row, out, 252, 1, "# 8/16/32 \x1f134", color::ACCENT);
+        return;
+    }
+    let Some(scope) = model
+        .shortwave_scope
+        .filter(|scope| scope.step_hz > 0 && scope.point_count() != 0)
+    else {
+        if (78..85).contains(&row) {
+            let mut points = Text::new();
+            let _ = write!(points, "{} \x1f134", view.shortwave_scope_points);
+            centered(row, out, 78, 1, points.as_str(), color::ACCENT);
+        }
         centered(row, out, 136, 2, "\x1f0AF", color::MUTED);
         centered(row, out, 266, 1, "\x1f017", color::ACCENT);
         return;
     };
     const X: usize = 12;
-    const PITCH: usize = 7;
+    const PLOT_WIDTH: usize = 224;
+    let points = u32::from(scope.point_count());
+    let pitch = PLOT_WIDTH / points as usize;
     match row {
         78..=84 => {
             let mut width = Text::new();
             let _ = write!(
                 width,
-                "\x1f13A {} \x1f090 {} \x1f08E",
+                "{points} \x1f134  \x1f13A {}  \x1f090 {} \x1f08E",
                 scope.step_hz / 1000,
-                scope.step_hz * 31 / 1000
+                scope.step_hz * (points - 1) / 1000
             );
             centered(row, out, 78, 1, width.as_str(), color::ACCENT);
         }
@@ -258,21 +303,21 @@ pub(super) fn shortwave_scope_page(row: u16, out: &mut Row<'_>, model: &Model<'_
                 rect(
                     row,
                     out,
-                    X + index * PITCH,
+                    X + index * pitch,
                     GRAPH_BOTTOM - height,
-                    6,
+                    pitch - 1,
                     height.max(1),
                     color::ACCENT,
                 );
             }
             let selected_hz = view.shortwave_khz * 1000 + u32::from(view.shortwave_fraction_hz);
             let cursor = selected_hz.saturating_sub(scope.first_hz) / scope.step_hz;
-            if cursor < BINS as u32 {
-                out[X + cursor as usize * PITCH + 3] = color::WARNING;
+            if cursor < points {
+                out[X + cursor as usize * pitch + pitch / 2] = color::WARNING;
             }
         }
         158..=164 => {
-            for (index, x) in [(0, 12), (16, 98), (31, 194)] {
+            for (index, x) in [(0, 12), (points / 2, 98), (points - 1, 194)] {
                 let khz = (scope.first_hz + scope.step_hz * index) / 1000;
                 let mut label = Text::new();
                 let _ = write!(label, "{khz}");
@@ -280,15 +325,15 @@ pub(super) fn shortwave_scope_page(row: u16, out: &mut Row<'_>, model: &Model<'_
             }
         }
         PROGRESS_TOP..=169 => {
-            let progress = scope.measured_bins().count_ones() as usize * PITCH;
+            let progress = scope.measured_bins().count_ones() as usize * pitch;
             out[X..X + progress].fill(color::MUTED);
         }
         HISTORY_TOP..=HISTORY_LAST => {
             let age = usize::from((row - HISTORY_TOP) / HISTORY_ROW_HEIGHT);
             if let Some(samples) = scope.history_row(age) {
                 for (bin, &rssi) in samples.iter().enumerate() {
-                    let x = X + bin * PITCH;
-                    out[x..x + PITCH].fill(waterfall_ink(rssi));
+                    let x = X + bin * pitch;
+                    out[x..x + pitch].fill(waterfall_ink(rssi));
                 }
             }
         }

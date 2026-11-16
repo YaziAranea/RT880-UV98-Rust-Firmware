@@ -267,7 +267,7 @@ pub struct App<N, L, D> {
     spectrum: Option<SpectrumSnapshot>,
     waterfall: render::Waterfall,
     shortwave_scope: render::ShortwaveScope,
-    shortwave_scope_selection: Option<(controller::ShortwaveMode, u16, i16, u8, bool)>,
+    shortwave_scope_selection: Option<(controller::ShortwaveMode, u16, i16, u8, bool, u8)>,
     last_spectrum: Option<SpectrumSnapshot>,
     /// Physical lower side-key input identification, independent of its
     /// editable assignment. False until the board traces a real source.
@@ -482,24 +482,31 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         &mut self,
         first_hz: u32,
         step_hz: u32,
+        points: u8,
         bin: u8,
         rssi: u8,
         snr: u8,
         complete: bool,
     ) -> Result<(), Error<N::Error, L::Error>> {
         let view = &self.status.view;
+        if !matches!(points, 8 | 16 | 32) || points != view.shortwave_scope_points || bin >= points
+        {
+            return Ok(());
+        }
         let selection = (
             view.shortwave_mode,
             view.shortwave_fraction_hz,
             view.shortwave_bfo,
             view.shortwave_filter,
             view.shortwave_soft_mute,
+            points,
         );
         let reset = self.shortwave_scope.first_hz != first_hz
             || self.shortwave_scope.step_hz != step_hz
+            || self.shortwave_scope.point_count() != points
             || self.shortwave_scope_selection != Some(selection);
         if reset {
-            self.shortwave_scope.reset(first_hz, step_hz);
+            self.shortwave_scope.reset(first_hz, step_hz, points);
             self.shortwave_scope_selection = Some(selection);
         }
         let damage = self.shortwave_scope.sample(bin, rssi, snr, complete);
@@ -1558,6 +1565,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             view.shortwave_bfo,
             view.shortwave_filter,
             view.shortwave_soft_mute,
+            view.shortwave_scope_points,
         );
         if self
             .shortwave_scope_selection
