@@ -1288,6 +1288,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let simulated_rx = RadioView {
         state: RadioState::Receiving,
         tx_slot: None,
+        rx_slot: Some(app.status().view.active_slot),
         rssi: Some(245),
         meter_floor: 0,
         squelch_open: true,
@@ -2210,6 +2211,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         app.set_radio_view(RadioView {
             state,
             tx_slot: (state == RadioState::Transmitting).then_some(slot),
+            rx_slot: (state == RadioState::Receiving).then_some(slot),
             rssi,
             power,
             squelch_open: state == RadioState::Receiving && rssi.is_some(),
@@ -2467,9 +2469,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let selected = app.status().view.active_slot;
     hold_request(&mut app, &mut now, Key::Digit2);
     assert!(app.status().view.dual_watch);
-    app.set_watch_rx(Some(selected.other())).unwrap();
     app.set_radio_view(RadioView {
         state: RadioState::Receiving,
+        rx_slot: Some(selected.other()),
         squelch_open: true,
         rssi: Some(150),
         ..RadioView::OFF
@@ -2485,7 +2487,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?);
     hold_request(&mut app, &mut now, Key::Digit2);
     assert!(!app.status().view.dual_watch);
-    assert_eq!(app.status().view.watch_rx, None);
+    app.set_radio_view(RadioView {
+        state: RadioState::Receiving,
+        ..RadioView::OFF
+    })
+    .unwrap();
     hold_request(&mut app, &mut now, Key::Digit1);
     assert_eq!(app.status().view.screen, Screen::Crossband);
     app.set_crossband_probe(uv98_handheld_ui::controller::CrossbandProbe::Measuring {
@@ -2650,6 +2656,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         empty_app
             .set_radio_view(RadioView {
                 state: RadioState::Receiving,
+                rx_slot: Some(Slot::A),
                 rssi: Some(151),
                 meter_floor: 128,
                 squelch_open: true,

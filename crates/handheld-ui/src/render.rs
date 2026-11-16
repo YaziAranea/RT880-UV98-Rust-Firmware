@@ -57,8 +57,6 @@ const HOME_META_Y: u16 = 130;
 const LIST_Y: u16 = 54;
 const LIST_ROW_HEIGHT: u16 = 32;
 const ITEM_PAINT_HEIGHT: u16 = 30;
-const MENU_MARKER_OFFSET: u16 = 25;
-const MENU_MARKER_HEIGHT: u16 = 4;
 const SETTING_Y: u16 = 112;
 const SETTING_ROW_HEIGHT: u16 = 44;
 const SETTING_PAINT_HEIGHT: u16 = 36;
@@ -77,6 +75,7 @@ pub mod color {
     pub(super) const TX: u16 = 0x319f;
     // Pure red in the portrait panel's native BGR565 order.
     pub(super) const TX_OUTLINE: u16 = 0x001f;
+    pub(super) const RX_OUTLINE: u16 = 0x07e0;
     // Portrait panel uses MADCTL BGR. These two badges are authored in
     // panel order; the established palette and the S-meter stay as before.
     pub const AM_BADGE: u16 = 0x421f;
@@ -113,6 +112,8 @@ pub struct RadioView {
     pub state: RadioState,
     /// Confirmed transmitter context, including a tail after key release.
     pub tx_slot: Option<Slot>,
+    /// Confirmed receive context. Scope or relay audio has no home VFO.
+    pub rx_slot: Option<Slot>,
     pub rssi: Option<u16>,
     pub meter_floor: u16,
     pub squelch_open: bool,
@@ -129,6 +130,7 @@ impl RadioView {
     pub const OFF: Self = Self {
         state: RadioState::Off,
         tx_slot: None,
+        rx_slot: None,
         rssi: None,
         meter_floor: 0,
         squelch_open: false,
@@ -138,6 +140,14 @@ impl RadioView {
         route: None,
         tx_trial: false,
     };
+
+    pub fn receiving_slot(self) -> Option<Slot> {
+        if self.state == RadioState::Receiving && self.squelch_open {
+            self.rx_slot
+        } else {
+            None
+        }
+    }
 
     pub fn transmitting_slot(self) -> Option<Slot> {
         if self.state == RadioState::Transmitting {
@@ -340,18 +350,59 @@ pub const fn battery_rows() -> (u16, u16) {
     (3, 15)
 }
 
-fn home_frame_ink(view: View, slot: Slot) -> u16 {
-    if view.dual_watch && view.watch_rx.is_some() {
-        if view.watch_rx == Some(slot) {
-            color::GOOD
-        } else {
-            color::LINE
-        }
-    } else if view.active_slot == slot {
+fn home_frame_ink(active_slot: Slot, slot: Slot) -> u16 {
+    if active_slot == slot {
         color::ACCENT
     } else {
         color::LINE
     }
+}
+
+/// One disjoint LCD rectangle per edge. Each sends at most one full-width
+/// row's worth of pixels, even for a tall side. The rest of the card stays put.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HomeOutlineEdge(u8);
+
+impl HomeOutlineEdge {
+    pub fn next(pending: u8) -> Option<Self> {
+        (pending != 0).then(|| Self(pending.trailing_zeros() as u8))
+    }
+
+    pub fn bit(self) -> u8 {
+        1 << self.0
+    }
+
+    fn slot(self) -> Slot {
+        if self.0 < 4 { Slot::A } else { Slot::B }
+    }
+
+    fn rect(self) -> (u16, u16, u16, u16) {
+        let (top, end) = home_slot_rows(self.slot());
+        match self.0 % 4 {
+            0 => (4, top, 232, 1),
+            1 => (4, top + 1, 1, end - top - 2),
+            2 => (235, top + 1, 1, end - top - 2),
+            _ => (4, end - 1, 232, 1),
+        }
+    }
+}
+
+pub fn render_home_outline_edge<B: DisplayBus, D: Delay>(
+    display: &mut Display<B, D>,
+    edge: HomeOutlineEdge,
+    active_slot: Slot,
+    radio: RadioView,
+) -> Result<(), RenderError<B::Error>> {
+    let slot = edge.slot();
+    let ink = if radio.transmitting_slot() == Some(slot) {
+        color::TX_OUTLINE
+    } else if radio.receiving_slot() == Some(slot) {
+        color::RX_OUTLINE
+    } else {
+        home_frame_ink(active_slot, slot)
+    };
+    let (x, y, width, height) = edge.rect();
+    display.fill_rect(x, y, width, height, ink).map_err(RenderError::Display)
 }
 
 pub const fn home_frequency_rows(slot: Slot) -> (u16, u16) {
@@ -392,6 +443,7 @@ pub enum RenderError<E> {
 pub struct DirtyRanges {
     ranges: [(u16, u16); 4],
     len: usize,
+    home_outline_edges: u8,
 }
 
 impl DirtyRanges {
@@ -399,10 +451,15 @@ impl DirtyRanges {
         &self.ranges[..self.len]
     }
 
+    pub fn home_outline_edges(&self) -> u8 {
+        self.home_outline_edges
+    }
+
     fn new() -> Self {
         Self {
             ranges: [(0, 0); 4],
             len: 0,
+            home_outline_edges: 0,
         }
     }
 
@@ -593,10 +650,8 @@ pub fn dirty_ranges(model: &Model<'_>, previous: Option<View>) -> Result<DirtyRa
             }
             let first = menu_start(new.menu_index);
             for index in [old.menu_index, new.menu_index] {
-                let y = LIST_Y
-                    + (usize::from(index) - first) as u16 * LIST_ROW_HEIGHT
-                    + MENU_MARKER_OFFSET;
-                dirty.push(y, y + MENU_MARKER_HEIGHT);
+                let y = LIST_Y + (usize::from(index) - first) as u16 * LIST_ROW_HEIGHT;
+                dirty.push(y, y + ITEM_PAINT_HEIGHT);
             }
             dirty.push(283, 290);
         }
@@ -693,21 +748,8 @@ pub fn dirty_ranges(model: &Model<'_>, previous: Option<View>) -> Result<DirtyRa
                 }
                 _ => {}
             }
-            if old.scan != new.scan
-                || old.dual_watch != new.dual_watch
-                || old.watch_rx != new.watch_rx
-            {
+            if old.scan != new.scan || old.dual_watch != new.dual_watch {
                 dirty.push(0, 27);
-            }
-            if old.watch_rx != new.watch_rx || old.dual_watch != new.dual_watch {
-                for slot in [Slot::A, Slot::B] {
-                    let (start, end) = if home_frame_ink(old, slot) != home_frame_ink(new, slot) {
-                        home_slot_rows(slot)
-                    } else {
-                        home_meter_rows(slot)
-                    };
-                    dirty.push(start, end);
-                }
             }
             if (old.reverse != new.reverse
                 || old.shift_index != new.shift_index
@@ -948,12 +990,8 @@ pub fn radio_dirty_ranges(model: &Model<'_>, previous: RadioView) -> Result<Dirt
     let view = model.view;
     if view.screen == Screen::Home {
         let marker_changed = (previous.tx_trial != new.tx_trial && !new.monitor)
-            || (previous.monitor != new.monitor
-                && (!view.locked || new.squelch_open || previous.tx_trial || new.tx_trial));
-        if previous.state != new.state
-            || marker_changed
-            || (new.state == RadioState::Receiving && previous.squelch_open != new.squelch_open)
-        {
+            || (previous.monitor != new.monitor && !view.locked);
+        if previous.state != new.state || marker_changed {
             dirty.push(banner_start, banner_end);
         }
         for slot in [Slot::A, Slot::B] {
@@ -964,6 +1002,9 @@ pub fn radio_dirty_ranges(model: &Model<'_>, previous: RadioView) -> Result<Dirt
                 let (start, end) = home_slot_rows(slot);
                 dirty.push(start, end);
                 continue;
+            }
+            if (previous.receiving_slot() == Some(slot)) != (new.receiving_slot() == Some(slot)) {
+                dirty.home_outline_edges |= if slot == Slot::A { 0x0f } else { 0xf0 };
             }
             if view.active_slot == slot
                 && view.entry.is_some()
@@ -1009,9 +1050,6 @@ pub fn radio_dirty_ranges(model: &Model<'_>, previous: RadioView) -> Result<Dirt
             _ => {}
         }
         return Ok(dirty);
-    }
-    if new.state == RadioState::Receiving && previous.squelch_open != new.squelch_open {
-        dirty.push(banner_start, banner_end);
     }
     if view.screen == Screen::Setting {
         let changed = match view.setting {
@@ -1265,39 +1303,13 @@ fn battery(row: u16, out: &mut Row<'_>, millivolts: Option<u16>) {
 
 fn home_header(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     rect(row, out, 0, 0, WIDTH, 27, color::PANEL);
-    if model.view.dual_watch
-        && matches!(
-            model.radio.state,
-            RadioState::Starting | RadioState::Receiving
-        )
-    {
-        let label = match model.view.watch_rx {
-            Some(Slot::A) => "DUAL WATCH   RX A",
-            Some(Slot::B) => "DUAL WATCH   RX B",
-            None => "DUAL WATCH",
-        };
-        text(
-            row,
-            out,
-            12,
-            6,
-            1,
-            label,
-            if model.view.watch_rx.is_some() {
-                color::GOOD
-            } else {
-                color::ACCENT
-            },
-        );
-    } else if model.radio.state != RadioState::Transmitting {
-        if model.radio.state != RadioState::Receiving || model.radio.squelch_open {
-            radio_banner(row + 28, out, model);
-            if model.radio.state == RadioState::Receiving && model.radio.monitor {
-                text(row, out, 12, 6, 1, "MON", color::BACKGROUND);
-            }
-        } else if !model.view.locked {
-            home_status(row, out, model);
+    match model.radio.state {
+        RadioState::Starting | RadioState::Receiving if model.view.dual_watch => {
+            text(row, out, 12, 6, 1, "DUAL WATCH", color::ACCENT);
         }
+        RadioState::Receiving if !model.view.locked => home_status(row, out, model),
+        RadioState::Receiving | RadioState::Transmitting => {}
+        _ => radio_banner(row + 28, out, model),
     }
     if let Some(label) = notice_label(model.view.notice) {
         rect(row, out, 0, 17, WIDTH, 10, color::WARNING_BACKGROUND);
@@ -1320,7 +1332,6 @@ fn radio_banner(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
         }
         RadioState::Off => ("\x1f0FA", color::WARNING, color::WARNING_BACKGROUND),
         RadioState::Starting => ("\x1f0FC", color::WARNING, color::WARNING_BACKGROUND),
-        RadioState::Receiving if model.radio.squelch_open => ("RX", color::BACKGROUND, color::GOOD),
         RadioState::Receiving => ("", color::GOOD, color::PANEL),
         RadioState::Transmitting => ("TX", color::TEXT, color::BAD),
         RadioState::Unavailable => ("\x1f0FB", color::WARNING, color::WARNING_BACKGROUND),
@@ -2242,6 +2253,13 @@ fn home(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     if transmitting {
         rect(row, out, 4, top, 3, end - top, color::TX_OUTLINE);
         rect(row, out, 233, top, 3, end - top, color::TX_OUTLINE);
+    } else if model.radio.receiving_slot() == Some(slot) && (top..end).contains(&row) {
+        if row == top || row == end - 1 {
+            out[4..236].fill(color::RX_OUTLINE);
+        } else {
+            out[4] = color::RX_OUTLINE;
+            out[235] = color::RX_OUTLINE;
+        }
     }
 }
 
@@ -2290,7 +2308,7 @@ fn slot_card(row: u16, out: &mut Row<'_>, model: &Model<'_>, slot: Slot) {
     let transmitting = model.radio.transmitting_slot() == Some(slot);
     let cb = model.view.cb_for_slot(slot);
     let content = slot_content(model, slot);
-    let border = home_frame_ink(model.view, slot);
+    let border = home_frame_ink(model.view.active_slot, slot);
     let background = if active {
         color::PANEL
     } else {
@@ -2536,7 +2554,7 @@ fn home_meter(view: &View, radio: RadioView, slot: Slot) -> MeterReading {
     let meter_slot = if radio.state == RadioState::Transmitting {
         radio.transmitting_slot()
     } else {
-        Some(view.watch_rx.unwrap_or(view.active_slot))
+        radio.receiving_slot().or(Some(view.active_slot))
     };
     if meter_slot == Some(slot) {
         MeterReading::from_radio(radio)
@@ -3086,18 +3104,8 @@ fn menu(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
             return;
         };
         let y = LIST_Y + offset * LIST_ROW_HEIGHT;
-        item_background(row, out, y, false);
-        if index == usize::from(model.view.menu_index) {
-            rect(
-                row,
-                out,
-                12,
-                y + MENU_MARKER_OFFSET,
-                216,
-                MENU_MARKER_HEIGHT,
-                color::ACCENT,
-            );
-        }
+        let selected = index == usize::from(model.view.menu_index);
+        item_background(row, out, y, selected);
         if !(y + 7..y + 23).contains(&row) {
             return;
         }
@@ -3128,7 +3136,9 @@ fn menu(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
             },
             _ => Symbol::Settings,
         };
-        symbol(row, out, 20, y + 7, glyph, color::ACCENT);
+        let ink = item_color(selected);
+        let icon_ink = if selected { ink } else { color::ACCENT };
+        symbol(row, out, 20, y + 7, glyph, icon_ink);
         text(
             row,
             out,
@@ -3139,10 +3149,10 @@ fn menu(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
                 MenuEntry::Item(item) => menu_label(item),
                 MenuEntry::Group(group) => menu_group_label(group),
             },
-            color::TEXT,
+            ink,
         );
         if matches!(entry, MenuEntry::Group(_)) {
-            text(row, out, 216, y + 8, 2, ">", color::TEXT);
+            text(row, out, 216, y + 8, 2, ">", ink);
         }
     } else if (283..290).contains(&row) {
         let mut position = Text::new();
@@ -4792,13 +4802,26 @@ mod tests {
                     radio_dirty_ranges(new, old.radio).unwrap(),
                     spectrum_dirty_ranges(new, old.spectrum).unwrap(),
                 ];
+                let edges = plans[1].home_outline_edges();
                 for y in 0..HEIGHT {
-                    if frames[a][usize::from(y)] != frames[b][usize::from(y)] {
+                    let old_row = &frames[a][usize::from(y)];
+                    let new_row = &frames[b][usize::from(y)];
+                    if old_row != new_row {
+                        let row_dirty = plans.iter().any(|plan| plan
+                            .ranges()
+                            .iter()
+                            .any(|&(start, end)| (start..end).contains(&y)));
+                        let edges_cover = || old_row.iter().zip(new_row).enumerate().all(
+                            |(x, (old, new))| old == new || (0..8).any(|index| {
+                                let edge = HomeOutlineEdge(index);
+                                let (left, top, width, height) = edge.rect();
+                                edges & edge.bit() != 0
+                                    && (left..left + width).contains(&(x as u16))
+                                    && (top..top + height).contains(&y)
+                            })
+                        );
                         assert!(
-                            plans.iter().any(|plan| plan
-                                .ranges()
-                                .iter()
-                                .any(|&(start, end)| (start..end).contains(&y))),
+                            row_dirty || edges_cover(),
                             "stale row {y}: {:?}/{:?}/{:?} -> {:?}/{:?}/{:?}",
                             old.view,
                             old.radio,
@@ -5235,31 +5258,49 @@ mod tests {
     }
 
     #[test]
-    fn dual_watch_frame_follows_rx_and_returns_to_edit_slot() {
-        for selected in [Slot::A, Slot::B] {
-            let mut old = model(Screen::Home);
-            old.view.active_slot = selected;
-            old.view.dual_watch = true;
-            for rx in [None, Some(selected.other()), Some(selected), None] {
-                let mut new = old;
-                new.view.watch_rx = rx;
-                compare_incremental(old, new);
+    fn receive_frame_follows_confirmed_slot_and_restores_focus_frame() {
+        for focus in [Slot::A, Slot::B] {
+            let mut model = model(Screen::Home);
+            model.view.active_slot = focus;
+            model.view.dual_watch = true;
+            model.radio.state = RadioState::Receiving;
+            for rx in [Some(focus.other()), Some(focus), None] {
+                let before = model;
+                model.radio.rx_slot = rx;
+                model.radio.squelch_open = rx.is_some();
+                for row in 0..HOME_HEADER_END {
+                    let mut old = [0; WIDTH];
+                    let mut new = [0; WIDTH];
+                    render_row(row, &mut old, &before).unwrap();
+                    render_row(row, &mut new, &model).unwrap();
+                    assert_eq!(old, new, "RX must never change the header");
+                }
                 for slot in [Slot::A, Slot::B] {
-                    let mut pixels = [0; WIDTH];
                     let (top, end) = home_slot_rows(slot);
-                    let expected = match rx {
-                        Some(s) if s == slot => color::GOOD,
-                        None if selected == slot => color::ACCENT,
-                        _ => color::LINE,
+                    let expected = if rx == Some(slot) {
+                        color::RX_OUTLINE
+                    } else {
+                        home_frame_ink(focus, slot)
                     };
                     for row in [top, top + 1, end - 1] {
-                        render_row(row, &mut pixels, &new).unwrap();
+                        let mut pixels = [0; WIDTH];
+                        render_row(row, &mut pixels, &model).unwrap();
                         assert_eq!(pixels[4], expected, "{slot:?} {rx:?} row {row}");
+                        assert_eq!(pixels[235], expected, "{slot:?} {rx:?} row {row}");
                     }
                 }
-                assert_eq!(new.view.active_slot, selected);
-                old = new;
+                assert_eq!(model.view.active_slot, focus);
+                assert!(compare_radio_incremental(before, model) < WIDTH * 70);
             }
+        }
+        for screen in [Screen::Menu, Screen::Setting] {
+            let mut idle = model(screen);
+            idle.view.setting = Some(Setting::Monitor);
+            idle.radio.state = RadioState::Receiving;
+            let mut receiving = idle;
+            receiving.radio.rx_slot = Some(Slot::B);
+            receiving.radio.squelch_open = true;
+            assert_eq!(compare_radio_incremental(idle, receiving), 0);
         }
     }
 
@@ -5336,6 +5377,12 @@ mod tests {
         for &(start, end) in ranges.ranges() {
             render_rows(&mut display, &updated, start, end).unwrap();
         }
+        let mut edges = ranges.home_outline_edges();
+        while let Some(edge) = HomeOutlineEdge::next(edges) {
+            render_home_outline_edge(&mut display, edge, updated.view.active_slot, updated.radio)
+                .unwrap();
+            edges &= !edge.bit();
+        }
         for y in 0..HEIGHT {
             let mut expected = [0; WIDTH];
             render_row(y, &mut expected, &updated).unwrap();
@@ -5369,6 +5416,7 @@ mod tests {
             modulation: Modulation::Am,
             route: Some(RadioRoute::Hf),
             tx_slot: None,
+            rx_slot: None,
             tx_trial: false,
         };
         compare_radio_incremental(old, new);
@@ -5475,7 +5523,7 @@ mod tests {
             let tx_slot = focus.other();
             let mut receiving = model(Screen::Home);
             receiving.view.active_slot = focus;
-            receiving.view.watch_rx = Some(focus);
+            receiving.radio.rx_slot = Some(focus);
             receiving.channel.as_mut().unwrap().tx_10hz = 43_020_000;
             receiving.peer = Some(PeerView {
                 slot: tx_slot,
@@ -5648,6 +5696,7 @@ mod tests {
                         modulation: Modulation::Am,
                         route: Some(RadioRoute::Hf),
                         tx_slot: None,
+                        rx_slot: None,
                         tx_trial: false,
                     };
                     let pixels = compare_radio_incremental(old, new);
@@ -5687,7 +5736,7 @@ mod tests {
         old = model(Screen::Menu);
         new = old;
         new.view.menu_index = 1;
-        assert_eq!(compare_incremental(old, new), WIDTH * 15);
+        assert_eq!(compare_incremental(old, new), WIDTH * 67);
         for screen in [Screen::SideKeys, Screen::SideAction] {
             old = model(screen);
             new = old;
@@ -5750,8 +5799,15 @@ mod tests {
                 old.view.menu_index = index as u8;
                 let mut new = old;
                 new.view.menu_index += 1;
+                let y = LIST_Y + (index % LIST_ROWS) as u16 * LIST_ROW_HEIGHT;
+                for row in y..y + ITEM_PAINT_HEIGHT {
+                    let mut selected = [0; WIDTH];
+                    render_row(row, &mut selected, &old).unwrap();
+                    assert_eq!(selected[12], color::ACCENT);
+                    assert_eq!(selected[14], color::ACCENT);
+                }
                 let expected = if index / 7 == (index + 1) / 7 {
-                    15
+                    67
                 } else {
                     231
                 };
@@ -6106,6 +6162,7 @@ mod tests {
                 modulation: Modulation::Am,
                 route: Some(RadioRoute::Hf),
                 tx_slot: None,
+            rx_slot: None,
                 tx_trial: false,
             };
             for y in 0..HEIGHT {

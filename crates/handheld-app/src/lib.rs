@@ -250,6 +250,7 @@ pub struct App<N, L, D> {
     // already painted near its beginning. Payloads always use the latest model.
     deferred_radio_rows: PendingRows,
     priority_rows: PendingRows,
+    pending_outlines: u8,
     priority_run: u16,
     row_cursor: u16,
     render_page: Option<Screen>,
@@ -305,6 +306,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             pending_rows: PendingRows::default(),
             deferred_radio_rows: PendingRows::default(),
             priority_rows: PendingRows::default(),
+            pending_outlines: 0,
             priority_run: 0,
             row_cursor: 0,
             render_page: None,
@@ -1084,13 +1086,13 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         (self.nor, self.display)
     }
     pub fn render_pending(&self) -> bool {
-        self.pending_rows.any()
+        self.pending_outlines != 0 || self.pending_rows.any()
     }
 
-    /// Send up to max_rows across disjoint dirty ranges from the current model.
-    /// Check admission before each contiguous transfer. A transfer already
-    /// started runs synchronously; the caller still polls physical inputs
-    /// before the next batch.
+    /// Send up to max_rows full-row equivalents from the current model.
+    /// Check admission before each window of at most six rows or one outline
+    /// edge. A transfer already started runs synchronously. The caller still
+    /// polls physical inputs before the next batch.
     pub fn render_batch(
         &mut self,
         max_rows: u16,
@@ -1098,16 +1100,16 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
     ) -> Result<RenderProgress, Error<N::Error, L::Error>> {
         let mut progress = self.render_step(0)?;
         while progress.pending && progress.rows < max_rows && admit() {
-            let next = self.render_step(max_rows - progress.rows)?;
+            let next = self.render_step((max_rows - progress.rows).min(6))?;
             progress.rows += next.rows;
             progress.pending = next.pending;
         }
         Ok(progress)
     }
 
-    /// At most max_rows contiguous rows are sent. No NOR read or input polling
-    /// is hidden in this call; use render_batch to combine disjoint ranges
-    /// under one input-polling budget.
+    /// Send at most max_rows contiguous rows, or one narrow outline edge that
+    /// costs one row of the budget. No NOR read or input polling is hidden in
+    /// this call. Use render_batch to combine windows under one polling budget.
     pub fn render_step(
         &mut self,
         max_rows: u16,
@@ -1118,7 +1120,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         if max_rows == 0 {
             return Ok(RenderProgress {
                 rows: 0,
-                pending: self.pending_rows.any(),
+                pending: self.render_pending(),
             });
         }
         // Exclude queued priority bits from the ordinary cursor search. This
@@ -1127,8 +1129,23 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         // advanced by priority work.
         let ordinary = self.pending_rows.without(&self.priority_rows);
         let normal_start = ordinary.next(self.row_cursor);
-        let priority = self.priority_rows.any()
-            && (normal_start.is_none() || self.priority_run < PRIORITY_BURST_ROWS);
+        let admit_priority = normal_start.is_none() || self.priority_run < PRIORITY_BURST_ROWS;
+        let priority = admit_priority && self.priority_rows.any();
+        if !priority && admit_priority {
+            if let Some(edge) = render::HomeOutlineEdge::next(self.pending_outlines) {
+                self.status.state = State::Failed;
+                render::render_home_outline_edge(
+                    &mut self.display,
+                    edge,
+                    self.status.view.active_slot,
+                    self.render_radio,
+                )
+                .map_err(Error::Render)?;
+                self.pending_outlines &= !edge.bit();
+                self.priority_run = self.priority_run.saturating_add(1);
+                return Ok(self.finish_render_step(1));
+            }
+        }
         let (start, limit) = if priority {
             let limit = if normal_start.is_some() {
                 max_rows.min(PRIORITY_BURST_ROWS - self.priority_run)
@@ -1165,20 +1182,24 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             self.priority_run = 0;
             self.row_cursor = if end == render::HEIGHT { 0 } else { end };
         }
-        if !self.priority_rows.any() {
+        Ok(self.finish_render_step(end - start))
+    }
+
+    fn finish_render_step(&mut self, rows: u16) -> RenderProgress {
+        if self.pending_outlines == 0 && !self.priority_rows.any() {
             self.priority_run = 0;
         }
-        if !self.pending_rows.any() {
+        if !self.render_pending() {
             // One combined follow-up captures telemetry that changed while the
             // pass was rendering, including a value that changed and changed back.
             self.pending_rows.merge_take(&mut self.deferred_radio_rows);
             self.render_radio = self.radio;
         }
         self.status.state = State::Ready;
-        Ok(RenderProgress {
-            rows: end - start,
-            pending: self.pending_rows.any(),
-        })
+        RenderProgress {
+            rows,
+            pending: self.render_pending(),
+        }
     }
 
     fn read_config(&mut self) -> Result<(), Error<N::Error, L::Error>> {
@@ -1487,6 +1508,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             // Keep that damage and paint every row from the newest model.
             self.pending_rows.merge_take(&mut self.deferred_radio_rows);
             self.priority_rows = PendingRows::default();
+            self.pending_outlines = 0;
             self.priority_run = 0;
             self.row_cursor = 0;
             self.render_page = Some(self.status.view.screen);
@@ -1495,7 +1517,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             self.row_cursor = 0;
         }
         let defer_telemetry = !page_changed
-            && self.pending_rows.any()
+            && self.render_pending()
             && radio_controls_equal(self.last_radio, self.radio);
         let screen = self.status.view.screen;
         let snapshot = matches!(screen, Screen::Home | Screen::ChannelDetails)
@@ -1573,6 +1595,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         for &(start, end) in spectrum_damage.ranges() {
             self.pending_rows.mark(start, end);
         }
+        self.pending_outlines |= radio_damage.home_outline_edges();
         if defer_telemetry {
             for &(start, end) in radio_damage.ranges() {
                 self.deferred_radio_rows.mark(start, end);
@@ -1695,6 +1718,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
 fn radio_controls_equal(a: RadioView, b: RadioView) -> bool {
     a.state == b.state
         && a.tx_slot == b.tx_slot
+        && a.receiving_slot() == b.receiving_slot()
         && a.tx_trial == b.tx_trial
         && a.power == b.power
         && a.modulation == b.modulation

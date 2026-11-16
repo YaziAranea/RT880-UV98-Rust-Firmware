@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn held_menu_key_drains_three_islands_in_three_polls_instead_of_seven() {
+fn held_menu_key_drains_filled_selection_in_five_receive_batches() {
     fn navigate(batched: bool) -> (u16, usize, Vec<u16>) {
         let capture = Rc::new(RefCell::new(CapturedFrame::new()));
         let panel = Panel {
@@ -26,13 +26,13 @@ fn held_menu_key_drains_three_islands_in_three_polls_instead_of_seven() {
         let mut polls = 0;
         while app.render_pending() {
             let progress = if batched {
-                app.render_batch(6, || true)
+                app.render_batch(16, || true)
             } else {
-                app.render_step(3)
+                app.render_batch(6, || true)
             }
             .unwrap();
             assert!(progress.rows > 0);
-            assert!(progress.rows <= if batched { 6 } else { 3 });
+            assert!(progress.rows <= if batched { 16 } else { 6 });
             rows += progress.rows;
             polls += 1;
         }
@@ -44,8 +44,8 @@ fn held_menu_key_drains_three_islands_in_three_polls_instead_of_seven() {
 
     let (old_rows, old_polls, old_frame) = navigate(false);
     let (new_rows, new_polls, new_frame) = navigate(true);
-    assert_eq!((old_rows, old_polls), (15, 7));
-    assert_eq!((new_rows, new_polls), (15, 3));
+    assert_eq!((old_rows, old_polls), (67, 12));
+    assert_eq!((new_rows, new_polls), (67, 5));
     assert_eq!(old_frame, new_frame);
 }
 

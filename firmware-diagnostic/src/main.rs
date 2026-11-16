@@ -2261,7 +2261,6 @@ fn main() -> ! {
                 watch_rx = signal.audio_open.then_some(slot);
             }
         }
-        checked(&mut log, app.set_watch_rx(watch_rx), 0xE032);
         let view = app.status().view;
         if view.screen == Screen::Crossband {
             if upper || lower {
@@ -2667,6 +2666,15 @@ fn main() -> ! {
                 report.meter_floor = report.meter_floor.max(report.rssi.unwrap_or(0));
             }
             report.squelch_open = last_signal.is_some_and(|s| s.audio_open);
+            report.rx_slot = if watch_receive.is_some() {
+                watch_rx
+            } else if !scope.active() && !tuner_open && !crossband_open
+                && current.is_some() && current == operator_profile
+            {
+                Some(view.active_slot)
+            } else {
+                None
+            };
             if watch_receive.is_some() && watch_rx.is_none() {
                 report.rssi = None;
                 report.meter_floor = 0;
@@ -2714,24 +2722,32 @@ fn main() -> ! {
         if cfg!(feature = "verbose-runtime") && app.render_pending() && redraw_since.is_none() {
             redraw_since = Some(now);
         }
-        // Keep the foreground return to physical PTT polling short during the
-        // TX trial. The row cap covers the whole batch, including disjoint
-        // windows. Cycle admission does not interrupt an in-flight transfer.
-        let row_budget = if beacon.active() {
-            1
-        } else if radio.tx_active_or_starting() || relay_active {
-            2
+        // Keep physical PTT/TOT polling short during TX and while a PTT is
+        // down. The cap covers every window, including narrow outline edges.
+        // Cycle admission does not interrupt an in-flight transfer.
+        let (row_budget, admission_cycles) = if beacon.active() {
+            (1, LCD_BATCH_ADMISSION_CYCLES)
+        } else if radio.tx_active_or_starting() || relay_active || upper || lower {
+            (2, LCD_BATCH_ADMISSION_CYCLES)
+        } else if radio.state() == RfState::Configuring {
+            // Finish RX restoration before spending more foreground time on LCD.
+            (0, LCD_BATCH_ADMISSION_CYCLES)
         } else if scope.active()
             || current.is_some_and(|profile| profile.audio.modulation == Modulation::Am)
         {
-            4
+            (4, LCD_BATCH_ADMISSION_CYCLES)
+        } else if raw.is_some() && ptt::side_idle(adc.raw) {
+            // A longer RX-only batch amortizes the keypad and RF work. Each
+            // LCD window is still bounded. Either physical PTT source keeps
+            // its short budget as soon as it is observed.
+            (16, LCD_BATCH_ADMISSION_CYCLES * 3)
         } else {
-            6
+            (6, LCD_BATCH_ADMISSION_CYCLES)
         };
         let drawn = checked(
             &mut log,
             app.render_batch(row_budget, || {
-                DWT::cycle_count().wrapping_sub(render_start) < LCD_BATCH_ADMISSION_CYCLES
+                DWT::cycle_count().wrapping_sub(render_start) < admission_cycles
             }),
             0xE032,
         );

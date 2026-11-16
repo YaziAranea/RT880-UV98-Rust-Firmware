@@ -974,7 +974,7 @@ fn rapid_menu_steps_with_battery_and_rf_updates_match_full_frame() {
     while app.render_pending() {
         rows += app.render_step(4).unwrap().rows;
     }
-    assert_eq!(rows, 15);
+    assert_eq!(rows, 67);
     for (index, key) in [
         Key::Down,
         Key::Down,
