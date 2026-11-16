@@ -18,6 +18,7 @@ struct Mock {
     fail_after: Option<usize>,
     calls: usize,
     mismatch: Option<u8>,
+    ack_clears_irq: bool,
     muted: bool,
     hf: bool,
     fail_from: Option<usize>,
@@ -31,6 +32,7 @@ impl Mock {
             fail_after: None,
             calls: 0,
             mismatch: None,
+            ack_clears_irq: false,
             muted: true,
             hf: false,
             fail_from: None,
@@ -58,6 +60,9 @@ impl Io for Mock {
     fn write(&mut self, r: u8, v: u16) -> Result<(), Self::Error> {
         self.event(Event::Write(r, v))?;
         self.words[r as usize] = v;
+        if self.ack_clears_irq && (r, v) == (0x02, 0) {
+            self.words[0x0c] &= !1;
+        }
         Ok(())
     }
     fn mute(&mut self, m: bool) -> Result<(), Self::Error> {
@@ -142,6 +147,110 @@ fn assert_off(r: &Runtime<Mock>) {
     assert_eq!(r.io.words[0x36], 0x007f);
     assert_eq!(r.io.words[0x30], 0);
     assert!(r.io.muted && !r.io.hf);
+}
+
+fn dtmf_ready() -> (Runtime<Mock>, u32) {
+    let (mut r, now) = ready();
+    r.io.ack_clears_irq = true;
+    r.io.words[0x21] = 0x0123;
+    r.io.words[0x24] = 0x001e;
+    r.io.words[0x3f] = 0x0040;
+    r.io.events.clear();
+    for _ in 0..17 {
+        r.observe_dtmf(audio(), 0).unwrap();
+    }
+    let coeffs: Vec<_> = r.io.events.iter().filter_map(|event| match event {
+        Event::Write(0x09, word) => Some(*word),
+        _ => None,
+    }).collect();
+    assert_eq!(coeffs, [
+        0x006f, 0x106b, 0x2067, 0x3062, 0x4050, 0x5047, 0x603a, 0x702c,
+        0x8041, 0x9037, 0xa025, 0xb017, 0xc0e4, 0xd0cb, 0xe0b5, 0xf09f,
+    ]);
+    assert_eq!(r.io.words[0x21], 0x06d8);
+    assert_eq!(r.io.words[0x24], 0xc17e);
+    assert_eq!(r.io.words[0x3f], 0x0840);
+    (r, now)
+}
+
+#[test]
+fn dtmf_rx_requires_a_new_symbol_irq_and_repeats_distinct_digits() {
+    let (mut r, mut now) = dtmf_ready();
+    for (status, decoder, text) in [
+        (0x0002, 0x1100, ""), // stale REG0B after acknowledge
+        (0x0003, 0x0800, ""), // an unrelated IRQ on a carrier
+        (0x0001, 0x1100, ""), // no carrier
+        (0x0003, 0x1100, "1"),
+        (0x0002, 0x1100, "1"), // same latched symbol, no new IRQ
+        (0x0003, 0x1100, "11"),
+        (0x0003, 0x1f00, "11#"),
+    ] {
+        now += 90;
+        r.tick(now, false).unwrap();
+        r.io.words[0x0c] = status;
+        r.io.words[0x0b] = decoder;
+        r.io.events.clear();
+        r.observe_dtmf(audio(), 0).unwrap();
+        assert_eq!(r.received_dtmf(now), text);
+        if status & 1 != 0 {
+            assert_eq!(&r.io.events[..4], &[
+                Event::Read(0x0c),
+                Event::Read(0x0b),
+                Event::Write(0x02, 0),
+                Event::Read(0x0c),
+            ]);
+        }
+    }
+    let timeout = uv98_signaling::dtmf_rx::DISPLAY_MS;
+    assert_eq!(r.received_dtmf(now + timeout - 1), "11#");
+    assert_eq!(r.received_dtmf(now + timeout), "");
+}
+
+#[test]
+fn dtmf_rx_restores_decoder_before_tx_and_clears_on_retune() {
+    let (mut r, mut now) = dtmf_ready();
+    r.io.words[0x0c] = 3;
+    r.io.words[0x0b] = 0x1200;
+    r.observe_dtmf(audio(), 0).unwrap();
+    assert_eq!(r.received_dtmf(now), "2");
+
+    r.transmit(&cal(), tx(), now, true).unwrap();
+    assert_eq!(r.received_dtmf(now), "");
+    assert_eq!(r.io.words[0x21], 0x0123);
+    assert_eq!(r.io.words[0x24], 0x001e);
+    assert_eq!(r.io.words[0x3f], 0x0040);
+    pump(&mut r, &mut now, true);
+    assert_eq!(r.state(), State::Transmitting);
+    now += 1;
+    assert!(r.tick(now, false).unwrap().tx_ended);
+    assert_off(&r);
+
+    r.receive(&cal(), rx(), now).unwrap();
+    pump(&mut r, &mut now, false);
+    r.observe_dtmf(audio(), 0).unwrap();
+    assert_eq!(r.io.words[0x24], 0xc17e);
+    r.io.words[0x0c] = 3;
+    r.io.words[0x0b] = 0x1300;
+    r.observe_dtmf(audio(), 0).unwrap();
+    assert_eq!(r.received_dtmf(now), "3");
+    r.receive(&cal(), rx(), now).unwrap();
+    pump(&mut r, &mut now, false);
+    r.observe_dtmf(audio(), 0).unwrap();
+    assert_eq!(r.received_dtmf(now), "");
+}
+
+#[test]
+fn dtmf_rx_restores_decoder_when_fm_observation_is_disabled() {
+    let (mut r, now) = dtmf_ready();
+    r.io.words[0x0c] = 3;
+    r.io.words[0x0b] = 0x1400;
+    r.observe_dtmf(audio(), 0).unwrap();
+    assert_eq!(r.received_dtmf(now), "4");
+    r.observe_dtmf(Audio { modulation: Modulation::Am, ..audio() }, 0).unwrap();
+    assert_eq!(r.io.words[0x21], 0x0123);
+    assert_eq!(r.io.words[0x24], 0x001e);
+    assert_eq!(r.io.words[0x3f], 0x0040);
+    assert_eq!(r.received_dtmf(now), "");
 }
 #[test]
 fn cold_rx_tx_release_round_trip() {

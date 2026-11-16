@@ -9,6 +9,7 @@ use uv98_rf_sequence::{self as sequence, Modulation, Plan, RxRequest, Step, TxRe
 
 pub mod capabilities;
 pub mod crossband;
+mod dtmf_rx;
 pub mod lighting;
 pub mod mdc1200;
 pub mod policy;
@@ -141,6 +142,7 @@ pub struct Runtime<I: Io> {
     indicator_state: Option<(bool, bool)>,
     backlight_state: Option<(bool, bool)>,
     signaling_baseline: Option<(u16, u16)>,
+    dtmf_rx: dtmf_rx::Receiver,
     mdc_modem: Option<mdc1200::Modem>,
 }
 
@@ -167,6 +169,7 @@ impl<I: Io> Runtime<I> {
             indicator_state: None,
             backlight_state: None,
             signaling_baseline: None,
+            dtmf_rx: dtmf_rx::Receiver::default(),
             mdc_modem: None,
         }
     }
@@ -272,6 +275,9 @@ impl<I: Io> Runtime<I> {
         }
         if self.cleanup_mdc() {
             // Bit7 groups independent modulation cleanup requests.
+            errors |= 1 << 7;
+        }
+        if self.restore_dtmf_rx().is_err() {
             errors |= 1 << 7;
         }
         if let Some((reg50, reg70)) = self.signaling_baseline.take() {
@@ -417,6 +423,7 @@ impl<I: Io> Runtime<I> {
             return Err(self.reject(Error::State));
         }
         self.advance_clock(now)?;
+        self.stop_dtmf_rx()?;
         self.state = State::Configuring;
         self.target = target;
         self.plan = Some(plan);
@@ -622,35 +629,73 @@ impl<I: Io> Runtime<I> {
         audio: Audio,
         tone_detected: Option<bool>,
     ) -> Result<Signal, Fault<I::Error>> {
-        let status = self.receive_status()?;
+        if self.state == State::Receiving {
+            self.stop_dtmf_rx()?;
+        }
+        let (status, _) = self.receive_status()?;
         self.signal_at(audio, tone_detected, status)
     }
-    fn receive_status(&mut self) -> Result<u16, Fault<I::Error>> {
+    fn receive_status(&mut self) -> Result<(u16, u16), Fault<I::Error>> {
         if self.state != State::Receiving {
             return Err(self.reject(Error::State));
         }
         let mut status = self.read(0x0c)?;
+        let mut decoder = 0;
         if status & 1 != 0 {
             // Proven stock IRQ acknowledgement. No unbounded drain and no FSK
             // handler claim; a still-pending IRQ cannot qualify a receive tone.
-            let _ = self.read(0x0b)?;
+            decoder = self.read(0x0b)?;
             self.write(0x02, 0)?;
             status = self.read(0x0c)?;
         }
-        Ok(status)
+        Ok((status, decoder))
     }
     /// Hardware entry: fresh status and bounded IRQ acknowledgement, then the
     /// stock tone decision. Call at most once per foreground loop, no sooner
     /// than 1ms after the preceding observation. No catch-up burst. Stock's
     /// gain hold counts calls, not wall-clock milliseconds.
-    pub fn observe(&mut self, mut audio: Audio, raw_tone: u16) -> Result<Signal, Fault<I::Error>> {
-        let status = self.receive_status()?;
+    pub fn observe(&mut self, audio: Audio, raw_tone: u16) -> Result<Signal, Fault<I::Error>> {
+        self.observe_inner(audio, raw_tone, false)
+    }
+
+    /// Observe ordinary primary BK4819 FM receive with DTMF digit capture.
+    /// Only one latched event is serviced per observation. The first FM RX
+    /// after startup loads decoder coefficients one at a time. Call `observe`
+    /// for modes where the decoder should be inactive.
+    pub fn observe_dtmf(&mut self, audio: Audio, raw_tone: u16) -> Result<Signal, Fault<I::Error>> {
+        self.observe_inner(audio, raw_tone, audio.modulation == Modulation::Fm)
+    }
+
+    fn observe_inner(
+        &mut self,
+        mut audio: Audio,
+        raw_tone: u16,
+        dtmf: bool,
+    ) -> Result<Signal, Fault<I::Error>> {
+        if self.state != State::Receiving {
+            return Err(self.reject(Error::State));
+        }
+        let capture = if dtmf {
+            self.prepare_dtmf_rx()?
+        } else {
+            self.stop_dtmf_rx()?;
+            false
+        };
+        let (status, decoder) = self.receive_status()?;
         audio.tone_required = raw_tone != 0;
         let mut result = self.signal_at(
             audio,
             Some(sequence::tone_matches(status, raw_tone)),
             status,
         )?;
+        if let Some(now) = self.last_now.filter(|_| capture) {
+            self.dtmf_rx.text.expire(now);
+            let has_carrier = status & 2 != 0;
+            let found = decoder & dtmf_rx::SYMBOL_FOUND != 0;
+            if found && has_carrier && result.audio_open {
+                self.dtmf_rx.text.push(((decoder >> 8) & 0xf) as u8, now);
+            }
+        }
         if audio.modulation == Modulation::Am && result.audio_open {
             // Count elapsed time during the hold even if LCD or NOR work
             // delayed this sample. Still issue at most one gain update.

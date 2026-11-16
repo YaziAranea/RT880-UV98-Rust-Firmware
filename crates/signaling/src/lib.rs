@@ -5,6 +5,7 @@
 
 pub mod aprs;
 pub mod cmx868;
+pub mod dtmf_rx;
 pub mod mdc1200;
 pub mod tones;
 

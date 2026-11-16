@@ -69,6 +69,7 @@ impl<I: Io> Runtime<I> {
             return Err(self.fail(Error::State));
         }
         self.advance_clock(now)?;
+        self.stop_dtmf_rx()?;
         let checked = self.io.verify_control();
         self.io_result(checked)?;
         let muted = self.io.mute(true);
