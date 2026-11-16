@@ -287,7 +287,7 @@ fn radio_settings<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
 ) -> Option<policy::Settings> {
     app.radio_config().map(|cfg| policy::Settings {
         squelch: cfg.squelch,
-        mic_gain: cfg.mic_gain,
+        mic_gain: app.status().view.microphone_gain,
         fm_volume: cfg.fm_volume,
         am_volume: cfg.am_volume,
         squelch_delay: cfg.squelch_delay,
@@ -835,6 +835,8 @@ fn main() -> ! {
     let mut stock_roger = [0u8; 1];
     let _ = app.read_auxiliary_config(76, &mut stock_name);
     let _ = app.read_auxiliary_config(166, &mut stock_roger);
+    let stock_microphone_gain = app.radio_config().map_or(16, |cfg| cfg.mic_gain);
+    app.apply_microphone_gain(stock_microphone_gain);
     #[cfg(not(feature = "pa5-audio"))]
     let mut name_store = match unsafe { uv98_settings_store::hardware::FlashStore::new(p.FLASH) } {
         Err(uv98_settings_store::Error::Protection) => None,
@@ -855,6 +857,7 @@ fn main() -> ! {
         stored.unwrap_or(uv98_settings_store::Settings {
             name: stock_name,
             roger_enabled: stock_roger[0] == 3,
+            microphone_gain: Some(app.status().view.microphone_gain),
         })
     };
     #[cfg(not(feature = "pa5-audio"))]
@@ -863,6 +866,12 @@ fn main() -> ! {
             uv98_signaling::radio_name::RadioName::from_payload(saved_name_settings.name),
             saved_name_settings.roger_enabled,
         );
+        app.apply_microphone_gain(
+            saved_name_settings
+                .microphone_gain
+                .unwrap_or(stock_microphone_gain),
+        );
+        saved_name_settings.microphone_gain = Some(app.status().view.microphone_gain);
         // Unsupported stock encodings remain untouched in NOR, and are not
         // accidentally persisted as a change by the ASCII editor at boot.
         saved_name_settings.name = app
@@ -1276,6 +1285,7 @@ fn main() -> ! {
             let desired = uv98_settings_store::Settings {
                 name: name.map_or([0xff; 16], |name| name.payload()),
                 roger_enabled: enabled,
+                microphone_gain: Some(app.status().view.microphone_gain),
             };
             if desired != saved_name_settings
                 && radio.initialized()
@@ -1318,6 +1328,12 @@ fn main() -> ! {
                         ),
                         saved_name_settings.roger_enabled,
                     );
+                    app.apply_microphone_gain(
+                        saved_name_settings
+                            .microphone_gain
+                            .unwrap_or(stock_microphone_gain),
+                    );
+                    saved_name_settings.microphone_gain = Some(app.status().view.microphone_gain);
                     saved_name_settings.name = app
                         .status()
                         .view

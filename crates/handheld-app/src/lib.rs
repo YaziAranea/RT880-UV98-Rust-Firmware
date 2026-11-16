@@ -442,6 +442,10 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         self.controller.apply_radio_name_settings(name, enabled);
         self.status.view = self.controller.view();
     }
+    pub fn apply_microphone_gain(&mut self, gain: u8) {
+        self.controller.apply_microphone_gain(gain);
+        self.status.view = self.controller.view();
+    }
     pub fn report_name_save(&mut self, confirmed: bool) -> Result<(), Error<N::Error, L::Error>> {
         self.controller.report_name_save(confirmed);
         self.status.view = self.controller.view();

@@ -4,7 +4,8 @@ pub const PAGE_SIZE: usize = 2048;
 pub const WORDS: usize = 8;
 const SLOTS: usize = PAGE_SIZE / (WORDS * size_of::<u32>());
 const ERASED: u32 = u32::MAX;
-const HEADER: u32 = 0x5556_0100; // "UV", schema 1, flags in the low byte.
+const LEGACY_HEADER: u32 = 0x5556_0100;
+const HEADER: u32 = 0x5556_0200; // "UV", schema 2, flags in the low byte.
 const COMMIT: u32 = 0x51A7_6E39;
 const COMMIT_INDEX: usize = WORDS - 1;
 type Words = [u32; WORDS];
@@ -48,19 +49,34 @@ impl Entry {
         {
             *destination = u32::from_le_bytes(name);
         }
-        words[5] = HEADER | u32::from(self.settings.roger_enabled);
+        words[5] = HEADER
+            | u32::from(self.settings.roger_enabled)
+            | self
+                .settings
+                .microphone_gain
+                .map_or(0, |gain| 0x40 | (u32::from(gain) << 1));
         words[6] = crc32(&words[..6]);
         words[COMMIT_INDEX] = COMMIT;
         words
     }
 
     fn decode(words: Words) -> Option<Self> {
-        if words[COMMIT_INDEX] != COMMIT
-            || words[5] & !1 != HEADER
-            || crc32(&words[..6]) != words[6]
-        {
+        if words[COMMIT_INDEX] != COMMIT || crc32(&words[..6]) != words[6] {
             return None;
         }
+        let microphone_gain = if words[5] & !1 == LEGACY_HEADER {
+            None
+        } else if words[5] & !0x7f == HEADER {
+            if words[5] & 0x40 != 0 {
+                Some(((words[5] >> 1) & 31) as u8)
+            } else if words[5] & 0x3e == 0 {
+                None
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        };
         let mut name = [0; 16];
         for (destination, word) in name.as_chunks_mut::<4>().0.iter_mut().zip(&words[1..5]) {
             *destination = word.to_le_bytes();
@@ -70,6 +86,7 @@ impl Entry {
             settings: Settings {
                 name,
                 roger_enabled: words[5] & 1 != 0,
+                microphone_gain,
             },
         })
     }
@@ -115,6 +132,9 @@ pub fn load(storage: &mut impl Storage) -> Result<Option<Settings>, Error> {
 }
 
 pub fn save(storage: &mut impl Storage, settings: Settings) -> Result<(), Error> {
+    if settings.microphone_gain.is_some_and(|gain| gain > 31) {
+        return Err(Error::InvalidSettings);
+    }
     let (active, generation) = match latest(storage)? {
         Some((_, entry)) if settings == entry.settings => return Ok(()),
         Some((page, entry)) => (page, entry.generation.wrapping_add(1)),

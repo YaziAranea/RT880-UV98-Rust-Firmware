@@ -99,6 +99,50 @@ fn settings(seed: u8) -> Settings {
     Settings {
         name: [seed; 16],
         roger_enabled: seed & 1 != 0,
+        microphone_gain: Some(seed & 31),
+    }
+}
+
+#[test]
+fn microphone_levels_round_trip_and_schema_one_retains_factory_gain() {
+    for gain in 0..32 {
+        let mut saved = settings(42);
+        saved.microphone_gain = Some(gain);
+        let record = Entry {
+            generation: 7,
+            settings: saved,
+        }
+        .encode();
+        assert_eq!(Entry::decode(record).unwrap().settings, saved);
+    }
+    let mut legacy = Entry {
+        generation: 8,
+        settings: settings(43),
+    }
+    .encode();
+    legacy[5] = LEGACY_HEADER | 1;
+    legacy[6] = crc32(&legacy[..6]);
+    let loaded = Entry::decode(legacy).unwrap();
+    assert_eq!(loaded.settings.microphone_gain, None);
+    assert!(loaded.settings.roger_enabled);
+    assert_eq!(loaded.settings.name, [43; 16]);
+    let mut malformed = legacy;
+    malformed[5] = HEADER | 2; // Gain bits without the validity flag.
+    malformed[6] = crc32(&malformed[..6]);
+    assert!(Entry::decode(malformed).is_none());
+}
+
+#[test]
+fn invalid_microphone_gain_is_rejected_before_storage_access() {
+    let mut model = Model {
+        read_error: true,
+        ..Model::default()
+    };
+    for gain in [32, 63, 128, 255] {
+        let mut invalid = settings(42);
+        invalid.microphone_gain = Some(gain);
+        assert_eq!(save(&mut model, invalid), Err(Error::InvalidSettings));
+        assert_eq!(model.operations, 0);
     }
 }
 
@@ -118,6 +162,7 @@ fn record_round_trip_and_crc_reject_every_single_bit_corruption() {
         settings: Settings {
             name: *b"ABCD\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff",
             roger_enabled: true,
+            microphone_gain: Some(31),
         },
     };
     let words = entry.encode();

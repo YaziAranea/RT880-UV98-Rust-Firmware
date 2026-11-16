@@ -656,3 +656,42 @@ fn second_receiver_probe_keeps_all_transmit_controls_off() {
         .iter()
         .all(|step| matches!(step, Step::WriteA { .. } | Step::DelayMs(_))));
 }
+
+#[test]
+fn microphone_sensitivity_does_not_change_power_deviation_or_tone() {
+    let bytes = fixture();
+    let cal = Calibration::parse(&bytes).unwrap();
+    let request = TxRequest {
+        frequency_10hz: 14_550_000,
+        width: Width::Narrow,
+        tone: 0x1375,
+        tone_mode: 0,
+        option_nibble: 0,
+        power: 1,
+        mic_gain: 0,
+    };
+    let baseline = run(sequence::transmit(&cal, request).unwrap().operations());
+    for gain in [0, 1, 16, 31] {
+        let actual = run(sequence::transmit(
+            &cal,
+            TxRequest {
+                mic_gain: gain,
+                ..request
+            },
+        )
+        .unwrap()
+        .operations());
+        assert_eq!(actual.len(), baseline.len());
+        let mut gain_writes = 0;
+        for (expected, actual) in baseline.iter().zip(&actual) {
+            if expected.kind == "write" && expected.target == "A" && expected.register == 0x7d {
+                gain_writes += 1;
+                assert_eq!(actual.value & 31, u16::from(gain));
+                assert_eq!(actual.value & !31, expected.value & !31);
+            } else {
+                assert_eq!(actual, expected);
+            }
+        }
+        assert_eq!(gain_writes, 1);
+    }
+}

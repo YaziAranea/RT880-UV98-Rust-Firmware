@@ -146,6 +146,7 @@ pub enum Setting {
     GpsBaud,
     Dtmf,
     NameRoger,
+    MicrophoneGain,
 }
 
 impl Setting {
@@ -154,7 +155,9 @@ impl Setting {
     }
 
     pub const fn choice_count(self) -> u8 {
-        if matches!(self, Self::GpsBaud) {
+        if matches!(self, Self::MicrophoneGain) {
+            32
+        } else if matches!(self, Self::GpsBaud) {
             10
         } else if matches!(self, Self::BandPreset) {
             4
@@ -208,10 +211,11 @@ pub enum MenuItem {
     Mdc,
     RadioName,
     NameRoger,
+    MicrophoneGain,
 }
 
 /// Full catalog for tooling. The visible menu uses `menu_entries`.
-pub const MENU_ITEMS: [MenuItem; 32] = [
+pub const MENU_ITEMS: [MenuItem; 33] = [
     MenuItem::Mode,
     MenuItem::Modulation,
     MenuItem::Channels,
@@ -244,6 +248,7 @@ pub const MENU_ITEMS: [MenuItem; 32] = [
     MenuItem::Mdc,
     MenuItem::RadioName,
     MenuItem::NameRoger,
+    MenuItem::MicrophoneGain,
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -316,6 +321,7 @@ pub const fn menu_entries(group: Option<MenuGroup>) -> &'static [MenuEntry] {
             Item(MenuItem::Dtmf),
             Item(MenuItem::RadioName),
             Item(MenuItem::NameRoger),
+            Item(MenuItem::MicrophoneGain),
         ],
     }
 }
@@ -688,6 +694,8 @@ pub struct View {
     pub mdc: [MdcSettings; 2],
     pub radio_name: Option<RadioName>,
     pub name_roger_enabled: bool,
+    /// BK4819 microphone sensitivity code, 0..31. Zero is minimum, not mute.
+    pub microphone_gain: u8,
     pub radio_name_draft: Option<Editor<NAME_BYTES>>,
     pub mdc_option: u8,
     pub mdc_draft: Option<MdcDraft>,
@@ -699,6 +707,7 @@ pub struct View {
     pub aprs_ssid: u8,
     pub dtmf_enabled: bool,
     pub shortwave_scope: bool,
+    pub shortwave_scope_points: u8,
     pub shortwave_filter: u8,
     pub shortwave_soft_mute: bool,
     pub shortwave_khz: u32,
@@ -933,6 +942,7 @@ impl Controller {
                 mdc: [MdcSettings { mode: 0, id: None }; 2],
                 radio_name: None,
                 name_roger_enabled: false,
+                microphone_gain: 16,
                 radio_name_draft: None,
                 mdc_option: 0,
                 mdc_draft: None,
@@ -944,6 +954,7 @@ impl Controller {
                 aprs_ssid: 0,
                 dtmf_enabled: true,
                 shortwave_scope: false,
+                shortwave_scope_points: 8,
                 shortwave_filter: 1,
                 shortwave_soft_mute: false,
                 screen: Screen::Home,
@@ -1096,6 +1107,11 @@ impl Controller {
         self.view.radio_name = name;
         self.view.name_roger_enabled = enabled;
     }
+    pub fn apply_microphone_gain(&mut self, gain: u8) {
+        if gain <= 31 {
+            self.view.microphone_gain = gain;
+        }
+    }
     /// Firmware calls this only after the persistent store has returned.
     pub fn report_name_save(&mut self, confirmed: bool) {
         self.view.notice = if confirmed {
@@ -1112,6 +1128,7 @@ impl Controller {
             Setting::GpsBaud => self.view.gps_baud,
             Setting::Dtmf => u8::from(self.view.dtmf_enabled),
             Setting::NameRoger => u8::from(self.view.name_roger_enabled),
+            Setting::MicrophoneGain => self.view.microphone_gain,
             Setting::TopKey => {
                 self.view.top_draft = self.view.top_key;
                 self.view.top_action
@@ -1158,6 +1175,7 @@ impl Controller {
             Setting::GpsBaud => self.view.gps_baud = selected,
             Setting::Dtmf => self.view.dtmf_enabled = selected != 0,
             Setting::NameRoger => self.view.name_roger_enabled = selected != 0,
+            Setting::MicrophoneGain => self.apply_microphone_gain(selected),
             Setting::BandPreset => {
                 // Presets select frequency, modulation and step together. The
                 // RF runtime still derives its relay route from frequency.
@@ -1864,6 +1882,15 @@ impl Controller {
             InputEvent::Hold(Key::Digit0) if self.view.shortwave_entry.is_none() => {
                 self.view.shortwave_scope = !self.view.shortwave_scope;
                 self.view.shortwave_scan = false;
+            }
+            InputEvent::Short(Key::Hash)
+                if self.view.shortwave_scope && self.view.shortwave_entry.is_none() =>
+            {
+                self.view.shortwave_scope_points = match self.view.shortwave_scope_points {
+                    8 => 16,
+                    16 => 32,
+                    _ => 8,
+                };
             }
             InputEvent::Hold(Key::Digit1)
                 if self.view.shortwave_entry.is_none()
@@ -3089,6 +3116,7 @@ impl Controller {
                     MenuItem::GpsBaud => self.open_setting(Setting::GpsBaud),
                     MenuItem::Dtmf => self.open_setting(Setting::Dtmf),
                     MenuItem::NameRoger => self.open_setting(Setting::NameRoger),
+                    MenuItem::MicrophoneGain => self.open_setting(Setting::MicrophoneGain),
                     MenuItem::RadioName => {
                         let text = self.view.radio_name.as_ref().map_or("", RadioName::as_str);
                         self.view.radio_name_draft = Some(Editor::new(
@@ -3678,6 +3706,49 @@ mod tests {
             MenuEntry::Item(item)
         );
         press(ui, Key::Menu, bitmap)
+    }
+
+    #[test]
+    fn microphone_gain_commits_only_on_menu_and_rejects_invalid_restore() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        ui.apply_microphone_gain(12);
+        assert_eq!(
+            choose_menu(&mut ui, MenuItem::MicrophoneGain, &bitmap).request,
+            None
+        );
+        press(&mut ui, Key::Down, &bitmap);
+        assert_eq!(ui.view.microphone_gain, 12);
+        press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(ui.view.microphone_gain, 12);
+        choose_menu(&mut ui, MenuItem::MicrophoneGain, &bitmap);
+        press(&mut ui, Key::Down, &bitmap);
+        assert_eq!(press(&mut ui, Key::Menu, &bitmap).request, None);
+        assert_eq!(ui.view.microphone_gain, 13);
+        ui.select_slot(Slot::B);
+        assert_eq!(ui.view.microphone_gain, 13);
+        ui.apply_microphone_gain(31);
+        choose_menu(&mut ui, MenuItem::MicrophoneGain, &bitmap);
+        press(&mut ui, Key::Down, &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(ui.view.microphone_gain, 0);
+        ui.apply_microphone_gain(255);
+        assert_eq!(ui.view.microphone_gain, 0);
+    }
+
+    #[test]
+    fn shortwave_scope_resolution_cycles_without_retuning_center() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        ui.view.screen = Screen::Shortwave;
+        let tuning = (ui.view.shortwave_khz, ui.view.shortwave_mode);
+        ui.handle(InputEvent::Hold(Key::Digit0), &bitmap);
+        assert!(ui.view.shortwave_scope);
+        for points in [16, 32, 8] {
+            assert_eq!(press(&mut ui, Key::Hash, &bitmap).request, None);
+            assert_eq!(ui.view.shortwave_scope_points, points);
+            assert_eq!((ui.view.shortwave_khz, ui.view.shortwave_mode), tuning);
+        }
     }
 
     #[test]
@@ -4675,6 +4746,7 @@ mod tests {
                 Item(MenuItem::Dtmf),
                 Item(MenuItem::RadioName),
                 Item(MenuItem::NameRoger),
+                Item(MenuItem::MicrophoneGain),
             ]
         );
     }

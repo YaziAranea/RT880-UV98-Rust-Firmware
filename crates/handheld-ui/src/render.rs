@@ -2937,6 +2937,7 @@ fn setting_title(setting: Setting) -> &'static str {
         Setting::GpsBaud => "\x1f11C",
         Setting::Dtmf => "\x1f00F",
         Setting::NameRoger => "\x1f16E",
+        Setting::MicrophoneGain => "\x1f174",
         Setting::TopKey => "\x1f091",
         Setting::BottomKey => "\x1f092",
         Setting::Shift => "\x1f101",
@@ -2955,6 +2956,11 @@ fn setting_title(setting: Setting) -> &'static str {
 
 fn setting_options(setting: Setting) -> &'static [&'static str] {
     match setting {
+        Setting::MicrophoneGain => &[
+            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15",
+            "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29",
+            "30", "31",
+        ],
         Setting::BandPreset => &[
             "VHF / 145.500",
             "UHF / 433.500",
@@ -2991,6 +2997,7 @@ fn setting_geometry(setting: Setting) -> (u16, u16, u16) {
             | Setting::Shift
             | Setting::TxTone
             | Setting::GpsBaud
+            | Setting::MicrophoneGain
     ) {
         (100, 26, 22)
     } else {
@@ -3030,6 +3037,7 @@ fn current_setting_label(model: &Model<'_>, setting: Setting) -> &'static str {
         Setting::GpsBaud => usize::from(model.view.gps_baud),
         Setting::Dtmf => usize::from(model.view.dtmf_enabled),
         Setting::NameRoger => usize::from(model.view.name_roger_enabled),
+        Setting::MicrophoneGain => usize::from(model.view.microphone_gain),
         Setting::TopKey => usize::from(model.view.top_action),
         Setting::BottomKey => usize::from(model.view.bottom_action),
         Setting::Shift => usize::from(model.view.shift_index),
@@ -3164,6 +3172,7 @@ pub fn menu_label(item: MenuItem) -> &'static str {
         MenuItem::Mdc => "MDC1200",
         MenuItem::RadioName => "\x1f16D",
         MenuItem::NameRoger => "\x1f16E",
+        MenuItem::MicrophoneGain => "\x1f174",
         MenuItem::BandPreset => "\x1f069",
         MenuItem::Gps => "\x1f01B",
         MenuItem::GpsEnable => "\x1f0E1",
@@ -4403,6 +4412,7 @@ mod tests {
             mdc: [crate::controller::MdcSettings { mode: 0, id: None }; 2],
             radio_name: None,
             name_roger_enabled: false,
+            microphone_gain: 16,
             radio_name_draft: None,
             mdc_option: 0,
             mdc_draft: None,
@@ -4414,6 +4424,7 @@ mod tests {
             aprs_ssid: 0,
             dtmf_enabled: true,
             shortwave_scope: false,
+            shortwave_scope_points: 8,
             shortwave_filter: 1,
             shortwave_soft_mute: false,
             screen,
