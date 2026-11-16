@@ -21,7 +21,20 @@ const DWT_CYCCNT: *const u32 = 0xe000_1004 as *const u32;
 const ERASE_DEADLINE_CYCLES: u32 = 48_000 * 50; // 50 ms, DS max 16 ms.
 const PROGRAM_DEADLINE_CYCLES: u32 = 48_000 * 2; // 2 ms, DS max 42 us.
 
-global_asm!(include_str!("flash.s"), options(raw));
+// Read the base from the PAC's const generic. A pointer-to-integer cast is
+// unavailable in const evaluation, and the RAM routine needs immediates.
+const fn periph_address<R, const ADDRESS: usize>(
+    _: Option<at32f4xx_pac::Periph<R, ADDRESS>>,
+) -> usize {
+    ADDRESS
+}
+
+const FLASH_BASE: usize = periph_address(None::<FLASH>);
+global_asm!(
+    include_str!("flash.s"),
+    flash_base_lo = const FLASH_BASE & 0xffff,
+    flash_base_hi = const FLASH_BASE >> 16,
+);
 
 extern "C" {
     static __settings_start: u8;

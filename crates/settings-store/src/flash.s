@@ -11,7 +11,7 @@
  * No literal pool, call or Flash load during OBF. PRIMASK is restored after
  * lock. Access valid FLASH->ADDR and main-array addresses only. */
 __uv98_flash_op:
-    push    {r4-r7, lr}
+    push    {{r4-r7, lr}}
     mrs     r4, primask
     cpsid   i
 
@@ -31,8 +31,8 @@ __uv98_flash_op:
     bne     .Lcontroller
 
 .Lcheck_bus:
-    movw    r5, #0x2000
-    movt    r5, #0x4002             /* FLASH register base */
+    movw    r5, #{flash_base_lo}
+    movt    r5, #{flash_base_hi}    /* AT32F423 FLASH: 0x40023c00 */
     ldr     r6, [r5, #0x0c]
     tst     r6, #1                  /* OBF */
     bne     .Lawait_watchdog
@@ -125,6 +125,6 @@ __uv98_flash_op:
     dsb     sy
     isb     sy
     msr     primask, r4
-    pop     {r4-r7, pc}
+    pop     {{r4-r7, pc}}
 __uv98_flash_op_end:
 .size __uv98_flash_op, . - __uv98_flash_op
