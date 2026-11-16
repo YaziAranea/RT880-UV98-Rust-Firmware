@@ -8,7 +8,9 @@ use uv98_signaling::dtmf_rx::DtmfRx;
 const COEFFICIENTS: [u8; 16] = [
     0x6f, 0x6b, 0x67, 0x62, 0x50, 0x47, 0x3a, 0x2c, 0x41, 0x37, 0x25, 0x17, 0xe4, 0xcb, 0xb5, 0x9f,
 ];
-const DETECTOR_THRESHOLD: u16 = 130;
+// Native RT880 CPS calls CFG[519] the decode threshold. The examined stock
+// configuration exports use 22. CFG[518] is the separate TX tone gain.
+const DETECTOR_THRESHOLD: u16 = 22;
 const DETECTOR_CONTROL: u16 = 0x807e | (DETECTOR_THRESHOLD << 7);
 const DTMF_IRQ: u16 = 1 << 11;
 

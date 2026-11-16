@@ -159,16 +159,23 @@ fn dtmf_ready() -> (Runtime<Mock>, u32) {
     for _ in 0..17 {
         r.observe_dtmf(audio(), 0).unwrap();
     }
-    let coeffs: Vec<_> = r.io.events.iter().filter_map(|event| match event {
-        Event::Write(0x09, word) => Some(*word),
-        _ => None,
-    }).collect();
-    assert_eq!(coeffs, [
-        0x006f, 0x106b, 0x2067, 0x3062, 0x4050, 0x5047, 0x603a, 0x702c,
-        0x8041, 0x9037, 0xa025, 0xb017, 0xc0e4, 0xd0cb, 0xe0b5, 0xf09f,
-    ]);
+    let coeffs: Vec<_> =
+        r.io.events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Write(0x09, word) => Some(*word),
+                _ => None,
+            })
+            .collect();
+    assert_eq!(
+        coeffs,
+        [
+            0x006f, 0x106b, 0x2067, 0x3062, 0x4050, 0x5047, 0x603a, 0x702c, 0x8041, 0x9037, 0xa025,
+            0xb017, 0xc0e4, 0xd0cb, 0xe0b5, 0xf09f,
+        ]
+    );
     assert_eq!(r.io.words[0x21], 0x06d8);
-    assert_eq!(r.io.words[0x24], 0xc17e);
+    assert_eq!(r.io.words[0x24], 0x8b7e);
     assert_eq!(r.io.words[0x3f], 0x0840);
     (r, now)
 }
@@ -193,12 +200,15 @@ fn dtmf_rx_requires_a_new_symbol_irq_and_repeats_distinct_digits() {
         r.observe_dtmf(audio(), 0).unwrap();
         assert_eq!(r.received_dtmf(now), text);
         if status & 1 != 0 {
-            assert_eq!(&r.io.events[..4], &[
-                Event::Read(0x0c),
-                Event::Read(0x0b),
-                Event::Write(0x02, 0),
-                Event::Read(0x0c),
-            ]);
+            assert_eq!(
+                &r.io.events[..4],
+                &[
+                    Event::Read(0x0c),
+                    Event::Read(0x0b),
+                    Event::Write(0x02, 0),
+                    Event::Read(0x0c),
+                ]
+            );
         }
     }
     let timeout = uv98_signaling::dtmf_rx::DISPLAY_MS;
@@ -228,7 +238,7 @@ fn dtmf_rx_restores_decoder_before_tx_and_clears_on_retune() {
     r.receive(&cal(), rx(), now).unwrap();
     pump(&mut r, &mut now, false);
     r.observe_dtmf(audio(), 0).unwrap();
-    assert_eq!(r.io.words[0x24], 0xc17e);
+    assert_eq!(r.io.words[0x24], 0x8b7e);
     r.io.words[0x0c] = 3;
     r.io.words[0x0b] = 0x1300;
     r.observe_dtmf(audio(), 0).unwrap();
@@ -246,7 +256,14 @@ fn dtmf_rx_restores_decoder_when_fm_observation_is_disabled() {
     r.io.words[0x0b] = 0x1400;
     r.observe_dtmf(audio(), 0).unwrap();
     assert_eq!(r.received_dtmf(now), "4");
-    r.observe_dtmf(Audio { modulation: Modulation::Am, ..audio() }, 0).unwrap();
+    r.observe_dtmf(
+        Audio {
+            modulation: Modulation::Am,
+            ..audio()
+        },
+        0,
+    )
+    .unwrap();
     assert_eq!(r.io.words[0x21], 0x0123);
     assert_eq!(r.io.words[0x24], 0x001e);
     assert_eq!(r.io.words[0x3f], 0x0040);
