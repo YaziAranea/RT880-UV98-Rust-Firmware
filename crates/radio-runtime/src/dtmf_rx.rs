@@ -30,6 +30,7 @@ struct Baseline {
 #[derive(Default)]
 pub(super) struct Receiver {
     pub(super) text: DtmfRx,
+    slot: Option<uv98_handheld_ui::controller::Slot>,
     coefficients_written: usize,
     baseline: Option<Baseline>,
 }
@@ -49,6 +50,25 @@ impl<I: Io> Runtime<I> {
         } else {
             ""
         }
+    }
+
+    /// Bind decoded symbols to the actual logical receiver, even when A and B
+    /// have identical RF settings and switching focus needs no hardware retune.
+    pub fn observe_dtmf_for_slot(
+        &mut self,
+        audio: crate::Audio,
+        raw_tone: u16,
+        slot: uv98_handheld_ui::controller::Slot,
+    ) -> Result<crate::Signal, Fault<I::Error>> {
+        if self.dtmf_rx.slot != Some(slot) {
+            self.stop_dtmf_rx()?;
+            self.dtmf_rx.slot = Some(slot);
+        }
+        self.observe_dtmf(audio, raw_tone)
+    }
+
+    pub fn received_dtmf_slot(&self) -> Option<uv98_handheld_ui::controller::Slot> {
+        self.dtmf_rx.slot
     }
 
     pub(super) fn prepare_dtmf_rx(&mut self) -> Result<(), Fault<I::Error>> {
@@ -80,6 +100,7 @@ impl<I: Io> Runtime<I> {
 
     pub(super) fn restore_dtmf_rx(&mut self) -> Result<(), I::Error> {
         self.dtmf_rx.text.clear();
+        self.dtmf_rx.slot = None;
         let Some(saved) = self.dtmf_rx.baseline.take() else {
             return Ok(());
         };

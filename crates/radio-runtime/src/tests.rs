@@ -289,6 +289,33 @@ fn dtmf_rx_keeps_the_last_digit_when_carrier_drops_during_acknowledgement() {
 }
 
 #[test]
+fn dtmf_rx_same_frequency_slot_switch_drops_old_digits_and_pending_irq() {
+    use uv98_handheld_ui::controller::Slot;
+    let (mut r, now) = dtmf_ready();
+    r.observe_dtmf_for_slot(audio(), 0, Slot::A).unwrap();
+    r.io.words[0x0c] = 3;
+    r.io.words[0x0b] = 0x0100;
+    r.io.pending_irq_cause = 0x0800;
+    r.observe_dtmf_for_slot(audio(), 0, Slot::A).unwrap();
+    assert_eq!(r.received_dtmf(now), "1");
+    assert_eq!(r.received_dtmf_slot(), Some(Slot::A));
+    // A second event was latched while A still owned this same-frequency RX.
+    r.io.words[0x0c] = 3;
+    r.io.pending_irq_cause = 0x0800;
+    r.observe_dtmf_for_slot(audio(), 0, Slot::B).unwrap();
+    assert_eq!(r.state(), State::Receiving);
+    assert_eq!(r.received_dtmf(now), "");
+    assert_eq!(r.received_dtmf_slot(), Some(Slot::B));
+    r.io.words[0x0c] = 3;
+    r.io.words[0x0b] = 0x0200;
+    r.io.pending_irq_cause = 0x0800;
+    r.observe_dtmf_for_slot(audio(), 0, Slot::B).unwrap();
+    assert_eq!(r.received_dtmf(now), "2");
+    r.observe(audio(), 0).unwrap();
+    assert_eq!(r.received_dtmf_slot(), None);
+}
+
+#[test]
 fn dtmf_rx_restores_decoder_before_tx_and_clears_on_retune() {
     let (mut r, mut now) = dtmf_ready();
     r.io.words[0x0c] = 3;

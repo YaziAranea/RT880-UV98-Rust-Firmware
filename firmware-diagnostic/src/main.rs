@@ -1083,8 +1083,7 @@ fn main() -> ! {
         // An active/starting transmitter retains the short batch and a fresh
         // physical PTT check before each operation. Admission is checked before
         // each transaction, not an interruption of synchronous bus work.
-        let restoring_rx = radio.state() == RfState::Configuring
-            && !radio.tx_active_or_starting();
+        let restoring_rx = radio.state() == RfState::Configuring && !radio.tx_active_or_starting();
         let burst_cycles = if restoring_rx { 384_000 } else { 96_000 };
         let burst_steps = if restoring_rx { 63 } else { 7 };
         let burst_started = DWT::cycle_count();
@@ -2244,9 +2243,18 @@ fn main() -> ! {
                 last_signal = Some(checked(
                     &mut log,
                     if p.audio.modulation == Modulation::Fm
-                        && !scope.active() && !tuner_open && !crossband_open
+                        && !scope.active()
+                        && !tuner_open
+                        && !crossband_open
                     {
-                        radio.observe_dtmf(p.audio, p.receive.map(|r| r.tone).unwrap_or(0))
+                        let slot = watch_receive
+                            .map(|(slot, _)| slot)
+                            .unwrap_or(view.active_slot);
+                        radio.observe_dtmf_for_slot(
+                            p.audio,
+                            p.receive.map(|r| r.tone).unwrap_or(0),
+                            slot,
+                        )
                     } else {
                         radio.observe(p.audio, p.receive.map(|r| r.tone).unwrap_or(0))
                     },
@@ -2682,17 +2690,20 @@ fn main() -> ! {
                 None
             } else if watch_receive.is_some() {
                 watch_rx
-            } else if !scope.active() && !tuner_open && !crossband_open
-                && current.is_some() && current == operator_profile
+            } else if !scope.active()
+                && !tuner_open
+                && !crossband_open
+                && current.is_some()
+                && current == operator_profile
             {
                 Some(view.active_slot)
             } else {
                 None
             };
             if !scope.active() && !tuner_open && !crossband_open {
-                let slot = watch_receive.map(|(slot, _)| slot).unwrap_or(view.active_slot);
-                report.dtmf = uv98_handheld_ui::render::DtmfReception::new(
-                    slot, radio.received_dtmf(now));
+                report.dtmf = radio.received_dtmf_slot().and_then(|slot| {
+                    uv98_handheld_ui::render::DtmfReception::new(slot, radio.received_dtmf(now))
+                });
             }
             if watch_receive.is_some() && watch_rx.is_none() {
                 report.rssi = None;

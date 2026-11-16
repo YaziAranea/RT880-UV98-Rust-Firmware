@@ -2689,6 +2689,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ..RadioView::OFF
             })
             .unwrap();
+        empty_app
+            .set_radio_view(RadioView {
+                state: RadioState::Receiving,
+                squelch_open: true,
+                rx_slot: Some(Slot::B),
+                dtmf: uv98_handheld_ui::render::DtmfReception::new(Slot::B, "112233ABCD*#"),
+                ..RadioView::OFF
+            })
+            .unwrap();
+        frames.push(capture(
+            &mut empty_app,
+            &empty_panel,
+            output,
+            &format!("{code}-dtmf-rx.png"),
+            empty_ms.get(),
+        )?);
+        empty_app
+            .set_radio_view(RadioView {
+                state: RadioState::Receiving,
+                ..RadioView::OFF
+            })
+            .unwrap();
         frames.extend(capture_r38_public(
             &mut empty_app,
             &mut empty_now,

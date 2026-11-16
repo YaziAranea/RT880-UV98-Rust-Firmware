@@ -148,7 +148,11 @@ impl RadioView {
     };
 
     pub fn visible_dtmf(self) -> Option<DtmfReception> {
-        if self.state == RadioState::Receiving { self.dtmf } else { None }
+        if self.state == RadioState::Receiving {
+            self.dtmf
+        } else {
+            None
+        }
     }
 
     pub fn receiving_slot(self) -> Option<Slot> {
@@ -383,7 +387,11 @@ impl HomeOutlineEdge {
     }
 
     fn slot(self) -> Slot {
-        if self.0 < 4 { Slot::A } else { Slot::B }
+        if self.0 < 4 {
+            Slot::A
+        } else {
+            Slot::B
+        }
     }
 
     fn rect(self) -> (u16, u16, u16, u16) {
@@ -412,7 +420,23 @@ pub fn render_home_outline_edge<B: DisplayBus, D: Delay>(
         home_frame_ink(active_slot, slot)
     };
     let (x, y, width, height) = edge.rect();
-    display.fill_rect(x, y, width, height, ink).map_err(RenderError::Display)
+    // The popup is above the VFO cards. Narrow direct LCD writes must obey
+    // the same composition order as the full-row painter.
+    if height == 1
+        && radio.visible_dtmf().is_some()
+        && (dtmf_popup::ROWS.0..dtmf_popup::ROWS.1).contains(&y)
+    {
+        let (left, right) = dtmf_popup::COLUMNS;
+        display
+            .fill_rect(x, y, left - x, 1, ink)
+            .map_err(RenderError::Display)?;
+        return display
+            .fill_rect(right, y, x + width - right, 1, ink)
+            .map_err(RenderError::Display);
+    }
+    display
+        .fill_rect(x, y, width, height, ink)
+        .map_err(RenderError::Display)
 }
 
 pub const fn home_frequency_rows(slot: Slot) -> (u16, u16) {
@@ -3116,12 +3140,7 @@ struct MenuLabel {
     scale: u16,
 }
 
-fn menu(
-    row: u16,
-    out: &mut Row<'_>,
-    model: &Model<'_>,
-    label: &mut Option<MenuLabel>,
-) {
+fn menu(row: u16, out: &mut Row<'_>, model: &Model<'_>, label: &mut Option<MenuLabel>) {
     let entries = menu_entries(model.view.menu_group);
     if (LIST_Y..LIST_Y + LIST_ROWS as u16 * LIST_ROW_HEIGHT).contains(&row) {
         let offset = (row - LIST_Y) / LIST_ROW_HEIGHT;
@@ -3180,7 +3199,15 @@ fn menu(
                 });
             }
             if let Some(cached) = label {
-                raw_text(row, out, 44, y + 8, cached.scale, cached.message.as_str(), ink);
+                raw_text(
+                    row,
+                    out,
+                    44,
+                    y + 8,
+                    cached.scale,
+                    cached.message.as_str(),
+                    ink,
+                );
             }
         }
         if matches!(entry, MenuEntry::Group(_)) {
@@ -4835,19 +4862,27 @@ mod tests {
                     let old_row = &frames[a][usize::from(y)];
                     let new_row = &frames[b][usize::from(y)];
                     if old_row != new_row {
-                        let row_dirty = plans.iter().any(|plan| plan
-                            .ranges()
-                            .iter()
-                            .any(|&(start, end)| (start..end).contains(&y)));
-                        let edges_cover = || old_row.iter().zip(new_row).enumerate().all(
-                            |(x, (old, new))| old == new || (0..8).any(|index| {
-                                let edge = HomeOutlineEdge(index);
-                                let (left, top, width, height) = edge.rect();
-                                edges & edge.bit() != 0
-                                    && (left..left + width).contains(&(x as u16))
-                                    && (top..top + height).contains(&y)
-                            })
-                        );
+                        let row_dirty = plans.iter().any(|plan| {
+                            plan.ranges()
+                                .iter()
+                                .any(|&(start, end)| (start..end).contains(&y))
+                        });
+                        let edges_cover = || {
+                            old_row
+                                .iter()
+                                .zip(new_row)
+                                .enumerate()
+                                .all(|(x, (old, new))| {
+                                    old == new
+                                        || (0..8).any(|index| {
+                                            let edge = HomeOutlineEdge(index);
+                                            let (left, top, width, height) = edge.rect();
+                                            edges & edge.bit() != 0
+                                                && (left..left + width).contains(&(x as u16))
+                                                && (top..top + height).contains(&y)
+                                        })
+                                })
+                        };
                         assert!(
                             row_dirty || edges_cover(),
                             "stale row {y}: {:?}/{:?}/{:?} -> {:?}/{:?}/{:?}",
@@ -5425,6 +5460,22 @@ mod tests {
     }
 
     #[test]
+    fn dtmf_overlay_survives_carrier_edges_on_both_slots() {
+        for slot in [Slot::A, Slot::B] {
+            let mut old = model(Screen::Home);
+            old.radio.state = RadioState::Receiving;
+            old.radio.squelch_open = true;
+            old.radio.rx_slot = Some(slot);
+            old.radio.dtmf = DtmfReception::new(slot, "1122A*#");
+            let mut new = old;
+            new.radio.squelch_open = false;
+            new.radio.rx_slot = None;
+            compare_radio_incremental(old, new);
+            compare_radio_incremental(new, old);
+        }
+    }
+
+    #[test]
     fn live_meter_samples_repaint_only_changed_card_rows() {
         let mut old = model(Screen::Home);
         old.radio.state = RadioState::Receiving;
@@ -5445,7 +5496,7 @@ mod tests {
             route: Some(RadioRoute::Hf),
             tx_slot: None,
             rx_slot: None,
-        dtmf: None,
+            dtmf: None,
             tx_trial: false,
         };
         compare_radio_incremental(old, new);
@@ -5747,7 +5798,7 @@ mod tests {
                         route: Some(RadioRoute::Hf),
                         tx_slot: None,
                         rx_slot: None,
-        dtmf: None,
+                        dtmf: None,
                         tx_trial: false,
                     };
                     let pixels = compare_radio_incremental(old, new);
@@ -6213,8 +6264,8 @@ mod tests {
                 modulation: Modulation::Am,
                 route: Some(RadioRoute::Hf),
                 tx_slot: None,
-            rx_slot: None,
-        dtmf: None,
+                rx_slot: None,
+                dtmf: None,
                 tx_trial: false,
             };
             for y in 0..HEIGHT {
