@@ -10,55 +10,66 @@ Independent A/B operation, a colour spectrum display, shortwave tools and access
 
 **English** · [Deutsch](README.de.md) · [Русский](README.ru.md)
 
-[**Firmware releases and CPS**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases) · [**Start here — backup and installation**](docs/GETTING-STARTED.en.md)
+[**R41 release**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r41) · [**Start here — backup and installation**](docs/GETTING-STARTED.en.md)
 
-> **Experimental firmware for the investigated AT32F423 board profile.** Use CPS to prepare a personal R40 image from your radio's verified NOR backup before flashing. CPS binds the image to your factory calibration. Verify board compatibility before proceeding. [Backup and preparation guide](docs/GETTING-STARTED.en.md#4-check-compatibility-before-flashing)
+[**CPS 0.8.0 for Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r41/UV98-CPS-0.8.0.zip) · R41 BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r41/UV98-r41-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r41/UV98-r41-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r41/UV98-r41-de.bin)
 
-## Windows CPS 0.7.0
+> **Experimental firmware for the investigated AT32F423 board profile.** Verify board compatibility. Use CPS to prepare a personal R41 image from your radio's verified NOR backup before flashing. CPS binds the image to your factory calibration. [Backup and preparation guide](docs/GETTING-STARTED.en.md#4-check-compatibility-before-flashing)
+
+## Windows CPS 0.8.0
 
 Use **Язык / Language / Sprache** in the toolbar to select **Русский**, **English** or **Deutsch**. All eight tabs and existing status messages switch immediately. Unsaved edits stay in place, and CPS remembers the selection in your Windows user profile. File dialog titles and filters follow CPS. Standard dialog buttons follow Windows.
 
-The R40 kit bundles the released CPS 0.7.0 build. [CPS 0.7.0 source](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/tree/cps-v0.7.0)
+In **Firmware → Select BIN…**, open a compatible application BIN with a calibration profile directly. CPS checks structure and file integrity. Verify the release source and your board revision separately. Personalization saves the personal BIN, a copy of the source BIN and a catalog with recorded provenance. [CPS source in R41](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/tree/r41/apps/cps)
 
 ![CPS 0.7.0 channel editor in English](docs/images/cps-0.7.0/en-channels.png)
 
-*Headless render of the CPS interface from egui with simulated data.*
+*Historical CPS 0.7.0 render from egui with simulated data.*
 
 ## On the screen
 
 <table>
 <tr>
-<td align="center"><img src="docs/images/r40/en-home.png" width="240" alt="English dual A/B frequency screen with signal meters"><br><b>A/B channels and VFOs</b></td>
-<td align="center"><img src="docs/images/r40/en-spectrum.png" width="240" alt="Colour frequency spectrum and waterfall"><br><b>Spectrum and waterfall</b></td>
+<td align="center"><img src="docs/images/r41/en-home.png" width="240" alt="English dual A/B frequency screen with signal meters"><br><b>A/B channels and VFOs</b></td>
+<td align="center"><img src="docs/images/r41/en-spectrum.png" width="240" alt="Colour frequency spectrum and waterfall"><br><b>Spectrum and waterfall</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r40/en-hf.png" width="240" alt="Shortwave receiver with an RSSI waterfall"><br><b>Shortwave tools</b></td>
-<td align="center"><img src="docs/images/r40/en-menu.png" width="240" alt="English radio menu"><br><b>English menu in R40</b></td>
+<td align="center"><img src="docs/images/r41/en-hf.png" width="240" alt="Shortwave receiver with an RSSI waterfall"><br><b>Shortwave tools</b></td>
+<td align="center"><img src="docs/images/r41/en-menu.png" width="240" alt="English radio menu"><br><b>English menu in R41</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r40/en-tx-b.png" width="240" alt="Red TX outline on VFO B while VFO A is selected"><br><b>PTT B with A selected</b></td>
-<td align="center"><img src="docs/images/r40/en-battery-low.png" width="240" alt="Low battery indication on the main screen"><br><b>Low battery</b></td>
+<td align="center"><img src="docs/images/r41/en-tx-b.png" width="240" alt="Red TX outline on VFO B while VFO A is selected"><br><b>PTT B with A selected</b></td>
+<td align="center"><img src="docs/images/r41/en-battery-low.png" width="240" alt="Low battery indication on the main screen"><br><b>Low battery</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r40/en-cb-grid.png" width="240" alt="40-channel CB grid at channel 15 AM"><br><b>CB grid</b></td>
-<td align="center"><img src="docs/images/r40/en-mdc.png" width="240" alt="MDC1200 settings for slot B and its local name"><br><b>MDC1200</b></td>
+<td align="center"><img src="docs/images/r41/en-cb-grid.png" width="240" alt="40-channel CB grid at channel 15 AM"><br><b>CB grid</b></td>
+<td align="center"><img src="docs/images/r41/en-mdc.png" width="240" alt="Numeric MDC1200 settings for slot B"><br><b>MDC1200</b></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/images/r40/en-dtmf-rx.png" width="240" alt="Incoming DTMF"><br><b>Incoming DTMF</b></td>
-<td align="center"><img src="docs/images/r40/en-mdc-alias-en.png" width="240" alt="Local name entry"><br><b>Local name entry</b></td>
+<td align="center"><img src="docs/images/r41/en-dtmf-rx.png" width="240" alt="Incoming DTMF"><br><b>Incoming DTMF</b></td>
+<td align="center"><img src="docs/images/r41/en-radio-name.png" width="240" alt="R41 radio-name editor"><br><b>Radio-name entry</b></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/images/r41/en-radio-name-rx.png" width="240" alt="Radio name received after PTT"><br><b>Received name</b></td>
+<td align="center"><img src="docs/images/r41/en-cb-tx-a.png" width="240" alt="CB transmit display for VFO A"><br><b>CB TX on A</b></td>
 </tr>
 </table>
 
-*R40 screenshots from the Rust renderer. Signals and readings are simulated.*
+*R41 screenshots from the Rust renderer. Signals and readings are simulated.*
 
-## R40 features
+## R41 features
+
+- **Radio name after PTT.** Set **RADIO NAME** and **NAME AFTER PTT** in **SYSTEM / TX**. The name uses up to 16 uppercase Latin letters, digits and spaces. The radio sends it in the stock RT880 1.16 Roger format when enabled. These settings survive power-off. A full firmware update clears the internal journal, and startup then loads usable stock settings. [Name entry and saving](docs/GETTING-STARTED.en.md#radio-name-after-ptt)
+- **Power indicator.** A large red **L**, yellow **M** or green **H** indicates the configured power of the transmitting slot, including B while A is selected.
 
 - **CB grid.** The 40-channel CEPT grid for VFO A opens on channel 15 AM at 27.135 MHz on first use. Use `#` for the zero-ending frequencies. Assign a long digit to open the grid. Hold EXIT on the grid to restore the previous A context. In the CB grid on A, AM receives on the channel frequency. PTT uses experimental narrow FM 2 kHz higher. On CEPT channel 15, RX is 27.135 MHz and TX is 27.137 MHz. [CB controls](docs/GETTING-STARTED.en.md#cb-grid)
 - **Menu and A/B status.** A solid fill highlights the selected menu item. A green outline marks the receiving A/B slot. The transmitting slot has a red outline, which takes priority. RX no longer uses the top status strip.
 - **DTMF reception.** On ordinary BK4819 FM reception with audio open, the home-screen popup keeps up to 16 symbols for three seconds after the last detected symbol. AM, spectrum, shortwave and crossband modes do not use this decoder. Keypad DTMF during PTT is still available. Select V, ZVEI and CCIR were removed.
-- **MDC1200.** Each slot can send its own 16-bit PTT ID at the start or end of TX, or both. The local RU/EN name is a label of up to 12 characters stored in RAM. [MDC1200 and keypad controls](docs/GETTING-STARTED.en.md#mdc1200-and-local-name)
-- **Shortwave AM.** During listening on Si4732, changing the 6, 3 or 1 kHz filter or soft mute keeps the current frequency and avoids restarting the tuning sequence. The waterfall still steps through frequencies.
+- **Numeric MDC1200.** Each slot has its own 16-bit PTT ID and timing. When name transmission is enabled, the name takes the end-of-TX slot. Numeric start-of-TX transmission follows its own setting. [Numeric MDC1200 controls](docs/GETTING-STARTED.en.md#numeric-mdc1200)
+- **Shortwave AM.** During listening on Si4732, changing the 6, 3 or 1 kHz filter or soft mute keeps the current frequency. The waterfall steps through 32 frequencies and redraws changed rows.
 - **RX after PTT.** The firmware prioritizes receiver setup after PTT release. Pickup of a short repeater reply still needs testing on the radio.
+
+[R41 notes (Russian)](R41-NOTES-RU.txt) · [Separate RX-only PA5 audio test guide (Russian)](research/r41/PA5-TEST-RU.txt)
 
 ## What is included
 
@@ -67,10 +78,10 @@ The R40 kit bundles the released CPS 0.7.0 build. [CPS 0.7.0 source](https://git
 | Everyday operation | Independent A/B channel or VFO contexts, zones, repeater shift, CTCSS/DCS indications, segmented signal meters and assignable keys. |
 | Finding signals | Frequency scanning, spectrum cursor and window control, peak listening and a colour waterfall. |
 | Shortwave | Si4732 receiver, AM/USB/LSB/CW controls, band and step selection, sequential RSSI waterfall, AM filters and soft mute. |
-| Signalling | MDC1200 16-bit PTT ID, incoming FM DTMF popup and keypad DTMF while holding PTT. |
+| Signalling | Radio name after PTT, numeric MDC1200 PTT ID, incoming FM DTMF popup and keypad DTMF while holding PTT. |
 | Navigation | GPS position handling and an explicitly requested APRS position beacon through the supported C-BUS modem. |
 | Windows CPS | Channel/zone editing, calibration and NOR backups, GPS/APRS file settings, image validation and flashing through the stock loader. |
-| Languages | Separate RU, EN and DE firmware BINs. Choose the desired language before flashing. CPS 0.7.0 keeps its own language selector. |
+| Languages | Separate RU, EN and DE firmware BINs. Choose the desired language before flashing. CPS has its own language selector. |
 
 The stock “800 MHz” mode starts at **840 MHz**. The preset uses 850.000 MHz.
 
@@ -79,19 +90,19 @@ The stock “800 MHz” mode starts at **840 MHz**. The preset uses 850.000 MHz.
 1. Keep the radio on its stock firmware and save its original `.880dmf` / `.98pdmf` file.
 2. Use our CPS to save **calibration**, **4 MiB NOR** and **settings/channel sections**. Each operation reads twice and compares the results.
 3. Keep the complete snapshot folders and a matching factory recovery file in two places. The public package does not include the manufacturer's firmware.
-4. Check board compatibility, then prepare your personal R40 image in CPS from the verified NOR snapshot. No Rust compiler is needed for this step.
+4. Check board compatibility, then prepare your personal R41 image in CPS from the verified NOR snapshot. No Rust compiler is needed for this step.
 
 The [file checklist and step-by-step guide](docs/GETTING-STARTED.en.md) names every CPS button and expected file. **The 4 MiB NOR backup is not an MCU firmware or bootloader dump.**
 
 ## Current limits
 
-R40 still needs on-radio checks of display timing, reception after PTT, DTMF decoding, and shortwave filter changes. The build and simulator exercise the software paths.
+R41 still needs on-radio checks of name signalling and saving across power-off, display timing, reception after PTT, DTMF decoding and shortwave filter changes.
 
 - Dual Watch alternates the receiver. Simultaneous audio from two BK4819 receivers is not implemented.
 - The HF waterfall retunes one Si4732 and interrupts audio during the sweep; it is not an FFT.
 - APRS is currently a manual beacon. An APRS receive UI, automatic beacons and the alternative GPIO modem remain unfinished.
 - AM filters/soft mute are available; general-purpose voice NR/NB on the main BK4819 is not implemented.
-- Radio settings are volatile. The interface language is fixed by the flashed BIN. CPS edits settings files and prepares firmware images.
+- The radio name and its PTT toggle use the internal journal. Other on-radio edits remain in RAM until power-off. The flashed BIN fixes the interface language.
 
 ## Source and development
 

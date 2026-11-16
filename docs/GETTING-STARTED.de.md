@@ -13,9 +13,9 @@ Diese Anleitung beschreibt die erste Vorbereitung eines UV-98 Plus / der untersu
 3. Mit der originalen CPS für das eigene Modell das Gerät auslesen und die ursprüngliche `.880dmf`- oder `.98pdmf`-Datei speichern. Eine vorhandene Originaldatei wie `999.880dmf` unverändert aufbewahren.
 4. Original-CPS, Radio Tuning Software und andere Programme schließen, die das Kabel verwenden. Vor dem ersten Auslesen mit unserer CPS das Gerät für 3 Sekunden ausschalten und wieder normal starten.
 5. Einen Ordner anlegen, etwa `Dokumente/UV98-backup-2026-11-16`. Sinnvolle Unterordner: `01-original`, `02-calibration`, `03-nor`, `04-settings`, `05-recovery`. Die ursprüngliche CPS-Datei in `01-original` ablegen.
-6. Das [R40-Paket mit CPS 0.7.0](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r40/UV98-r40-2026-11-16.zip) vollständig entpacken. `UV98-CPS.exe` starten, unter **Язык / Language / Sprache** die Option **Deutsch** wählen und **Sicherungen** öffnen. Den tatsächlichen COM-Port über **Liste aktualisieren → Verfügbare Ports** wählen. Frühere Angaben wie COM20/COM21 sind keine Vorgabe für Ihren Rechner.
+6. [CPS 0.8.0 für Windows](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r41/UV98-CPS-0.8.0.zip) entpacken. `UV98-CPS.exe` starten, unter **Язык / Language / Sprache** die Option **Deutsch** wählen und **Sicherungen** öffnen. Den tatsächlichen COM-Port über **Liste aktualisieren → Verfügbare Ports** wählen. Portnummern in älteren Screenshots und Protokollen können abweichen.
 
-Die Sprachwahl ist stets in der Symbolleiste sichtbar. Alle acht Reiter und bereits angezeigte Statusmeldungen wechseln sofort die Sprache. Ungespeicherte Änderungen bleiben erhalten. CPS speichert die Sprachwahl im Windows-Benutzerprofil. Titel und Filter der Dateidialoge folgen der CPS-Sprache. Die Standardschaltflächen folgen der Windows-Sprache. Das R40-Paket enthält die veröffentlichte CPS 0.7.0.
+Die Sprachwahl ist stets in der Symbolleiste sichtbar. Alle acht Reiter und bereits angezeigte Statusmeldungen wechseln sofort die Sprache. Ungespeicherte Änderungen bleiben erhalten. CPS speichert die Sprachwahl im Windows-Benutzerprofil. Titel und Filter der Dateidialoge folgen der CPS-Sprache. Die Standardschaltflächen folgen der Windows-Sprache.
 
 Modell, originale Firmwareversion und bekannte Platinenrevision in einer kurzen Textdatei bei den Sicherungen notieren.
 
@@ -77,39 +77,39 @@ Die Datei mit dem Namen `RT-880_Upgrade_V1_16_250915.bin` im Ordner `recovery` n
 
 ## 4. Kompatibilität vor dem Flashen prüfen
 
-R40 ist für das untersuchte AT32F423-Platinenprofil vorgesehen. Vor dem Flashen die Platinenrevision prüfen. Die Vorbereitung anhand der Sicherung bindet das Image an die eigenen Kalibrierungen.
+R41 ist für das untersuchte AT32F423-Platinenprofil vorgesehen. Vor dem Flashen die Platinenrevision prüfen. Die Vorbereitung anhand der Sicherung bindet das Image an die eigenen Kalibrierungen.
 
 Für eine bestätigte kompatible Platine eine persönliche BIN vorbereiten. **Ein Rust-Compiler wird dafür nicht benötigt.**
 
-1. **Firmware** in unserer CPS öffnen. Die ursprüngliche R40-BIN für **RU**, **EN** oder **DE** und den Katalog aus demselben Paket verwenden.
+1. Die ursprüngliche R41-BIN für die gewünschte Sprache herunterladen. [RU](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r41/UV98-r41-ru.bin) · [EN](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r41/UV98-r41-en.bin) · [DE](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r41/UV98-r41-de.bin) Die Datei in CPS unter **Firmware → BIN auswählen…** öffnen. Für eine kompatible ursprüngliche Anwendungs-BIN mit Kalibrierprofil ist der Versionskatalog optional.
 2. **Image für mein Funkgerät vorbereiten…** anklicken.
 3. **`manifest.json` der vollständigen 4-MiB-NOR-Sicherung** auswählen, die mit „Einstellungsspeicher lesen (4 MiB)“ erstellt wurde. Das Manifest auswählen, nicht `storage-address-space.bin` selbst. Eine reine Kalibrierungssicherung reicht nicht aus.
 4. Einen übergeordneten Ordner für neue Images wählen, etwa `Dokumente/UV98-personal`. CPS erstellt darin ein neues Verzeichnis `UV98-personal-…`.
-5. Die erfolgreiche Vorbereitung abwarten. Es entstehen `firmware/UV98-personal.bin` und `firmware/catalog.json`; CPS wählt die neue BIN automatisch zum Flashen aus.
-6. Den gesamten neuen Ordner aufbewahren. Beim späteren Öffnen der CPS die `UV98-personal.bin` auswählen und ihren benachbarten Katalog beibehalten.
+5. Die erfolgreiche Vorbereitung abwarten. CPS schreibt `firmware/UV98-personal.bin`, `firmware/UV98-source.bin` und `firmware/catalog.json` in den neuen Ordner und wählt die persönliche BIN aus.
+6. Den gesamten Ordner aufbewahren. Beim erneuten Öffnen von `UV98-personal.bin` müssen Quell-BIN und Katalog daneben liegen.
 
-CPS prüft den Status der zwei Lesevorgänge, Größen und SHA-Werte der Sicherungsdateien, die Übereinstimmung des Kalibrierungsblocks mit dem NOR-Anfang sowie die Originalvorlage anhand ihres Versionskatalogs und der Kalibrierungsprofil-Markierung. In die neue BIN wird nur der erwartete **SHA der eigenen Kalibrierungen** eingetragen, nicht die Kalibrierungsdaten selbst. Originalimage und Sicherung bleiben unverändert. Beim Start vergleicht die Firmware diesen Hash mit den tatsächlichen Kalibrierungen im Gerät.
+CPS prüft den Status der zwei Lesevorgänge, Größen und SHA256-Werte der Sicherungsdateien und gleicht den Kalibrierungsblock mit dem NOR-Anfang ab. Vor der Personalisierung prüft CPS Größe, Vektoren und Kalibrierprofil der Quell-BIN. Die neue BIN enthält den erwarteten **SHA256-Wert der eigenen Kalibrierung**. Beim Start vergleicht die Firmware diesen Hash mit der Kalibrierung im Gerät. CPS bewahrt Quell-BIN und Sicherung unverändert auf.
 
-Die persönliche BIN hat einen eigenen SHA im neuen CPS-Katalog. BIN und Katalog zusammen aufbewahren und die Sicherung des eigenen Geräts verwenden.
+Der Katalog enthält den SHA256-Wert der persönlichen BIN sowie Personalisierungsdaten im Schema 2 mit den Hashes von Quelle und Sicherung. CPS prüft Aufbau und Integrität der Datei. Quelle der Version, Herausgeber und Platinenrevision separat bestätigen.
 
-Wird die Vorbereitung abgelehnt, Auswahl prüfen. Erforderlich sind die vollständige und erfolgreich verglichene NOR-Sicherung des eigenen Geräts sowie die ursprüngliche R40-BIN aus demselben Paket. Für die Prüfung das Originalmanifest und den Originalkatalog verwenden.
+Wird die Vorbereitung abgelehnt, die Auswahl prüfen. Erforderlich sind die vollständige NOR-Sicherung des eigenen Geräts mit zwei übereinstimmenden Lesevorgängen und die ursprüngliche R41-BIN. Das Originalmanifest bei den Dateien der Sicherung aufbewahren.
 
 Erst nach erfolgreicher Vorbereitung, bestätigter Platinenkompatibilität und Sicherung der geprüften Daten sowie der richtigen Werks-BIN an zwei Orten fortfahren.
 
 ## 5. Ein kompatibles Image installieren
 
-1. Das gesamte Paket entpacken. CPS prüft BIN-Dateien anhand von `firmware/catalog.json`; eine einzelne Datei neben einer beliebigen alten CPS reicht nicht.
-2. **Firmware** in CPS öffnen und die vorbereitete `UV98-personal.bin` wählen. Namen und SHA256 prüfen; CPS vergleicht sie mit dem neuen persönlichen Katalog.
+1. In CPS 0.8.0 **Firmware → BIN auswählen…** öffnen.
+2. Die vorbereitete `UV98-personal.bin` wählen. Namen und SHA256 auf dem Bildschirm prüfen. CPS prüft das Image anhand der mitgespeicherten Quell-BIN und des Katalogs.
 3. Das Gerät ausschalten. Die **obere PTT** gedrückt halten, einschalten und PTT nach 2–3 Sekunden loslassen. Beim untersuchten Gerät zeigt der originale Bootloader einen schwarzen Bildschirm und eine grüne LED.
 4. Den COM-Port des Kabels wählen. Die Bestätigung zur Bootloader-Bereitschaft markieren und **Firmware schreiben** einmal anklicken.
 5. Auf die ausdrückliche Abschlussmeldung warten. Während des Schreibens weder ausschalten noch das Kabel abziehen oder CPS schließen.
 6. Nach Abschluss für 3 Sekunden ausschalten und **ohne PTT** starten. Anzeige, Tasten und Empfang prüfen. Das Vorgangsprotokoll aufbewahren.
 
-**Anzeigesprache.** Vor dem Flashen die BIN für die gewünschte Sprache wählen. Jede R40-BIN enthält eine Anzeigesprache. Die Sprachauswahl im Funkgerätemenü entfällt. Die CPS-Sprache wird getrennt in der Symbolleiste gewählt.
+**Anzeigesprache.** Vor dem Flashen die BIN für die gewünschte Sprache wählen. Jede R41-BIN enthält eine Anzeigesprache. Die CPS-Sprache wird getrennt in der Symbolleiste gewählt.
 
-In der Standardbelegung fordert die obere PTT eine Sendung über A an, die untere über B. Das tatsächlich sendende Feld zeigt TX und einen roten Rahmen, unabhängig vom ausgewählten VFO. Die Leistung liegt je VFO im RAM und steht nach dem Einschalten auf LOW. Das Akkusymbol zeigt den ungefähren Stand mit bis zu vier Balken und die Spannung in Schritten von 0,1 V (`--.-V`, wenn kein Messwert verfügbar ist). [Nachweise zur unteren PTT](../research/r37/ptt.md) Auf der Hauptanzeige markiert der grüne Rahmen das empfangende A/B-Feld. Der rote TX-Rahmen hat Vorrang und kennzeichnet das sendende Feld unabhängig vom ausgewählten VFO.
+In der Standardbelegung fordert die obere PTT eine Sendung über A an, die untere über B. Der grüne Rahmen markiert den Empfang, der rote TX-Rahmen hat Vorrang. Ein großes rotes **L**, gelbes **M** oder grünes **H** zeigt die eingestellte Leistung des sendenden VFOs, auch wenn B sendet und A ausgewählt ist. Nach dem Einschalten steht die Leistung auf LOW. Änderungen bleiben im RAM. Das Akkusymbol zeigt den ungefähren Stand mit bis zu vier Balken und die Spannung in Schritten von 0,1 V (`--.-V`, wenn kein Messwert verfügbar ist). [Nachweise zur unteren PTT](../research/r37/ptt.md)
 
-Bootloader-Bestätigungen belegen die Dateiübertragung. Start und Empfang am Funkgerät prüfen. Nach dem Loslassen der PTT hat in R40 das Einrichten des Empfangs Vorrang. Prüfen, ob der Beginn einer kurzen Relaisantwort hörbar ist und ob RX-/TX-Rahmen und DTMF-Fenster am Gerät erscheinen.
+Bootloader-Bestätigungen belegen die Dateiübertragung. Start und Empfang am Funkgerät prüfen. Nach dem Loslassen der PTT hat in R41 das Einrichten des Empfangs Vorrang. Prüfen, ob der Beginn einer kurzen Relaisantwort hörbar ist und ob RX-/TX-Rahmen und DTMF-Fenster am Gerät erscheinen.
 
 ### CB-Kanalraster
 
@@ -130,14 +130,27 @@ Mit langem Druck auf `1` zwischen den Filtern mit 6, 3 und 1 kHz wechseln. Mit l
 
 Beim normalen BK4819-FM-Empfang mit geöffnetem Audioweg öffnet sich das Fenster auf der Hauptanzeige automatisch. Es zeigt die letzten 16 Zeichen bis drei Sekunden nach dem letzten Zeichen an. Beim Wechsel des Empfangsmodus oder beim Sendebeginn schließt sich das Fenster. In AM, Spektrum, Kurzwelle und Crossband bleibt der Decoder aus. Select V, ZVEI und CCIR wurden entfernt.
 
-### MDC1200 und lokaler Name
+### Numerisches MDC1200
 
 1. Auf der Hauptanzeige A oder B wählen. Zum Umschalten zwischen den VFOs `*` gedrückt halten. **MENU → GPS / SIGNALE → MDC1200** öffnen und den VFO-Buchstaben in der Kopfzeile prüfen.
 2. Unter **MDC ZEITPUNKT** **AUS**, **TX-ANFANG**, **TX-ENDE** oder **TX-ANFANG UND -ENDE** wählen. Die Voreinstellung ist **AUS**. Mit MENU bestätigen.
 3. Unter **UNIT ID** vier Hexadezimalzeichen von `0001` bis `DEEE` eingeben. Für Ziffern 0–9 kurz drücken und für A–F die Tasten 1–6 gedrückt halten. Mit `*` löschen, mit MENU übernehmen und mit EXIT abbrechen. Zum Löschen der ID ein leeres Feld bestätigen.
-4. Unter **NAME (LOKAL)** eine Ziffer wiederholt drücken, um ihre Zeichen durchzugehen. Vor einem weiteren Zeichen auf derselben Taste ↑ drücken. Mit `#` RU/EN umschalten und mit `*` löschen. MENU speichert bis zu zwölf Zeichen. EXIT bricht die Bearbeitung ab.
 
-Das MDC1200-Paket überträgt die 16-Bit-PTT-ID. Der Name dient als lokale Beschriftung auf diesem Funkgerät. Zeitpunkt, ID, Name und weitere Firmware-Einstellungen liegen bis zum Ausschalten im RAM. [Simulierte Namenseingabe](images/r40/de-mdc-alias-en.png)
+Zeitpunkt und ID des numerischen MDC liegen bis zum Ausschalten im RAM.
+
+### Funkgerätename nach PTT
+
+1. **MENU → SYSTEM / TX → FUNKGERÄTENAME** öffnen. Bis zu 16 lateinische Großbuchstaben, Ziffern oder Leerzeichen eingeben. Eine Ziffer wiederholt kurz drücken, um die Zeichen zu wechseln. Mit `2` beispielsweise A, B, C und 2 durchgehen. Kurz `0` für ein Leerzeichen drücken. Gedrückt halten, um die Ziffer selbst einzugeben.
+2. Mit ↑ das aktuelle Zeichen übernehmen oder rund 650 ms warten, bevor dieselbe Taste ein weiteres Zeichen eingibt. `*` löscht das letzte Zeichen. Mit **MENU/OK** speichern oder mit EXIT abbrechen.
+3. Unter **SYSTEM / TX → NAME NACH PTT** **EIN** oder **AUS** wählen und mit **MENU/OK** bestätigen. Bleibt die Speicherbestätigung aus, den angezeigten Wert prüfen und erneut speichern.
+
+Name und Schalter teilen sich ein internes Flash-Journal. Beide Werte nach dem Aus- und Einschalten prüfen. Ein vollständiges Firmware-Update löscht das Journal. Bei leerem Journal lädt die Firmware gültige Einstellungen für Name und Roger aus dem originalen NOR. [Simulierte Namenseingabe in R41](images/r41/de-radio-name.png)
+
+Bei aktiver Option sendet das Funkgerät den Namen nach PTT im Roger-Format der Originalfirmware RT880 1.16. Die numerische MDC-PTT-ID hat eigene Einstellungen. Sind beide Funktionen aktiv, belegt der Name das Sendeende. Am Sendeanfang kann weiterhin die numerische MDC-ID gesendet werden. Gerätetests der Funkkompatibilität und der Speicherung stehen aus. [R41-Hinweise (Russisch)](../R41-NOTES-RU.txt)
+
+### Separater PA5-Audiotest
+
+Die RX-only-Diagnosefirmware zeichnet einen kurzen Empfangsblock zur Auswertung am PC auf. [PA5-Testanleitung (Russisch)](../research/r41/PA5-TEST-RU.txt)
 
 ## 6. Bei Bedarf zur Originalfirmware zurückkehren
 
