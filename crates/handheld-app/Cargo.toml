@@ -3,6 +3,9 @@ name = "uv98-handheld-app"
 version = "0.1.0"
 edition = "2021"
 publish = false
+[features]
+locale-all = ["uv98-handheld-ui/locale-all"]
+
 [dependencies]
 uv98-spectrum = { path = "../spectrum" }
 uv98-handheld-ui = { path = "../handheld-ui" }

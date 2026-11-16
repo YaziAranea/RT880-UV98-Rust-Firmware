@@ -2623,21 +2623,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (Language::German, "de"),
     ] {
         empty_app.set_battery_voltage(Some(7800)).unwrap();
-        open_setting(
-            &mut empty_app,
-            &mut empty_now,
-            MenuItem::Language,
-            Setting::Language,
-        );
-        let before = empty_app.status().view.language;
-        choose_setting(&mut empty_app, &mut empty_now, language as u8);
-        assert_eq!(
-            empty_app.status().view.language,
-            before,
-            "draft changed language"
-        );
-        assert_eq!(confirm_setting(&mut empty_app, &mut empty_now), None);
-        assert_eq!(empty_app.status().view.language, language);
+        empty_app.set_preview_language(language).unwrap();
+        home(&mut empty_app, &mut empty_now);
+        // Show the actual System/TX menu of the fixed-locale firmware.
+        menu(&mut empty_app, &mut empty_now, MenuItem::DisplayLight);
+        tap(&mut empty_app, &mut empty_now, Key::Exit);
+        assert_eq!(empty_app.status().view.language(), language);
+        assert_eq!(empty_app.status().view.screen, Screen::Menu);
         frames.push(capture(
             &mut empty_app,
             &empty_panel,
@@ -2830,7 +2822,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "mock_values_not_measurements":true,"rf_image_filename_marker":"SIMULATED",
             "gallery_tx_b_preserves_focus_a":true,"gallery_battery_mv":[6480,7800,8230]},
         "empty_catalog":{"synthetic_only":true,"input_sha256":empty_hash,"ready_in_vfo":true,"calibration_match":true,"selection_remains_none":true,"bytes_unchanged":true},
-        "localization":{"languages":["ru","en","de"],"default":"ru","runtime_setting":true,"persistent":false,
+        "localization":{"languages":["ru","en","de"],"default":"ru","firmware_runtime_setting":false,"simulator_locale_override":true,
             "gallery_uses_empty_channel_catalog":true,"gallery_rf_values_are_simulated":true,
             "files_per_language":["home","menu","spectrum","hf","tx-b","battery-low",
                 "cb-grid","cb-tx-a","mdc","mdc-alias-ru","mdc-alias-en"]},

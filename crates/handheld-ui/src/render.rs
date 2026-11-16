@@ -573,7 +573,8 @@ pub fn dirty_ranges(model: &Model<'_>, previous: Option<View>) -> Result<DirtyRa
         return Ok(dirty);
     };
     let new = model.view;
-    if old.language != new.language {
+    #[cfg(any(test, feature = "locale-all"))]
+    if old.language() != new.language() {
         dirty.push(0, HEIGHT);
         return Ok(dirty);
     }
@@ -1115,7 +1116,7 @@ pub fn render_row(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) -> Result
 fn render_validated_row(row: u16, pixels: &mut [u16; WIDTH], model: &Model<'_>) {
     let mut row_context = Row {
         pixels,
-        language: model.view.language,
+        language: model.view.language(),
     };
     let out = &mut row_context;
     out.fill(color::BACKGROUND);
@@ -2824,7 +2825,6 @@ fn setting_title(setting: Setting) -> &'static str {
         Setting::GpsBaud => "\x1f11C",
         Setting::TxTail => "\x1f111",
         Setting::Dtmf => "\x1f00F",
-        Setting::Language => "\x1f141",
         Setting::TopKey => "\x1f091",
         Setting::BottomKey => "\x1f092",
         Setting::Shift => "\x1f101",
@@ -2843,7 +2843,6 @@ fn setting_title(setting: Setting) -> &'static str {
 
 fn setting_options(setting: Setting) -> &'static [&'static str] {
     match setting {
-        Setting::Language => &["\x1f108", "ENGLISH", "DEUTSCH"],
         Setting::BandPreset => &[
             "VHF / 145.500",
             "UHF / 433.500",
@@ -2920,7 +2919,6 @@ fn current_setting_label(model: &Model<'_>, setting: Setting) -> &'static str {
         Setting::GpsBaud => usize::from(model.view.gps_baud),
         Setting::TxTail => usize::from(model.view.tx_tail),
         Setting::Dtmf => usize::from(model.view.dtmf_enabled),
-        Setting::Language => model.view.language as usize,
         Setting::TopKey => usize::from(model.view.top_action),
         Setting::BottomKey => usize::from(model.view.bottom_action),
         Setting::Shift => usize::from(model.view.shift_index),
@@ -3058,7 +3056,6 @@ pub fn menu_label(item: MenuItem) -> &'static str {
         MenuItem::TxTail => "\x1f112",
         MenuItem::TxId => "\x1f0BF",
         MenuItem::Dtmf => "\x1f00E",
-        MenuItem::Language => "\x1f141",
         MenuItem::Mode => "\x1f087",
         MenuItem::Channels => "\x1f126",
         MenuItem::ChannelDetails => "\x1f066",

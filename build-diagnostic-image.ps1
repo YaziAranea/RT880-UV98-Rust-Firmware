@@ -2,7 +2,9 @@
     [string]$OutputDirectory = '',
     [string]$NorBackup = '../../outputs/uv98-backup-2026-11-08/storage-read-01/storage-address-space.bin',
     [switch]$UpperExoTxTrial,
-    [switch]$ChannelTx
+    [switch]$ChannelTx,
+    [ValidateSet('ru', 'en', 'de')]
+    [string]$Language = 'ru'
 )
 
 # Offline build and file simulation only. No serial/flashing tool is invoked.
@@ -75,10 +77,13 @@ try {
     [string[]]$featureArgs = @()
     if ($ChannelTx) { $firmwareFeatures = @('channel-tx') }
     if ($UpperExoTxTrial) { $firmwareFeatures = @('upper-exo-tx-trial') }
-    if ($firmwareFeatures.Count) { $featureArgs = @('--features', $firmwareFeatures[0]) }
+    $firmwareLanguage = $Language.ToLowerInvariant()
+    $firmwareFeatures += "locale-$firmwareLanguage"
+    $featureArgs = @('--features', ($firmwareFeatures -join ','))
     Invoke-Checked $runner ($prefix + @('build', '--locked', '--offline', '--release', '--target', 'thumbv7em-none-eabi', '-p', 'uv98-diag-firmware') + $featureArgs)
     $imageDirectory = Join-Path $destination 'image'
     Invoke-Checked 'python' @('tools/export_diagnostic_image.py', 'target/thumbv7em-none-eabi/release/uv98-diag-firmware', $imageDirectory)
+    Invoke-Checked 'python' @('tools/pack_ui_locales.py', '--check', '--image', (Join-Path $imageDirectory 'UV98-diag-0.1.8.bin'), '--language', $firmwareLanguage)
     Invoke-Checked 'python' @('tools/check_diag_preinit.py', (Join-Path $imageDirectory 'UV98-diag-0.1.8.elf'), '--report', (Join-Path $imageDirectory 'early-machine-code-check.json'))
     Invoke-Checked 'python' @('tools/check_device_profile.py', (Join-Path $imageDirectory 'UV98-diag-0.1.8.elf'), '--report', (Join-Path $imageDirectory 'device-profile-check.json'))
     Invoke-Checked 'python' @((Join-Path $captureTools 'verify_boot_log_emulation.py'), '--report', (Join-Path $imageDirectory 'early-machine-code-check.json'), '--output', (Join-Path $destination 'boot-log-emulation-decode'))
@@ -99,7 +104,7 @@ try {
         completed_at = (Get-Date).ToUniversalTime().ToString('o')
         rustc = $rustInfo; target = 'thumbv7em-none-eabi'
         package = 'uv98-diag-firmware'; commands = $steps
-        firmware_features = $firmwareFeatures
+        firmware_features = $firmwareFeatures; firmware_language = $firmwareLanguage
         preserved_nor_sha256 = $expectedNor; preserved_calibration_sha256 = $expectedCal
         preserved_inputs_unchanged = $true; device_accessed = $false; flash_performed = $false
         hardware_qualified = $false; recovery_verified = $false

@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 uv98-spectrum = { path = "../../crates/spectrum" }
-uv98-handheld-app = { path = "../../crates/handheld-app" }
+uv98-handheld-app = { path = "../../crates/handheld-app", features = ["locale-all"] }
 uv98-handheld-ui = { path = "../../crates/handheld-ui" }
 uv98-diag-app = { path = "../../crates/diag-app" }
 uv98-codeplug = { path = "../../crates/codeplug" }

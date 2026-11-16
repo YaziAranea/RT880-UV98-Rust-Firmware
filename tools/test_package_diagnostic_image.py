@@ -335,6 +335,54 @@ class PackageTests(unittest.TestCase):
                     packaging.validate_inputs(self.folder, self.root, "channel-tx")
                 self.mutate_json("verification.json", firmware_features=[packaging.CHANNEL_TX_FEATURE])
 
+    def test_locale_evidence_must_match_single_linked_catalog_and_exact_forwarding(self):
+        directory = self.root / "crates/handheld-ui/locales"
+        directory.mkdir(parents=True)
+        catalogs = {code: f"packed-catalog-{code}".encode() for code in packaging.LANGUAGES}
+        for code, catalog in catalogs.items():
+            (directory / f"messages-{code}.bin").write_bytes(catalog)
+        valid = self.manifest.read_text() + "\n".join(
+            f'{feature} = ["{dependencies[0]}"]'
+            for feature, dependencies in packaging.LOCALE_FEATURES.items()
+        ) + "\n"
+        self.manifest.write_text(valid)
+
+        def build_with_catalogs(*codes):
+            elf = bytearray(policy_fixture())
+            catalog_data = b"".join(catalogs[code] for code in codes)
+            elf.extend(catalog_data)
+            struct.pack_into("<H", elf, 44, 5)
+            struct.pack_into("<H", elf, 48, 9)
+            check_elf.PROGRAM_HEADER.pack_into(elf, 180, 1, 0x600, 0x08003000, 0x08003000,
+                                              len(catalog_data), len(catalog_data), 4, 4)
+            check_elf.SECTION_HEADER.pack_into(elf, 0x200 + 8 * 40, 15, 1, 2, 0x08003000,
+                                              0x600, len(catalog_data), 0, 0, 4, 0)
+            self.build(bytes(elf))
+
+        for code in packaging.LANGUAGES:
+            with self.subTest(code=code):
+                build_with_catalogs(code)
+                self.mutate_json("verification.json", firmware_language=code, firmware_features=[f"locale-{code}"])
+                runtime = packaging.validate_inputs(self.folder, self.root)
+                self.assertEqual(runtime["firmware_language"], code)
+
+        build_with_catalogs("en", "de")
+        with self.assertRaisesRegex(ValueError, "only the de UI catalog"):
+            packaging.validate_inputs(self.folder, self.root)
+        build_with_catalogs("en")
+        with self.assertRaisesRegex(ValueError, "only the de UI catalog"):
+            packaging.validate_inputs(self.folder, self.root)
+        build_with_catalogs("de")
+        self.mutate_json("verification.json", firmware_features=["locale-de", "locale-en"])
+        with self.assertRaisesRegex(ValueError, "feature evidence"):
+            packaging.validate_inputs(self.folder, self.root)
+        self.mutate_json("verification.json", firmware_features=["locale-de"], firmware_language=None)
+        with self.assertRaisesRegex(ValueError, "firmware language"):
+            packaging.validate_inputs(self.folder, self.root)
+        self.manifest.write_text(valid.replace('["uv98-handheld-ui/locale-de"]', '["channel-tx"]'))
+        with self.assertRaisesRegex(ValueError, "locale feature declarations"):
+            packaging.validate_inputs(self.folder, self.root)
+
     def test_channel_package_retains_no_overwrite_and_private_calibration_exclusion(self):
         self.prepare_channel()
         elf = bytearray(policy_fixture(packaging.CHANNEL_TX_POLICY))

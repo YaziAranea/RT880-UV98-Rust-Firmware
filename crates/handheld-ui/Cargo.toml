@@ -3,6 +3,12 @@ name = "uv98-handheld-ui"
 version = "0.1.0"
 edition = "2021"
 publish = false
+[features]
+locale-ru = []
+locale-en = []
+locale-de = []
+locale-all = []
+
 [dependencies]
 uv98-spectrum = { path = "../spectrum" }
 uv98-keys = { path = "../keys" }

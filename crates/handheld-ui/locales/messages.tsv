@@ -263,7 +263,7 @@ W/N ПОЛОСА / L/M/H МОЩНОСТЬ	W/N BANDWIDTH / L/M/H POWER	W/N BANDBR
 РЕЖИМ КАНАЛ / VFO	CHANNEL / VFO MODE	KANAL/VFO-MODUS
 РЕЖИМ ОСТАНОВЛЕН	MODE STOPPED	MODUS BEENDET
 РЕТРАНСЛЯЦИЯ	REPEATING	RELAISBETRIEB
-РУССКИЙ	РУССКИЙ	РУССКИЙ
+
 РУЧНОЙ МАЯК / AX.25	MANUAL BEACON / AX.25	MANUELLE BAKE / AX.25
 С	S	S
 СБРОСИТЬ ПИКИ	CLEAR PEAKS	SPITZEN LÖSCHEN
@@ -320,7 +320,7 @@ W/N ПОЛОСА / L/M/H МОЩНОСТЬ	W/N BANDWIDTH / L/M/H POWER	W/N BANDBR
 ШАГ СКАНА	SCAN STEP	SUCHSCHRITT
 ШАГ ЧАСТОТЫ	TUNING STEP	FREQUENZSCHRITT
 ШАГ; ДОЛГО: БЛОК	STEP; HOLD: LOCK	SCHRITT; LANG: SPERRE
-ЯЗЫК / LANGUAGE	LANGUAGE	SPRACHE
+
 кГц	KHZ	KHZ
 ↑↓ КУРСОР  1/7 ШАГ  2/8 ПОЛОСА	↑↓ CURSOR  1/7 STEP  2/8 SPAN	↑↓ CURSOR  1/7 SCHRITT  2/8 SPANNE
 ↑↓ ЦЕНТР  ДОЛГО 0 / EXIT: ПРИЁМ	↑↓ CENTER  HOLD 0 / EXIT: LISTEN	↑↓ MITTE  LANG 0 / EXIT: EMPFANG

@@ -144,7 +144,6 @@ pub enum Setting {
     GpsBaud,
     TxTail,
     Dtmf,
-    Language,
 }
 
 impl Setting {
@@ -157,7 +156,7 @@ impl Setting {
             10
         } else if matches!(self, Self::BandPreset) {
             4
-        } else if matches!(self, Self::TxTail | Self::Language) {
+        } else if matches!(self, Self::TxTail) {
             3
         } else if self.is_tx_tone() {
             TX_CTCSS.len() as u8
@@ -207,13 +206,12 @@ pub enum MenuItem {
     TxTail,
     TxId,
     Dtmf,
-    Language,
     Cb,
     Mdc,
 }
 
 /// Full catalog for tooling. The visible menu uses `menu_entries`.
-pub const MENU_ITEMS: [MenuItem; 33] = [
+pub const MENU_ITEMS: [MenuItem; 32] = [
     MenuItem::Mode,
     MenuItem::Modulation,
     MenuItem::Channels,
@@ -244,7 +242,6 @@ pub const MENU_ITEMS: [MenuItem; 33] = [
     MenuItem::TxTail,
     MenuItem::TxId,
     MenuItem::Dtmf,
-    MenuItem::Language,
     MenuItem::Cb,
     MenuItem::Mdc,
 ];
@@ -319,7 +316,6 @@ pub const fn menu_entries(group: Option<MenuGroup>) -> &'static [MenuEntry] {
             Item(MenuItem::Dtmf),
             Item(MenuItem::TxTail),
             Item(MenuItem::TxId),
-            Item(MenuItem::Language),
         ],
     }
 }
@@ -683,7 +679,8 @@ pub enum MdcDraft {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct View {
-    pub language: Language,
+    #[cfg(any(test, feature = "locale-all"))]
+    pub(crate) language: Language,
     /// Committed channel grid context for slot A, independent of edit focus.
     pub cb: Option<CbChannel>,
     pub cb_draft: Option<CbChannel>,
@@ -779,6 +776,17 @@ pub struct View {
 }
 
 impl View {
+    pub const fn language(&self) -> Language {
+        #[cfg(any(test, feature = "locale-all"))]
+        {
+            self.language
+        }
+        #[cfg(not(any(test, feature = "locale-all")))]
+        {
+            Language::CURRENT
+        }
+    }
+
     pub const fn cb_for_slot(&self, slot: Slot) -> Option<CbChannel> {
         match slot {
             Slot::A => self.cb,
@@ -911,7 +919,8 @@ impl Controller {
         Self {
             spectrum_last_bin: SPECTRUM_INTERVALS[0],
             view: View {
-                language: Language::Russian,
+                #[cfg(any(test, feature = "locale-all"))]
+                language: Language::CURRENT,
                 cb: None,
                 cb_draft: None,
                 mdc: [MdcSettings { mode: 0, id: None }; 2],
@@ -1023,6 +1032,12 @@ impl Controller {
         }
     }
 
+    /// Change the locale for synthetic host previews.
+    #[cfg(feature = "locale-all")]
+    pub fn set_preview_language(&mut self, language: Language) {
+        self.view.language = language;
+    }
+
     pub const fn view(&self) -> View {
         self.view
     }
@@ -1078,7 +1093,6 @@ impl Controller {
             Setting::GpsBaud => self.view.gps_baud,
             Setting::TxTail => self.view.tx_tail,
             Setting::Dtmf => u8::from(self.view.dtmf_enabled),
-            Setting::Language => self.view.language as u8,
             Setting::TopKey => {
                 self.view.top_draft = self.view.top_key;
                 self.view.top_action
@@ -1125,7 +1139,6 @@ impl Controller {
             Setting::GpsBaud => self.view.gps_baud = selected,
             Setting::TxTail => self.view.tx_tail = selected,
             Setting::Dtmf => self.view.dtmf_enabled = selected != 0,
-            Setting::Language => self.view.language = Language::from_index(selected),
             Setting::BandPreset => {
                 // Presets select frequency, modulation and step together. The
                 // RF runtime still derives its relay route from frequency.
@@ -2523,7 +2536,7 @@ impl Controller {
                             TextValue::from_hex(settings.id),
                         )),
                         _ => {
-                            let mode = if self.view.language == Language::Russian {
+                            let mode = if self.view.language() == Language::Russian {
                                 InputMode::Russian
                             } else {
                                 InputMode::English
@@ -3045,7 +3058,6 @@ impl Controller {
                     MenuItem::GpsBaud => self.open_setting(Setting::GpsBaud),
                     MenuItem::TxTail => self.open_setting(Setting::TxTail),
                     MenuItem::Dtmf => self.open_setting(Setting::Dtmf),
-                    MenuItem::Language => self.open_setting(Setting::Language),
                     MenuItem::Gps => self.view.screen = Screen::Gps,
                     MenuItem::Aprs => self.view.screen = Screen::Aprs,
                     MenuItem::TxId => {
@@ -3767,7 +3779,14 @@ mod tests {
         ui.handle(InputEvent::PttB(false), &bitmap);
         press(&mut ui, Key::Menu, &bitmap);
         let saved_alias = ui.view.mdc_alias_for_slot(Slot::A);
-        assert_eq!(saved_alias.to_string(), "БB");
+        assert_eq!(
+            saved_alias.to_string(),
+            if Language::CURRENT == Language::Russian {
+                "БB"
+            } else {
+                "BБ"
+            }
+        );
         assert_eq!(ui.view.mdc_for_slot(Slot::A), a);
         press(&mut ui, Key::Menu, &bitmap);
         for index in 0..MDC_ALIAS_LEN - 2 {
@@ -4609,38 +4628,21 @@ mod tests {
     }
 
     #[test]
-    fn language_editor_cancels_draft_and_commits_without_changing_either_radio_context() {
-        let bitmap = catalog(&[0, 2]);
-        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
-        let contexts = [ui.context(Slot::A), ui.context(Slot::B)];
-        assert_eq!(ui.view.language, Language::Russian);
+    fn language_starts_in_the_build_locale_and_system_menu_has_no_selector() {
+        let ui = Controller::new(&catalog(&[0, 2]), DEFAULT_FREQUENCY_10HZ);
+        assert_eq!(ui.view().language(), Language::CURRENT);
+        use MenuEntry::Item;
         assert_eq!(
-            choose_menu(&mut ui, MenuItem::Language, &bitmap).request,
-            None
+            menu_entries(Some(MenuGroup::System)),
+            &[
+                Item(MenuItem::DisplayLight),
+                Item(MenuItem::KeyLight),
+                Item(MenuItem::About),
+                Item(MenuItem::Dtmf),
+                Item(MenuItem::TxTail),
+                Item(MenuItem::TxId),
+            ]
         );
-        assert_eq!(ui.view.setting, Some(Setting::Language));
-        assert_eq!(press(&mut ui, Key::Down, &bitmap).request, None);
-        assert_eq!(ui.view.language, Language::Russian);
-        assert_eq!(ui.view.setting_index, 1);
-        assert_eq!(press(&mut ui, Key::Exit, &bitmap).request, None);
-        assert_eq!(ui.view.language, Language::Russian);
-        for language in [Language::English, Language::German, Language::Russian] {
-            assert_eq!(
-                choose_menu(&mut ui, MenuItem::Language, &bitmap).request,
-                None
-            );
-            while ui.view.setting_index != language as u8 {
-                assert_eq!(press(&mut ui, Key::Down, &bitmap).request, None);
-            }
-            let change = press(&mut ui, Key::Menu, &bitmap);
-            assert_eq!(change.request, None);
-            assert!(change.redraw);
-            assert!(!change.ptt_tx_requested && !change.slot_changed && !change.channel_changed);
-            assert_eq!(ui.view.language, language);
-            assert_eq!(ui.view.screen, Screen::Menu);
-            assert_eq!([ui.context(Slot::A), ui.context(Slot::B)], contexts);
-            assert_eq!(ui.view.active_slot, Slot::A);
-        }
     }
 
     #[test]

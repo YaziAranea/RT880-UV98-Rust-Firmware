@@ -15,9 +15,10 @@ import struct
 
 ROOT = Path(__file__).resolve().parents[1]
 DIRECTORY = ROOT / "crates/handheld-ui/locales"
+LANGUAGES = ("ru", "en", "de")
 
 
-def audit_sources(count):
+def audit_sources(rows):
     """Catch untranslated literals and invalid IDs in production screen code."""
     lexer = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"', re.S)
     for filename in ["controller.rs", "render.rs", "utility.rs"]:
@@ -42,17 +43,22 @@ def audit_sources(count):
             literal = match.group()
             assert not re.search("[А-Яа-яЁё]", literal), f"untranslated UI literal in {filename}: {literal}"
             for message_id in re.findall(r"\\x1f([0-9A-Fa-f]{3})", literal):
-                assert int(message_id, 16) < count, f"invalid message ID {message_id} in {filename}"
+                index = int(message_id, 16)
+                assert index < len(rows) and all(rows[index]), f"invalid message ID {message_id} in {filename}"
 
 
-def build():
+def read_source():
     with (DIRECTORY / "messages.tsv").open(encoding="utf-8", newline="") as handle:
-        rows = list(csv.reader(handle, delimiter="\t"))
-    assert rows.pop(0) == ["ru", "en", "de"]
-    assert all(len(row) == 3 and all(row) for row in rows)
-    assert len({row[0] for row in rows}) == len(rows), "duplicate Russian key"
+        rows = [row or [""] * len(LANGUAGES) for row in csv.reader(handle, delimiter="\t")]
+    assert tuple(rows.pop(0)) == LANGUAGES
+    assert all(len(row) == len(LANGUAGES) and (all(row) or not any(row)) for row in rows)
+    keys = [row[0] for row in rows if row[0]]
+    assert len(set(keys)) == len(keys), "duplicate Russian key"
     assert len(rows) < 4096
-    messages = [message for row in rows for message in row]
+    return rows
+
+
+def pack(messages):
     alphabet = sorted(set("".join(messages)))
     assert len(alphabet) < 256 and all(ord(c) <= 0xffff for c in alphabet)
     lookup = {char: i for i, char in enumerate(alphabet)}
@@ -75,26 +81,43 @@ def build():
     for message in encoded:
         offsets.append(offsets[-1] + len(message))
     assert offsets[-1] <= 65535
-    result = struct.pack("<HBB", len(rows), len(alphabet), len(pairs))
+    result = struct.pack("<HBB", len(messages), len(alphabet), len(pairs))
     result += b"".join(struct.pack("<H", ord(char)) for char in alphabet)
     result += bytes(value for pair in pairs for value in pair)
     result += b"".join(struct.pack("<H", offset) for offset in offsets)
     result += b"".join(encoded)
-    return result, rows, max(depths)
+    return result, max(depths)
+
+
+def verify_image(image, language, directory=DIRECTORY):
+    """Match the exact packed catalog in the exported flash image."""
+    linked = [code for code in LANGUAGES
+              if (directory / f"messages-{code}.bin").read_bytes() in image]
+    if linked != [language]:
+        raise ValueError(f"Expected only the {language} UI catalog in BIN, found {linked}")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--image", type=Path, help="verify the selected catalog in an exported BIN")
+    parser.add_argument("--language", choices=LANGUAGES)
     args = parser.parse_args()
-    packed, rows, depth = build()
-    audit_sources(len(rows))
-    destination = DIRECTORY / "messages.bin"
-    if args.check:
-        assert destination.read_bytes() == packed, "messages.bin needs regeneration"
-    else:
-        destination.write_bytes(packed)
-    print(f"{len(rows)} messages / 3 languages: {len(packed)} bytes; decode depth {depth}")
+    if (args.image is None) != (args.language is None):
+        parser.error("--image and --language must be given together")
+    rows = read_source()
+    audit_sources(rows)
+    for code, messages in zip(LANGUAGES, zip(*rows)):
+        packed, depth = pack(messages)
+        destination = DIRECTORY / f"messages-{code}.bin"
+        if args.check:
+            assert destination.read_bytes() == packed, f"{destination.name} needs regeneration"
+        else:
+            destination.write_bytes(packed)
+        print(f"{code}: {len(rows)} message slots, {len(packed)} bytes, decode depth {depth}")
+    if args.image:
+        verify_image(args.image.read_bytes(), args.language)
+        print(f"Linked UI catalog: {args.language}")
 
 
 if __name__ == "__main__":

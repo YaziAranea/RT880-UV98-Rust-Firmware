@@ -10,6 +10,7 @@ import zipfile
 
 import check_elf
 from export_diagnostic_image import VERSION, export
+from pack_ui_locales import LANGUAGES, verify_image
 
 ROOT = Path(__file__).resolve().parent.parent
 RELEASE_SYMBOL = b"UV98_RELEASE_POLICY"
@@ -18,6 +19,7 @@ UPPER_EXO_TRIAL_POLICY = (0x108, 1, 0xFFFFFFFF, 0x45584F31)
 CHANNEL_TX_POLICY = (0x108, 1, 0x16, 0x464D5431)
 TRIAL_FEATURE = "upper-exo-tx-trial"
 CHANNEL_TX_FEATURE = "channel-tx"
+LOCALE_FEATURES = {f"locale-{code}": [f"uv98-handheld-ui/locale-{code}"] for code in LANGUAGES}
 PROFILES = {
     "rx": (RX_CANDIDATE_POLICY, [], "RX candidate"),
     "upper-exo-trial": (UPPER_EXO_TRIAL_POLICY, [TRIAL_FEATURE], "upper EXO trial"),
@@ -104,7 +106,10 @@ def validate_source(text, manifest, profile):
     if not (dual or expression == old_gate and profile != "channel-tx"
             or expression == "false" and profile == "rx"):
         raise ValueError("Packaged source must set LIVE_TX=false or use the selected explicit TX feature")
-    features = manifest.get("features", {})
+    features = manifest.get("features", {}).copy()
+    locales = {feature: features.pop(feature) for feature in LOCALE_FEATURES if feature in features}
+    if locales and locales != LOCALE_FEATURES:
+        raise ValueError("Firmware locale feature declarations must forward only the matching catalog")
     expected = {"default": [], TRIAL_FEATURE: [], CHANNEL_TX_FEATURE: []}
     legacy = {"default": [], TRIAL_FEATURE: []}
     # Disabled diagnostics-only features are allowed; TX/default aliases remain
@@ -176,13 +181,22 @@ def validate_inputs(folder, root, profile="rx"):
         raise ValueError("Instruction audit does not belong to the packaged ELF")
     if decoded["passed"] is not True or decoded["source_elf_sha256"] != digest(elf) or decoded["source_report_sha256"] != digest(folder / "image/early-machine-code-check.json"):
         raise ValueError("Host decoder integration does not belong to the packaged audit/ELF")
-    if verification.get("firmware_features", []) != expected_features:
-        raise ValueError("Build feature evidence differs from the selected candidate profile")
     policy = release_policy(elf_data, layout["layout"], expected_policy)
     source = root / "firmware-diagnostic/src/main.rs"
     text = source.read_text(encoding="utf-8-sig")
     firmware_manifest = root / "firmware-diagnostic/Cargo.toml"
-    validate_source(text, tomllib.loads(firmware_manifest.read_text(encoding="utf-8-sig")), profile)
+    declarations = tomllib.loads(firmware_manifest.read_text(encoding="utf-8-sig"))
+    validate_source(text, declarations, profile)
+    firmware_language = verification.get("firmware_language")
+    if LOCALE_FEATURES.keys() <= declarations.get("features", {}).keys():
+        if firmware_language not in LANGUAGES:
+            raise ValueError("Expected the selected firmware language in build evidence")
+        expected_features = expected_features + [f"locale-{firmware_language}"]
+        verify_image(bin_data, firmware_language, root / "crates/handheld-ui/locales")
+    elif firmware_language is not None:
+        raise ValueError("Unexpected firmware language for this source revision")
+    if verification.get("firmware_features", []) != expected_features:
+        raise ValueError("Build feature evidence differs from the selected candidate profile")
 
     if not (root / "DIAGNOSTIC-IMAGE-RU.txt").read_text(encoding="utf-8-sig").startswith(f"UV98 Rust {VERSION}"):
         raise ValueError("Diagnostic README version is stale")
@@ -198,6 +212,7 @@ def validate_inputs(folder, root, profile="rx"):
                                 if trial else "explicit PTT / FM channel and VFO / A-B and reverse / power codes 0..2 / calibrated plans and traced stock routes / 30s maximum; no live RF acceptance"
                                 if channel_tx else "offline RX/AM radio candidate; no live RF acceptance"),
             "profile": profile,
+            "firmware_language": firmware_language,
             "trial_restrictions": ({"channel_one_based": 2, "slot": "A", "frequency_hz": 432975000,
                                     "tx_ctcss_hz": 77.0, "power_code": 0, "max_hold_ms": 5000}
                                    if trial else None),

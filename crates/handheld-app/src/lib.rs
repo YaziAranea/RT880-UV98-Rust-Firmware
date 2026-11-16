@@ -741,6 +741,19 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         self.redraw_ready()
     }
 
+    /// Select the locale for a synthetic host preview.
+    #[cfg(feature = "locale-all")]
+    pub fn set_preview_language(
+        &mut self,
+        language: uv98_handheld_ui::locale::Language,
+    ) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.state != State::Ready {
+            return Err(Error::State);
+        }
+        self.controller.set_preview_language(language);
+        self.redraw_ready()
+    }
+
     /// Publish pack millivolts without redrawing unrelated rows or touching NOR.
     pub fn set_battery_voltage(
         &mut self,
