@@ -12,11 +12,14 @@ const COEFFICIENTS: [u8; 16] = [
 // configuration exports use 22. CFG[518] is the separate TX tone gain.
 const DETECTOR_THRESHOLD: u16 = 22;
 const DETECTOR_CONTROL: u16 = 0x807e | (DETECTOR_THRESHOLD << 7);
-const DTMF_IRQ: u16 = 1 << 11;
+// BK4819 Application Note v1.0 §17: REG3F enables the interrupt, and
+// REG02 bit 11 identifies DTMF/5-tone found in the acknowledged flags.
+pub(super) const DTMF_IRQ: u16 = 1 << 11;
 
-// The stock IRQ consumer at 0801D990 reads REG0B before acknowledging.
-// Bit 12 identifies a new DTMF symbol, bits 11:8 give its value.
-pub(super) const SYMBOL_FOUND: u16 = 1 << 12;
+pub(super) struct Detected {
+    pub(super) code: u8,
+    pub(super) carrier_before_ack: bool,
+}
 
 struct Baseline {
     reg21: u16,
@@ -31,6 +34,12 @@ pub(super) struct Receiver {
     baseline: Option<Baseline>,
 }
 
+impl Receiver {
+    pub(super) fn armed(&self) -> bool {
+        self.baseline.is_some()
+    }
+}
+
 impl<I: Io> Runtime<I> {
     /// Current decoded symbols, empty after expiry or when leaving receive.
     /// Use the same monotonic millisecond clock as `tick`.
@@ -42,17 +51,14 @@ impl<I: Io> Runtime<I> {
         }
     }
 
-    pub(super) fn prepare_dtmf_rx(&mut self) -> Result<bool, Fault<I::Error>> {
-        if self.dtmf_rx.baseline.is_some() {
-            return Ok(true);
-        }
+    pub(super) fn prepare_dtmf_rx(&mut self) -> Result<(), Fault<I::Error>> {
         let index = self.dtmf_rx.coefficients_written;
         if let Some(&coefficient) = COEFFICIENTS.get(index) {
             // Coefficients survive ordinary RX/TX reconfiguration. Load one
             // word per observation; no long register loop in the foreground.
             self.write(0x09, ((index as u16) << 12) | u16::from(coefficient))?;
             self.dtmf_rx.coefficients_written += 1;
-            return Ok(false);
+            return Ok(());
         }
         let baseline = Baseline {
             reg21: self.read(0x21)?,
@@ -64,8 +70,7 @@ impl<I: Io> Runtime<I> {
         self.write(0x21, 0x06d8)?;
         self.write(0x02, 0)?;
         self.write(0x3f, irq_mask | DTMF_IRQ)?;
-        self.write(0x24, DETECTOR_CONTROL)?;
-        Ok(true)
+        self.write(0x24, DETECTOR_CONTROL)
     }
 
     pub(super) fn stop_dtmf_rx(&mut self) -> Result<(), Fault<I::Error>> {

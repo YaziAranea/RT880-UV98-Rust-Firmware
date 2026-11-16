@@ -19,6 +19,8 @@ struct Mock {
     calls: usize,
     mismatch: Option<u8>,
     ack_clears_irq: bool,
+    pending_irq_cause: u16,
+    drop_carrier_on_ack: bool,
     muted: bool,
     hf: bool,
     fail_from: Option<usize>,
@@ -33,6 +35,8 @@ impl Mock {
             calls: 0,
             mismatch: None,
             ack_clears_irq: false,
+            pending_irq_cause: 0,
+            drop_carrier_on_ack: false,
             muted: true,
             hf: false,
             fail_from: None,
@@ -61,7 +65,12 @@ impl Io for Mock {
         self.event(Event::Write(r, v))?;
         self.words[r as usize] = v;
         if self.ack_clears_irq && (r, v) == (0x02, 0) {
+            // Acknowledge latches the IRQ flags for the following read.
+            self.words[0x02] = core::mem::take(&mut self.pending_irq_cause);
             self.words[0x0c] &= !1;
+            if self.drop_carrier_on_ack {
+                self.words[0x0c] &= !2;
+            }
         }
         Ok(())
     }
@@ -181,34 +190,81 @@ fn dtmf_ready() -> (Runtime<Mock>, u32) {
 }
 
 #[test]
-fn dtmf_rx_requires_a_new_symbol_irq_and_repeats_distinct_digits() {
+fn dtmf_rx_updates_audio_before_warmup_and_arming() {
+    let (mut r, now) = ready();
+    r.io.ack_clears_irq = true;
+    r.io.words[0x0c] = 2;
+    r.io.events.clear();
+    r.observe_dtmf(audio(), 0).unwrap();
+    let unmute =
+        r.io.events
+            .iter()
+            .position(|op| *op == Event::Mute(false))
+            .unwrap();
+    let coefficient =
+        r.io.events
+            .iter()
+            .position(|op| *op == Event::Write(0x09, 0x006f))
+            .unwrap();
+    assert!(unmute < coefficient);
+
+    for _ in 1..16 {
+        r.observe_dtmf(audio(), 0).unwrap();
+    }
+    // Close the audio then open it on the observation that arms the decoder.
+    r.io.words[0x0c] = 0;
+    r.observe(audio(), 0).unwrap();
+    r.io.words[0x0c] = 3;
+    r.io.words[0x0b] = 0x1100;
+    r.io.pending_irq_cause = 0x0800;
+    r.io.events.clear();
+    r.observe_dtmf(audio(), 0).unwrap();
+    let unmute =
+        r.io.events
+            .iter()
+            .position(|op| *op == Event::Mute(false))
+            .unwrap();
+    let enable =
+        r.io.events
+            .iter()
+            .position(|op| *op == Event::Write(0x24, 0x8b7e))
+            .unwrap();
+    assert!(unmute < enable);
+    assert!(!r.io.events.contains(&Event::Read(0x02)));
+    assert_eq!(r.received_dtmf(now), "");
+}
+
+#[test]
+fn dtmf_rx_requires_the_dtmf_irq_cause_and_repeats_distinct_digits() {
     let (mut r, mut now) = dtmf_ready();
-    for (status, decoder, text) in [
-        (0x0002, 0x1100, ""), // stale REG0B after acknowledge
-        (0x0003, 0x0800, ""), // an unrelated IRQ on a carrier
-        (0x0001, 0x1100, ""), // no carrier
-        (0x0003, 0x1100, "1"),
-        (0x0002, 0x1100, "1"), // same latched symbol, no new IRQ
-        (0x0003, 0x1100, "11"),
-        (0x0003, 0x1f00, "11#"),
+    for (status, cause, decoder, text) in [
+        (0x0002, 0x0000, 0x1100, ""),  // stale REG0B, no IRQ
+        (0x0003, 0x0080, 0x1100, ""),  // unrelated IRQ, stale valid-looking code
+        (0x0001, 0x0800, 0x1100, ""),  // DTMF cause but no carrier at either read
+        (0x0003, 0x0800, 0x0100, "1"), // bit 12 of REG0B is unnecessary
+        (0x0002, 0x0000, 0x1100, "1"), // same latched symbol, no new IRQ
+        (0x0003, 0x0800, 0x0100, "11"),
+        (0x0003, 0x0800, 0x0f00, "11#"),
     ] {
         now += 90;
         r.tick(now, false).unwrap();
         r.io.words[0x0c] = status;
         r.io.words[0x0b] = decoder;
+        r.io.pending_irq_cause = cause;
         r.io.events.clear();
         r.observe_dtmf(audio(), 0).unwrap();
         assert_eq!(r.received_dtmf(now), text);
         if status & 1 != 0 {
             assert_eq!(
-                &r.io.events[..4],
-                &[
-                    Event::Read(0x0c),
-                    Event::Read(0x0b),
-                    Event::Write(0x02, 0),
-                    Event::Read(0x0c),
-                ]
+                &r.io.events[..3],
+                &[Event::Read(0x0c), Event::Write(0x02, 0), Event::Read(0x02),]
             );
+            if cause & 0x0800 != 0 {
+                assert_eq!(&r.io.events[3..5], &[Event::Read(0x0b), Event::Read(0x0c)]);
+            } else {
+                assert!(!r.io.events.contains(&Event::Read(0x0b)));
+                assert_eq!(r.io.events[3], Event::Read(0x0c));
+            }
         }
     }
     let timeout = uv98_signaling::dtmf_rx::DISPLAY_MS;
@@ -217,10 +273,27 @@ fn dtmf_rx_requires_a_new_symbol_irq_and_repeats_distinct_digits() {
 }
 
 #[test]
+fn dtmf_rx_keeps_the_last_digit_when_carrier_drops_during_acknowledgement() {
+    let (mut r, now) = dtmf_ready();
+    r.io.words[0x0c] = 2;
+    assert!(r.observe_dtmf(audio(), 0).unwrap().audio_open);
+
+    r.io.words[0x0c] = 3;
+    r.io.words[0x0b] = 0x0f00;
+    r.io.pending_irq_cause = 0x0800;
+    r.io.drop_carrier_on_ack = true;
+    let result = r.observe_dtmf(audio(), 0).unwrap();
+    assert!(!result.audio_open);
+    assert_eq!(result.status_0c & 2, 0);
+    assert_eq!(r.received_dtmf(now), "#");
+}
+
+#[test]
 fn dtmf_rx_restores_decoder_before_tx_and_clears_on_retune() {
     let (mut r, mut now) = dtmf_ready();
     r.io.words[0x0c] = 3;
     r.io.words[0x0b] = 0x1200;
+    r.io.pending_irq_cause = 0x0800;
     r.observe_dtmf(audio(), 0).unwrap();
     assert_eq!(r.received_dtmf(now), "2");
 
@@ -241,6 +314,7 @@ fn dtmf_rx_restores_decoder_before_tx_and_clears_on_retune() {
     assert_eq!(r.io.words[0x24], 0x8b7e);
     r.io.words[0x0c] = 3;
     r.io.words[0x0b] = 0x1300;
+    r.io.pending_irq_cause = 0x0800;
     r.observe_dtmf(audio(), 0).unwrap();
     assert_eq!(r.received_dtmf(now), "3");
     r.receive(&cal(), rx(), now).unwrap();
@@ -254,6 +328,7 @@ fn dtmf_rx_restores_decoder_when_fm_observation_is_disabled() {
     let (mut r, now) = dtmf_ready();
     r.io.words[0x0c] = 3;
     r.io.words[0x0b] = 0x1400;
+    r.io.pending_irq_cause = 0x0800;
     r.observe_dtmf(audio(), 0).unwrap();
     assert_eq!(r.received_dtmf(now), "4");
     r.observe_dtmf(

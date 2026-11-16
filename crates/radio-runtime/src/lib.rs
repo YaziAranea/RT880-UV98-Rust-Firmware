@@ -632,23 +632,36 @@ impl<I: Io> Runtime<I> {
         if self.state == State::Receiving {
             self.stop_dtmf_rx()?;
         }
-        let (status, _) = self.receive_status()?;
+        let (status, _) = self.receive_status(false)?;
         self.signal_at(audio, tone_detected, status)
     }
-    fn receive_status(&mut self) -> Result<(u16, u16), Fault<I::Error>> {
+    fn receive_status(
+        &mut self,
+        capture_dtmf: bool,
+    ) -> Result<(u16, Option<dtmf_rx::Detected>), Fault<I::Error>> {
         if self.state != State::Receiving {
             return Err(self.reject(Error::State));
         }
         let mut status = self.read(0x0c)?;
-        let mut decoder = 0;
+        let mut detected = None;
         if status & 1 != 0 {
-            // Proven stock IRQ acknowledgement. No unbounded drain and no FSK
-            // handler claim; a still-pending IRQ cannot qualify a receive tone.
-            decoder = self.read(0x0b)?;
+            if !capture_dtmf {
+                // Stock acknowledgement for the ordinary analog RX path.
+                let _ = self.read(0x0b)?;
+            }
             self.write(0x02, 0)?;
+            if capture_dtmf && self.read(0x02)? & dtmf_rx::DTMF_IRQ != 0 {
+                // REG0B can retain the last code across unrelated IRQs.
+                // Read its payload only for the documented REG02 cause.
+                detected = Some(dtmf_rx::Detected {
+                    code: ((self.read(0x0b)? >> 8) & 0xf) as u8,
+                    carrier_before_ack: status & 2 != 0,
+                });
+            }
+            // Still-pending IRQs cannot qualify the subaudible tone gate.
             status = self.read(0x0c)?;
         }
-        Ok((status, decoder))
+        Ok((status, detected))
     }
     /// Hardware entry: fresh status and bounded IRQ acknowledgement, then the
     /// stock tone decision. Call at most once per foreground loop, no sooner
@@ -660,8 +673,9 @@ impl<I: Io> Runtime<I> {
 
     /// Observe ordinary primary BK4819 FM receive with DTMF digit capture.
     /// Only one latched event is serviced per observation. The first FM RX
-    /// after startup loads decoder coefficients one at a time. Call `observe`
-    /// for modes where the decoder should be inactive.
+    /// after startup loads 16 decoder coefficients one at a time, then arms
+    /// capture for future samples. Preparation runs after the audio update.
+    /// Call `observe` for modes where the decoder should be inactive.
     pub fn observe_dtmf(&mut self, audio: Audio, raw_tone: u16) -> Result<Signal, Fault<I::Error>> {
         self.observe_inner(audio, raw_tone, audio.modulation == Modulation::Fm)
     }
@@ -675,25 +689,35 @@ impl<I: Io> Runtime<I> {
         if self.state != State::Receiving {
             return Err(self.reject(Error::State));
         }
-        let capture = if dtmf {
-            self.prepare_dtmf_rx()?
-        } else {
+        if !dtmf {
             self.stop_dtmf_rx()?;
-            false
-        };
-        let (status, decoder) = self.receive_status()?;
+        }
+        let capture = dtmf && self.dtmf_rx.armed();
+        let previously_open = self.audio_open;
+        let (status, detected) = self.receive_status(capture)?;
         audio.tone_required = raw_tone != 0;
         let mut result = self.signal_at(
             audio,
             Some(sequence::tone_matches(status, raw_tone)),
             status,
         )?;
-        if let Some(now) = self.last_now.filter(|_| capture) {
-            self.dtmf_rx.text.expire(now);
-            let has_carrier = status & 2 != 0;
-            let found = decoder & dtmf_rx::SYMBOL_FOUND != 0;
-            if found && has_carrier && result.audio_open {
-                self.dtmf_rx.text.push(((decoder >> 8) & 0xf) as u8, now);
+        if dtmf {
+            if !capture {
+                self.prepare_dtmf_rx()?;
+            } else if let Some(now) = self.last_now {
+                self.dtmf_rx.text.expire(now);
+                if let Some(symbol) = detected {
+                    // The last digit may arrive just before carrier loss.
+                    // Require a fresh carrier sample even if audio was open.
+                    let qualified = if status & 2 != 0 {
+                        result.audio_open
+                    } else {
+                        previously_open && symbol.carrier_before_ack
+                    };
+                    if qualified {
+                        self.dtmf_rx.text.push(symbol.code, now);
+                    }
+                }
             }
         }
         if audio.modulation == Modulation::Am && result.audio_open {
