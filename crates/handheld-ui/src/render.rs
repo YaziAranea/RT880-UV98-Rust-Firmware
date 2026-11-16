@@ -1679,9 +1679,9 @@ fn mdc_page(row: u16, out: &mut Row<'_>, view: &View) {
 }
 
 /// One user-visible build identity for the header and the About page.
-pub const VERSION: &str = "0.1.8-r39";
+pub const VERSION: &str = "0.1.8-r40";
 /// Header has a fixed 42 px slot; About shows the full string.
-pub const VERSION_SHORT: &str = "R39";
+pub const VERSION_SHORT: &str = "R40";
 
 fn crossband(row: u16, out: &mut Row<'_>, view: &View) {
     let (status, tint) = match view.crossband_probe {

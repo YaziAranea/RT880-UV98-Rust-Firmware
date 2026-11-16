@@ -10,15 +10,15 @@ Unabhängige A/B-Einstellungen, ein farbiges Spektrum, Kurzwellenfunktionen und 
 
 [English](README.md) · **Deutsch** · [Русский](README.ru.md)
 
-[**Firmware-BIN**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r39/UV98-r39.bin) · [**Firmware und CPS 0.7.0**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r39/UV98-r39-2026-11-16.zip) · [**Hier beginnen: Sicherung und Installation**](docs/GETTING-STARTED.de.md) · [Versionshinweise](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r39)
+[**Firmware-Versionen und CPS**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases) · [**Hier beginnen — Sicherung und Installation**](docs/GETTING-STARTED.de.md)
 
-> **Experimentelle Firmware für das untersuchte AT32F423-Platinenprofil.** Vor dem Flashen mit CPS ein persönliches R39-Image aus der geprüften NOR-Sicherung des eigenen Geräts erstellen. CPS bindet das Image an die eigenen Werkskalibrierungen. Zuerst die Platinenkompatibilität prüfen. [Sicherungs- und Vorbereitungsanleitung](docs/GETTING-STARTED.de.md#4-kompatibilität-vor-dem-flashen-prüfen)
+> **Experimentelle Firmware für das untersuchte AT32F423-Platinenprofil.** Vor dem Flashen mit CPS ein persönliches R40-Image aus der geprüften NOR-Sicherung des eigenen Geräts erstellen. CPS bindet das Image an die eigenen Werkskalibrierungen. Zuerst die Platinenkompatibilität prüfen. [Sicherungs- und Vorbereitungsanleitung](docs/GETTING-STARTED.de.md#4-kompatibilität-vor-dem-flashen-prüfen)
 
 ## Windows-CPS 0.7.0
 
 Wählen Sie in der Symbolleiste unter **Язык / Language / Sprache** zwischen **Русский**, **English** und **Deutsch**. Alle acht Reiter und bereits angezeigte Statusmeldungen wechseln sofort die Sprache. Ungespeicherte Änderungen bleiben erhalten. CPS speichert die Sprachwahl im Windows-Benutzerprofil. Titel und Filter der Dateidialoge folgen der CPS-Sprache. Die Standardschaltflächen folgen der Windows-Sprache.
 
-Das R39-Paket enthält die veröffentlichte CPS 0.7.0. [Quellcode der CPS 0.7.0](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/tree/cps-v0.7.0)
+Das R40-Paket enthält die veröffentlichte CPS 0.7.0. [Quellcode der CPS 0.7.0](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/tree/cps-v0.7.0)
 
 ![Kanaleditor der CPS 0.7.0 auf Deutsch](docs/images/cps-0.7.0/de-channels.png)
 
@@ -33,7 +33,7 @@ Das R39-Paket enthält die veröffentlichte CPS 0.7.0. [Quellcode der CPS 0.7.0]
 </tr>
 <tr>
 <td align="center"><img src="docs/images/r39/de-hf.png" width="240" alt="Kurzwellenempfänger mit RSSI-Wasserfall"><br><b>Kurzwellenfunktionen</b></td>
-<td align="center"><img src="docs/images/r39/de-menu.png" width="240" alt="Deutsches Funkgerätemenü"><br><b>Deutsch · English · Русский</b></td>
+<td align="center"><img src="docs/images/r39/de-menu.png" width="240" alt="Deutsches Funkgerätemenü"><br><b>Deutsches Menü in R39</b></td>
 </tr>
 <tr>
 <td align="center"><img src="docs/images/r39/de-tx-b.png" width="240" alt="Roter TX-Rahmen auf VFO B bei ausgewähltem VFO A"><br><b>PTT B bei Auswahl von A</b></td>
@@ -45,14 +45,16 @@ Das R39-Paket enthält die veröffentlichte CPS 0.7.0. [Quellcode der CPS 0.7.0]
 </tr>
 </table>
 
-*Diese UI-Simulationen verwenden denselben Rust-Renderer wie das Funkgerät. Signale und Messwerte in den Abbildungen sind simuliert; sie sind keine HF-Messungen.*
+*R39-Bildschirmansichten aus dem Rust-Renderer. Signale und Messwerte sind simuliert.*
 
-## Funktionen in R39
+## Funktionen in R40
 
 - **CB-Kanalraster.** Für VFO A stehen 40 Kanäle zur Wahl. Beim ersten Öffnen ist Kanal 15 AM auf 27,135 MHz im CEPT-Raster ausgewählt. Mit `#` zum 0er-Raster wechseln. Eine lange Zifferntaste kann das Raster öffnen. Dort EXIT gedrückt halten, um die vorherige Einstellung von A wiederherzustellen. Im CB-Raster von VFO A empfängt AM auf der Kanalfrequenz. Beim Drücken der PTT sendet das Gerät experimentell in Schmalband-FM 2 kHz höher. Auf CEPT-Kanal 15 liegt RX bei 27,135 MHz und TX bei 27,137 MHz. [CB-Bedienung](docs/GETTING-STARTED.de.md#cb-kanalraster)
-- **Roter TX-Rahmen.** Der Rahmen markiert das tatsächlich sendende Feld. In der Standardbelegung fordert die obere PTT eine Sendung auf A an, die untere auf B. [Simulierte Sendung auf A bei ausgewähltem B](docs/images/r39/de-cb-tx-a.png)
-- **MDC1200.** Die PTT-ID und der Sendezeitpunkt sind für A und B getrennt einstellbar. Zur Wahl stehen aus, Sendeanfang, Sendeende oder beides. Der lokale Name mit bis zu zwölf kyrillischen oder lateinischen Zeichen liegt im RAM. [MDC1200 und Namenseingabe](docs/GETTING-STARTED.de.md#mdc1200-und-lokaler-name)
-- **Anzeige und Kurzwelle.** Jeder begrenzte LCD-Aktualisierungsschritt kann mehrere geänderte Bereiche übertragen. Der Si4732-Wasserfall zeichnet die vom RSSI-Suchlauf betroffenen Zeilen neu. LCD-Zeiten und Empfang sind am Gerät noch zu prüfen. [R38-Nachweise zu Anzeige und Kurzwelle](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/blob/r38/research/r38/EVIDENCE-RU.md)
+- **Menü und A/B-Anzeige.** Der ausgewählte Menüpunkt ist flächig hinterlegt. Ein grüner Rahmen markiert das empfangende A/B-Feld. Beim Senden hat der rote Rahmen Vorrang. Der obere RX-Streifen entfällt.
+- **DTMF-Empfang.** Beim normalen FM-Empfang mit geöffnetem Audioweg zeigt der Startbildschirm bis zu 16 BK4819-DTMF-Zeichen an. Das Fenster schließt drei Sekunden nach dem letzten Zeichen. In AM, Spektrum, Kurzwelle und Crossband bleibt der Decoder aus. DTMF über die Tastatur bei gedrückter PTT bleibt verfügbar. Select V, ZVEI und CCIR wurden entfernt.
+- **MDC1200.** Für A und B sind die 16-Bit-PTT-ID und der Sendezeitpunkt getrennt einstellbar. Der lokale Name mit bis zu zwölf kyrillischen oder lateinischen Zeichen liegt im RAM. [MDC1200 und Namenseingabe](docs/GETTING-STARTED.de.md#mdc1200-und-lokaler-name)
+- **Kurzwellen-AM.** Beim Hören über Si4732 bleiben beim Wechsel des 6-, 3- oder 1-kHz-Filters und von Soft Mute Frequenz und Abstimmung erhalten. Der Wasserfall stimmt weiterhin nacheinander auf mehrere Frequenzen ab.
+- **Empfang nach PTT.** Nach dem Loslassen der PTT hat das Einrichten des Empfangs Vorrang. Ob dadurch eine kurze Relaisantwort vollständig zu hören ist, muss am Funkgerät geprüft werden.
 
 ## Funktionen
 
@@ -61,10 +63,10 @@ Das R39-Paket enthält die veröffentlichte CPS 0.7.0. [Quellcode der CPS 0.7.0]
 | Funkbetrieb | Unabhängige Kanal-/VFO-Einstellungen für A/B, Zonen, Relaisablage, CTCSS/DCS-Anzeigen, segmentierte S-Meter und belegbare Tasten. |
 | Signalsuche | Frequenzsuchlauf, Spektrumcursor und Verschieben des Frequenzfensters, Abhören eines Peaks und farbiger Wasserfall. |
 | Kurzwelle | Si4732 mit AM/USB/LSB/CW-Bedienung, Band- und Schrittwahl, sequenziellem RSSI-Wasserfall, AM-Filtern und Soft Mute. |
-| Signalisierung | MDC1200-PTT-ID, DTMF über die Tastatur bei gedrückter PTT und fünfstellige ZVEI1-/CCIR-Kennung am Sendeende. |
+| Signalisierung | 16-Bit-MDC1200-PTT-ID, DTMF-Fenster beim FM-Empfang und Tastatur-DTMF bei gedrückter PTT. |
 | Navigation | GPS-Positionsverarbeitung und manuell ausgelöste APRS-Positionsbake über das unterstützte C-BUS-Modem. |
 | Windows-CPS | Kanal- und Zonenbearbeitung, Kalibrierungs-/NOR-Sicherungen, GPS/APRS-Dateieinstellungen, BIN-Prüfung und Flashen über den originalen Bootloader. |
-| Sprachen | Dokumentation und wählbare Funkgeräteoberfläche auf Deutsch, Englisch und Russisch. Eigene Kanalnamen bleiben unverändert. |
+| Sprachen | Separate Firmware-BINs für RU, EN und DE. Die Sprache wird vor dem Flashen gewählt. CPS 0.7.0 behält die eigene Sprachauswahl. |
 
 Der originale Modus „800 MHz“ beginnt bei **840 MHz**. Die Vorgabe wählt 850,000 MHz.
 
@@ -73,19 +75,19 @@ Der originale Modus „800 MHz“ beginnt bei **840 MHz**. Die Vorgabe wählt 85
 1. Die Originalfirmware beibehalten und die ursprüngliche `.880dmf`-/`.98pdmf`-Datei des eigenen Geräts sichern.
 2. Mit unserer CPS **Kalibrierung**, **4 MiB NOR** sowie **Einstellungs-/Kanalsektionen** lesen. Jeder Vorgang liest zweimal und vergleicht die Daten.
 3. Die vollständigen Sicherungsordner und eine passende originale Wiederherstellungsdatei an zwei Orten aufbewahren. Das öffentliche Paket enthält keine Herstellerfirmware.
-4. Die Platinenkompatibilität prüfen und anschließend in CPS ein persönliches R39-Image aus der geprüften NOR-Sicherung erstellen. Dafür wird kein Rust-Compiler benötigt.
+4. Die Platinenkompatibilität prüfen und anschließend in CPS ein persönliches R40-Image aus der geprüften NOR-Sicherung erstellen. Dafür wird kein Rust-Compiler benötigt.
 
 Die [Schritt-für-Schritt-Anleitung](docs/GETTING-STARTED.de.md) nennt die CPS-Schaltflächen, erwarteten Dateien, Prüfkriterien und den Rückweg. **Der 4-MiB-NOR-Dump enthält weder MCU-Firmware noch Bootloader.**
 
 ## Aktuelle Grenzen
 
-Bei R39 stehen Gerätetests für den TX-Rahmen, die LCD-Zeiten, CB/Kurzwelle, den Empfang des versetzten FM-Signals und die MDC1200-Dekodierung aus. [Build- und Simulationsergebnisse für R39](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r39)
+Für R40 stehen Gerätetests der Anzeigezeiten, des Empfangs nach PTT, der DTMF-Dekodierung und des KW-Filterwechsels aus. Build und Simulator prüfen die Softwarepfade.
 
 - Dual Watch hört A/B abwechselnd ab. Gleichzeitige Audiowiedergabe beider BK4819-Empfänger ist nicht implementiert.
 - Der KW-Wasserfall stimmt den einzigen Si4732 nacheinander ab und unterbricht dabei die Audiowiedergabe. Er ist keine FFT.
 - APRS sendet derzeit manuell. Eine APRS-Empfangsansicht, automatische Baken und das alternative GPIO-Modem sind noch nicht fertig.
 - AM-Filter und Soft Mute sind vorhanden; allgemeine Sprachrauschunterdrückung NR/NB für den Haupt-BK4819 ist nicht implementiert.
-- Die Funkgeräteeinstellungen einschließlich der Sprache liegen derzeit im RAM und gehen beim Ausschalten verloren. Der CPS-Dateieditor ist noch kein USB-Schreibprotokoll für Einstellungen der Rust-Firmware.
+- Die Funkgeräteeinstellungen liegen bis zum Ausschalten im RAM. Die geflashte BIN legt die Anzeigesprache fest. CPS bearbeitet Einstellungsdateien und bereitet Firmware-Images vor.
 
 ## Quellcode und Entwicklung
 

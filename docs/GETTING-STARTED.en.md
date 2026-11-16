@@ -13,9 +13,9 @@ This guide covers first-time preparation of a UV-98 Plus / the investigated RT-8
 3. Use the stock CPS for your model to read the radio and save its original `.880dmf` or `.98pdmf` file. Keep an existing original such as `999.880dmf` unchanged.
 4. Close the stock CPS, Radio Tuning Software and other programs using the cable. Before the first read in our CPS, power the radio off for 3 seconds, then start it normally again.
 5. Create a folder such as `Documents/UV98-backup-2026-11-16`. Suggested subfolders: `01-original`, `02-calibration`, `03-nor`, `04-settings`, `05-recovery`. Put the original CPS file in `01-original`.
-6. Extract the entire [R39 package with CPS 0.7.0](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r39/UV98-r39-2026-11-16.zip). Run `UV98-CPS.exe`, choose **English** in **Язык / Language / Sprache**, then open **Backups**. Select the actual cable COM port using **Refresh list → Available ports**. Old references to COM20/COM21 are not your required port number.
+6. Extract the entire [R40 package with CPS 0.7.0](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases). Run `UV98-CPS.exe`, choose **English** in **Язык / Language / Sprache**, then open **Backups**. Select the actual cable COM port using **Refresh list → Available ports**. Old references to COM20/COM21 are not your required port number.
 
-The toolbar language selector is always visible. All eight tabs and existing status messages switch immediately and unsaved edits stay in place. CPS remembers the selection in your Windows user profile. File dialog titles and filters follow CPS. Standard dialog buttons follow Windows. The R39 kit includes the released CPS 0.7.0 build.
+The toolbar language selector is always visible. All eight tabs and existing status messages switch immediately and unsaved edits stay in place. CPS remembers the selection in your Windows user profile. File dialog titles and filters follow CPS. Standard dialog buttons follow Windows. The R40 kit includes the released CPS 0.7.0 build.
 
 Keep a short text note beside the backups with the radio model, stock version and board revision if known.
 
@@ -77,11 +77,11 @@ Place the file named `RT-880_Upgrade_V1_16_250915.bin` in a `recovery` folder be
 
 ## 4. Check compatibility before flashing
 
-R39 targets the investigated AT32F423 board profile. Verify the board revision before flashing. Backup-based preparation binds the image to your calibration.
+R40 targets the investigated AT32F423 board profile. Verify the board revision before flashing. Backup-based preparation binds the image to your calibration.
 
 For a confirmed compatible board, prepare a personal BIN. **No Rust compiler is needed.**
 
-1. Open **Firmware** in our CPS. Select the original `UV98-r39.bin` from the current package.
+1. Open **Firmware** in our CPS. Select the original R40 BIN for **RU**, **EN** or **DE** from the package. Use its accompanying catalog.
 2. Click **Prepare an image for my radio…**.
 3. Select **`manifest.json` from the full 4 MiB NOR snapshot** created by “Read settings storage (4 MiB)”. Select the manifest, not `storage-address-space.bin` itself. A calibration-only snapshot is not sufficient.
 4. Choose a parent folder for new images, for example `Documents/UV98-personal`. CPS creates a new `UV98-personal-…` directory inside it.
@@ -92,7 +92,7 @@ CPS checks the two-read status, snapshot sizes and SHA values, calibration equal
 
 The personal BIN has its own SHA, recorded in the catalog created by CPS. Keep the BIN and catalog together and use the backup from your own radio.
 
-If preparation is rejected, verify that you selected your own complete, verified NOR snapshot and the original R39 BIN from the same package. Keep validation enabled and use the original manifest and catalog.
+If preparation is rejected, verify that you selected your own complete, verified NOR snapshot and the original R40 BIN from the same package. Keep validation enabled and use the original manifest and catalog.
 
 Proceed only after successful preparation, confirmation of board compatibility, and saving verified backups and the correct factory BIN in two places.
 
@@ -105,11 +105,11 @@ Proceed only after successful preparation, confirmation of board compatibility, 
 5. Wait for explicit completion. Do not switch off the radio, unplug the cable or close CPS during writing.
 6. After completion, switch off for 3 seconds and start **without PTT**. Check the display, keys and reception. Keep the operation log.
 
-**Choose the display language:** MENU → СИСТЕМА / TX → ЯЗЫК / LANGUAGE → ENGLISH. Use ↑/↓, MENU to confirm and EXIT to cancel. Available choices are РУССКИЙ, ENGLISH and DEUTSCH. After changing to English, the path reads MENU → SYSTEM / TX → LANGUAGE. The selection currently resets to Russian after power-off.
+**Firmware language.** Flash the BIN for your chosen language. Each R40 BIN has one interface language, with no language item in the radio menu. CPS language is chosen separately in the toolbar.
 
-With the default bindings, the upper PTT requests A and the lower PTT requests B. During transmission, the transmitting card shows TX and a red outline, regardless of the selected slot. Each slot's current power setting is held in RAM and starts at LOW. The battery icon shows up to four approximate level bars and the numeric voltage in 0.1 V steps (`--.-V` when unavailable). [Lower PTT hardware evidence](../research/r37/ptt.md)
+With the default bindings, the upper PTT requests A and the lower PTT requests B. On the home screen a green border identifies the receiving A/B slot. A red TX border takes priority and identifies the transmitting slot, regardless of which slot is selected. Each slot's current power setting is held in RAM and starts at LOW. The battery icon shows up to four approximate level bars and the numeric voltage in 0.1 V steps (`--.-V` when unavailable). [Lower PTT hardware evidence](../research/r37/ptt.md)
 
-Loader acknowledgements confirm file transfer. Check boot and operation on the device. R39's TX display, lower PTT, battery readings, CB/HF operation, reception of offset FM and external MDC1200 decoding still need on-radio checks. [R39 evidence and test limits](../research/r39/EVIDENCE-RU.md)
+Loader acknowledgements confirm file transfer. Check boot and reception on the radio. R40 prioritizes receiver setup after PTT release. Check whether the start of a short repeater response is audible, and verify the RX/TX outlines and DTMF window on the device.
 
 ### CB grid
 
@@ -122,6 +122,14 @@ Loader acknowledgements confirm file transfer. Check boot and operation on the d
 
 An AM receiver may detect the offset FM signal on the slope of its filter. Reception depends on the receiver's filter and FM deviation. Compatibility on the radio remains to be tested.
 
+### Shortwave AM
+
+Hold `1` to cycle the 6, 3 and 1 kHz filters. Hold `2` to toggle soft mute. In ordinary listening these changes keep the current Si4732 frequency.
+
+### Incoming DTMF
+
+In ordinary BK4819 FM reception with audio open, the home-screen popup appears automatically. It retains the most recent 16 symbols for three seconds after the last symbol. It closes when reception mode changes or TX starts. AM, spectrum, shortwave and crossband use no DTMF decode window. Select V, ZVEI and CCIR are removed.
+
 ### MDC1200 and local name
 
 1. On the home screen, select A or B. Hold `*` to switch slots. Open **MENU → GPS / SIGNALS → MDC1200** and check the slot in the header.
@@ -129,7 +137,7 @@ An AM receiver may detect the offset FM signal on the slope of its filter. Recep
 3. In **UNIT ID**, enter four hex digits from `0001` through `DEEE`. Tap 0–9 for digits and hold 1–6 for A–F. Use `*` to delete, MENU to accept, and EXIT to cancel. Confirm an empty field to clear the ID.
 4. In **NAME (LOCAL)**, tap a digit repeatedly to cycle its characters. Press ↑ before entering a second character on the same key. Use `#` to switch RU/EN and `*` to delete. MENU saves up to 12 characters. EXIT cancels the edit.
 
-The MDC1200 packet carries the PTT ID. The name is a label on this radio. Timing, ID, name and other firmware settings are stored in RAM until power-off. [Simulated name editor](images/r39/en-mdc-alias-en.png)
+The MDC1200 packet carries the 16-bit PTT ID. The name is a local label on this radio. Timing, ID, name and other firmware settings are stored in RAM until power-off. [Simulated name editor](images/r39/en-mdc-alias-en.png)
 
 ## 6. Return to stock if needed
 

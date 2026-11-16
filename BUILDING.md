@@ -1,10 +1,10 @@
-# Building R37 and CPS 0.7.0 from source
+# Building R40 and CPS 0.7.0 from source
 
 These commands build files on the computer; they do not open a COM port or flash a radio. For installation without a compiler, use the [release package and CPS guide](docs/GETTING-STARTED.en.md).
 
 The public checkout can build the ARM firmware, Windows CPS and the host-test subset below **without personal calibration or NOR files**. The complete historical verification pipeline still requires the owner's original private fixtures; it is a separate workflow.
 
-The [`r37` tag](https://github.com/YaziAranea/uv98-rust/tree/r37) identifies the original firmware release. The [`cps-v0.7.0` tag](https://github.com/YaziAranea/uv98-rust/tree/cps-v0.7.0) identifies the CPS 0.7.0 source used for the updated kit. The kit carries the same `UV98-r37.bin`, so updating CPS requires no reflash.
+Build R40 from the matching firmware source revision. R40 keeps the released CPS 0.7.0 executable. Its source is tagged [`cps-v0.7.0`](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/tree/cps-v0.7.0).
 
 ## Toolchain
 
@@ -27,28 +27,34 @@ $env:CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER = Join-Path $taskRustSysroot 
 
 ## Public ARM build
 
+Build and export each language before the next build replaces the linked file.
+Run from the repository root with new output directories.
+
 ```powershell
-cargo build --locked --release --target thumbv7em-none-eabi -p uv98-diag-firmware --features channel-tx
-python tools/export_diagnostic_image.py target/thumbv7em-none-eabi/release/uv98-diag-firmware validation/r37-public-build/image
-python tools/check_diag_preinit.py validation/r37-public-build/image/UV98-diag-0.1.8.elf --report validation/r37-public-build/early-machine-code-check.json
-python tools/check_device_profile.py validation/r37-public-build/image/UV98-diag-0.1.8.elf --report validation/r37-public-build/device-profile-check.json
+foreach ($locale in @('ru', 'en', 'de')) {
+    $imageDir = "validation/r40-public-$locale/image"
+    cargo build --locked --release --target thumbv7em-none-eabi -p uv98-diag-firmware --features "channel-tx,locale-$locale"
+    if ($LASTEXITCODE -ne 0) { throw "Build failed for $locale" }
+    python tools/export_diagnostic_image.py target/thumbv7em-none-eabi/release/uv98-diag-firmware $imageDir
+    if ($LASTEXITCODE -ne 0) { throw "Export failed for $locale" }
+    python tools/pack_ui_locales.py --check --image "$imageDir/UV98-diag-0.1.8.bin" --language $locale
+    if ($LASTEXITCODE -ne 0) { throw "Catalog check failed for $locale" }
+    python tools/check_diag_preinit.py "$imageDir/UV98-diag-0.1.8.elf" --report "$imageDir/early-machine-code-check.json"
+    if ($LASTEXITCODE -ne 0) { throw "Linked startup check failed for $locale" }
+    python tools/check_device_profile.py "$imageDir/UV98-diag-0.1.8.elf" --report "$imageDir/device-profile-check.json"
+    if ($LASTEXITCODE -ne 0) { throw "Device-profile check failed for $locale" }
+}
 ```
 
-The export directory must be new. Use another directory name for a subsequent build. The exporter retains its historical filenames:
+Each directory contains the ELF, BIN and `image-layout.json`. The exporter keeps the internal basenames `UV98-diag-0.1.8.elf` and `UV98-diag-0.1.8.bin`. The 251904-byte BIN covers the application window above the bootloader and excludes external NOR. Identify each image by its SHA256 from the layout report. The catalog check confirms the exact selected catalog in the BIN.
 
-```text
-validation/r37-public-build/image/UV98-diag-0.1.8.bin
-validation/r37-public-build/image/UV98-diag-0.1.8.elf
-validation/r37-public-build/image/image-layout.json
-```
+Use one locale feature per build. Rust selects Russian by default without an explicit locale feature. The host-only `locale-all` feature lets the simulator generate documentation in all three languages. The radio has no language selector.
 
-The BIN covers the 251904-byte application window. It excludes the bootloader prefix and external NOR. A release name such as `UV98-r37.bin` is assigned during packaging; identify the exact artifact by its SHA256, not its filename alone.
+`channel-tx` enables ordinary FM transmission with independent A/B PTT targets. Without a TX feature the default profile is RX-only. The separate historical `upper-exo-tx-trial` profile has its own feature selection. [PTT hardware evidence](research/r37/ptt.md)
 
-`channel-tx` enables the R37 release profile, including the independent A/B PTT targets. With neither TX feature, the default profile is RX-only. Build the historical `upper-exo-tx-trial` with its own feature selection. [PTT hardware evidence](research/r37/ptt.md)
+Linked checks examine startup, exception code and the device profile in the actual ELF. RF behaviour, pin levels and maximum stack use require device measurements.
 
-The linked checks examine startup/exception code and the device profile in the actual ELF. They do not measure RF behaviour, electrical pin states or maximum stack use on physical hardware.
-
-**A self-built BIN is not automatically accepted by the released CPS.** CPS validates recognized images against its release catalog. The exporter creates a layout report, not a trusted CPS catalog. Development builds need a separately reviewed catalog and packaging pipeline; do not rename an unknown BIN or disable validation to make it look like a release. The ordinary user path prepares a personal image from the recognized R37 template in CPS.
+**A self-built BIN is not automatically accepted by the released CPS.** CPS validates images against its release catalog. Development builds need a matching reviewed catalog and packaging pipeline. To prepare a personal image in CPS, use the recognized template for the desired language and its accompanying catalog.
 
 ## Host checks without private fixtures
 
@@ -74,28 +80,27 @@ The executable is `target/x86_64-pc-windows-gnullvm/release/uv98-cps.exe`. If th
 
 ## Full owner verification
 
-The historical `build-diagnostic-image.ps1` requires both the exact calibration fixture and preserved NOR listed in [PRIVATE-INPUTS.md](PRIVATE-INPUTS.md). It checks their fixed SHA values before and after running oracle checks, host tests, ARM checks and screen simulation. Another radio's backup is not a replacement for these golden inputs.
+`build-diagnostic-image.ps1` requires both the exact calibration fixture and preserved NOR listed in [PRIVATE-INPUTS.md](PRIVATE-INPUTS.md). It checks their fixed SHA values before and after running oracle checks, host tests, ARM checks and screen simulation. Another radio's backup is not a replacement for these golden inputs.
 
 For a maintainer who already holds those originals:
 
 ```powershell
-./build-diagnostic-image.ps1 -ChannelTx -NorBackup 'D:/private-radio-backup/storage-address-space.bin' -OutputDirectory 'D:/radio-builds/uv98-next-build'
+./build-diagnostic-image.ps1 -ChannelTx -Language ru -NorBackup 'D:/private-radio-backup/storage-address-space.bin' -OutputDirectory 'D:/radio-builds/uv98-r40-ru'
 ```
 
-Use real local paths and a new output directory. This workflow additionally needs `pyserial` for boot-log test tools, but does not access the radio. Do not invent, zero-fill or substitute a fixture to make the tests pass. Historical R35 results remain in [R35-REPORT-RU.txt](R35-REPORT-RU.txt); they are not R37 hardware acceptance evidence.
+Use real local paths and a new output directory for each language. Select `-Language en` or `-Language de` for the other variants. This workflow additionally needs `pyserial` for boot-log test tools, but does not access the radio. Do not invent, zero-fill or substitute a fixture to make the tests pass. This workflow records host and linked-image verification. R40 hardware checks remain separate.
 
 ## Public packaging
 
 Use `--exclude-private-fixture` with `tools/package_diagnostic_image.py` when preparing a shareable source archive. The legacy packager otherwise includes the owner's fixture in `source.zip`. That switch alone is not a public-release privacy or licensing audit: inspect archive entries, logs and reports as well.
 
-The [public R37 kit with CPS 0.7.0](https://github.com/YaziAranea/uv98-rust/releases/download/r37/UV98-r37-CPS-0.7.0-2026-11-16.zip) excludes manufacturer recovery firmware and personal calibration/NOR/codeplug files. The [getting-started guide](docs/GETTING-STARTED.en.md#where-to-get-the-stock-recovery-file) provides the separately obtained matching stock file and its hash. The older R35 kit remains a private historical artifact; its bundled recovery file must not be copied automatically into a public release.
+Keep a compatible CPS catalog with each flashable BIN. The public kit excludes manufacturer recovery firmware and personal calibration, NOR and codeplug files. The [getting-started guide](docs/GETTING-STARTED.en.md#where-to-get-the-stock-recovery-file) links the separate stock recovery file and its hash.
 
-
-### Optional runtime UART diagnostics (R39)
+### Optional runtime UART diagnostics
 
 The firmware feature `verbose-runtime` enables key snapshots (0x132), extra
 RX/register snapshots (0x174/0x175), and timing/profiling frames (0x172/0x176).
-It is off in the R39 release to fit the application flash region. LCD meters,
+R40 builds in this guide leave it off. LCD meters,
 normal RX observations, RF events, PTT/TOT guards and fault records remain active.
 This flag is for diagnostic compositions; combining every feature with
 `channel-tx` is not qualified to fit. Keep the linker memory bounds unchanged.
