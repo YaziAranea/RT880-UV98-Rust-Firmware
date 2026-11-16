@@ -55,6 +55,24 @@ impl Processing {
     }
 }
 
+#[derive(Clone, Copy)]
+enum AmProperty {
+    Filter(u16),
+    Attenuation(u16),
+}
+
+impl AmProperty {
+    fn command(self) -> [u8; 6] {
+        let (property, value) = match self {
+            Self::Filter(value) => (0x3102_u16, value),
+            Self::Attenuation(value) => (0x3302_u16, value),
+        };
+        let [ph, pl] = property.to_be_bytes();
+        let [vh, vl] = value.to_be_bytes();
+        [0x12, 0, ph, pl, vh, vl]
+    }
+}
+
 pub const CTS_PENDING: u8 = 6;
 const CTS_TIMEOUT_MS: u32 = 250;
 
@@ -115,6 +133,7 @@ impl ModeSwitch {
 
 pub trait Transport {
     fn write(&mut self, command: &[u8]) -> Result<(), u8>;
+    /// Check the response status for ERR and CTS before returning its bytes.
     fn read<const N: usize>(&mut self) -> Result<[u8; N], u8>;
 }
 
@@ -129,6 +148,8 @@ enum Phase {
     PatchRevision,
     Volume,
     Tune,
+    ApplyLiveProcessing,
+    ConfirmLiveProcessing(AmProperty),
     QueryComplete,
     ReadComplete,
     TuneStatus,
@@ -163,6 +184,7 @@ pub struct Session {
     tune_started: u32,
     cts_wait_started: Option<u32>,
     sweep_mode: bool,
+    listening: bool,
 }
 
 impl Session {
@@ -183,13 +205,15 @@ impl Session {
             tune_started: 0,
             cts_wait_started: None,
             sweep_mode: false,
+            listening: false,
         }
     }
 
-    /// Settings are applied on the next foreground tick, one property command
-    /// at a time with CTS handling. Existing callers retain the old defaults.
-    pub fn set_processing(&mut self, processing: Processing) {
+    /// Apply processing one command at a time. A confirmed AM frequency can
+    /// keep playing when the caller is listening with no active scan.
+    pub fn set_processing(&mut self, processing: Processing, listening: bool) {
         self.processing = Some(processing);
+        self.listening = listening;
     }
 
     /// A sweep polls the documented STC completion flag sooner instead of
@@ -199,12 +223,26 @@ impl Session {
         self.sweep_mode = enabled;
     }
 
-    fn processing_pending(&self, mode: ShortwaveMode) -> bool {
-        mode == ShortwaveMode::Am
-            && self.processing.is_some_and(|processing| {
-                self.configured_filter != Some(processing.filter_property())
-                    || self.configured_attenuation != Some(processing.attenuation_property())
-            })
+    fn next_am_property(&self, mode: ShortwaveMode) -> Option<AmProperty> {
+        if mode != ShortwaveMode::Am {
+            return None;
+        }
+        let processing = self.processing?;
+        let filter = processing.filter_property();
+        let attenuation = processing.attenuation_property();
+        if self.configured_filter != Some(filter) {
+            Some(AmProperty::Filter(filter))
+        } else {
+            (self.configured_attenuation != Some(attenuation))
+                .then_some(AmProperty::Attenuation(attenuation))
+        }
+    }
+
+    fn record_am_property(&mut self, property: AmProperty) {
+        match property {
+            AmProperty::Filter(value) => self.configured_filter = Some(value),
+            AmProperty::Attenuation(value) => self.configured_attenuation = Some(value),
+        }
     }
 
     pub fn tick(
@@ -214,14 +252,22 @@ impl Session {
         tuning: Tuning,
         mut read_patch: impl FnMut(u16, &mut [u8]) -> bool,
     ) -> Result<Option<Update>, u8> {
-        let needs_tune = matches!(self.phase, Phase::Ready)
-            && (self.tuned != Some(tuning) || self.processing_pending(tuning.mode));
-        if (!needs_tune || self.cts_wait_started.is_some())
-            && now.wrapping_sub(self.at) >= 0x8000_0000
+        let changed_tuning = self.tuned != Some(tuning);
+        let ready = matches!(self.phase, Phase::Ready);
+        let restart = ready && (changed_tuning || self.next_am_property(tuning.mode).is_some());
+        if (!restart || self.cts_wait_started.is_some()) && now.wrapping_sub(self.at) >= 0x8000_0000
         {
             return Ok(None);
         }
-        let phase = if needs_tune { Phase::Tune } else { self.phase };
+        let phase = if restart {
+            if !changed_tuning && self.listening && !self.sweep_mode {
+                Phase::ApplyLiveProcessing
+            } else {
+                Phase::Tune
+            }
+        } else {
+            self.phase
+        };
         let result = self.tick_due(bus, now, tuning, &mut read_patch, phase);
         if let Err(code) = result {
             if code & 0x0f == CTS_PENDING {
@@ -340,29 +386,17 @@ impl Session {
                     .map_err(|e| 0x40 | e)?;
                 (Phase::Tune, 12)
             }
-            Phase::Tune => {
+            Phase::Tune | Phase::ApplyLiveProcessing => {
                 bus.read::<1>().map_err(|e| 0x40 | e)?;
-                if self.processing_pending(tuning.mode) {
-                    // The pending predicate guarantees Some and AM mode.
-                    let processing = self.processing.unwrap();
-                    let filter = processing.filter_property();
-                    let attenuation = processing.attenuation_property();
-                    let (property, value) = if self.configured_filter != Some(filter) {
-                        (0x3102_u16, filter)
+                if let Some(property) = self.next_am_property(tuning.mode) {
+                    bus.write(&property.command()).map_err(|e| 0xc0 | e)?;
+                    if matches!(phase, Phase::ApplyLiveProcessing) {
+                        (Phase::ConfirmLiveProcessing(property), 12)
                     } else {
-                        (0x3302_u16, attenuation)
-                    };
-                    let [ph, pl] = property.to_be_bytes();
-                    let [vh, vl] = value.to_be_bytes();
-                    bus.write(&[0x12, 0, ph, pl, vh, vl])
-                        .map_err(|e| 0xc0 | e)?;
-                    if property == 0x3102 {
-                        self.configured_filter = Some(value);
-                    } else {
-                        self.configured_attenuation = Some(value);
+                        self.record_am_property(property);
+                        update = Some(Update::Tuning);
+                        (Phase::Tune, 12)
                     }
-                    update = Some(Update::Tuning);
-                    (Phase::Tune, 12)
                 } else if tuning.mode.is_ssb() && self.configured_mode != Some(tuning.mode) {
                     let bandwidth = if tuning.mode == ShortwaveMode::Cw {
                         [0x90, 0x04]
@@ -400,6 +434,14 @@ impl Session {
                     (Phase::QueryComplete, if self.sweep_mode { 10 } else { 85 })
                 }
             }
+            Phase::ConfirmLiveProcessing(property) => {
+                bus.read::<1>().map_err(|e| 0x40 | e)?;
+                self.record_am_property(property);
+                // Re-evaluate the current selection after finishing the
+                // outstanding command. A frequency or sweep change can now
+                // take the ordinary tuning and STC path.
+                (Phase::Ready, 0)
+            }
             Phase::QueryComplete => {
                 bus.write(&[0x14]).map_err(|e| 0x50 | e)?;
                 (Phase::ReadComplete, 3)
@@ -433,7 +475,7 @@ impl Session {
                 }) {
                     return Err(0x65);
                 }
-                if Some(tuning) == self.tuned && !self.processing_pending(tuning.mode) {
+                if Some(tuning) == self.tuned && self.next_am_property(tuning.mode).is_none() {
                     update = Some(Update::Tuned {
                         part: self.part,
                         rssi: reply[4],
@@ -460,7 +502,7 @@ impl Session {
                     let reply = bus.read::<6>().map_err(|e| 0x70 | e)?;
                     (reply[4], reply[5])
                 };
-                if Some(tuning) == self.tuned && !self.processing_pending(tuning.mode) {
+                if Some(tuning) == self.tuned && self.next_am_property(tuning.mode).is_none() {
                     update = Some(Update::Quality {
                         part: self.part,
                         rssi,
@@ -518,10 +560,13 @@ mod tests {
         let mut session = Session::new(0);
         session.phase = Phase::Ready;
         session.tuned = Some(tuning);
-        session.set_processing(Processing {
-            filter: AmFilter::Voice3k,
-            soft_mute: true,
-        });
+        session.set_processing(
+            Processing {
+                filter: AmFilter::Voice3k,
+                soft_mute: true,
+            },
+            false,
+        );
         let mut bus = Mock::default();
         assert_eq!(
             session.tick(&mut bus, 0, tuning, |_, _| false),
@@ -543,10 +588,13 @@ mod tests {
         let mut ssb = Session::new(0);
         ssb.phase = Phase::Tune;
         ssb.at = 0;
-        ssb.set_processing(Processing {
-            filter: AmFilter::Narrow1k,
-            soft_mute: true,
-        });
+        ssb.set_processing(
+            Processing {
+                filter: AmFilter::Narrow1k,
+                soft_mute: true,
+            },
+            false,
+        );
         bus.writes.clear();
         assert_eq!(
             ssb.tick(
@@ -561,6 +609,131 @@ mod tests {
             Ok(Some(Update::Tuning))
         );
         assert_eq!(&bus.writes[0][2..4], &[1, 1]); // SSB patch property, not AM 0x3102.
+    }
+
+    fn listening_am(tuning: Tuning) -> Session {
+        let mut session = Session::new(0);
+        session.phase = Phase::Ready;
+        session.tuned = Some(tuning);
+        session.configured_filter = Some(2);
+        session.configured_attenuation = Some(0);
+        session
+    }
+
+    #[test]
+    fn listening_am_changes_filter_and_soft_mute_without_retune_or_audio_transition() {
+        let tuning = am(6070);
+        let mut session = listening_am(tuning);
+        let mut bus = Mock::default();
+        session.set_processing(
+            Processing {
+                filter: AmFilter::Narrow1k,
+                soft_mute: true,
+            },
+            true,
+        );
+
+        assert_eq!(session.tick(&mut bus, 0, tuning, |_, _| false), Ok(None));
+        assert_eq!(bus.writes, [std::vec![0x12, 0, 0x31, 2, 1, 4]]);
+        assert_eq!(session.configured_filter, Some(2));
+        assert_eq!(session.tick(&mut bus, 11, tuning, |_, _| false), Ok(None));
+        assert_eq!(bus.reads, [1]);
+        bus.read_error = Some(CTS_PENDING);
+        assert_eq!(session.tick(&mut bus, 12, tuning, |_, _| false), Ok(None));
+        assert_eq!(session.configured_filter, Some(2));
+        bus.read_error = None;
+        assert_eq!(session.tick(&mut bus, 15, tuning, |_, _| false), Ok(None));
+        assert_eq!(bus.reads, [1, 1]);
+        assert_eq!(session.tick(&mut bus, 16, tuning, |_, _| false), Ok(None));
+        assert_eq!(session.configured_filter, Some(0x0104));
+        assert_eq!(session.tick(&mut bus, 17, tuning, |_, _| false), Ok(None));
+        assert_eq!(bus.writes[1], [0x12, 0, 0x33, 2, 0, 8]);
+        assert_eq!(session.configured_attenuation, Some(0));
+        assert_eq!(session.tick(&mut bus, 29, tuning, |_, _| false), Ok(None));
+        assert_eq!(session.configured_attenuation, Some(8));
+        assert_eq!(session.tick(&mut bus, 30, tuning, |_, _| false), Ok(None));
+        assert_eq!(bus.writes[2], [0x43, 0]);
+        bus.reply[4..6].copy_from_slice(&[41, 18]);
+        assert_eq!(
+            session.tick(&mut bus, 33, tuning, |_, _| false),
+            Ok(Some(Update::Quality {
+                part: 0,
+                rssi: 41,
+                snr: 18
+            }))
+        );
+        assert_eq!(bus.writes.len(), 3);
+        assert_eq!(session.tuned, Some(tuning));
+    }
+
+    #[test]
+    fn new_frequency_and_sweep_wait_for_property_cts_then_retune() {
+        let tuning = am(6070);
+        let mut session = listening_am(tuning);
+        let mut bus = Mock::default();
+        session.set_processing(
+            Processing {
+                filter: AmFilter::Wide6k,
+                soft_mute: false,
+            },
+            true,
+        );
+        assert_eq!(session.tick(&mut bus, 0, tuning, |_, _| false), Ok(None));
+
+        let next = am(6075);
+        session.set_sweep_mode(true);
+        session.set_processing(
+            Processing {
+                filter: AmFilter::Narrow1k,
+                soft_mute: false,
+            },
+            true,
+        );
+        assert_eq!(session.tick(&mut bus, 11, next, |_, _| false), Ok(None));
+        assert_eq!(bus.writes.len(), 1);
+        assert_eq!(session.tick(&mut bus, 12, next, |_, _| false), Ok(None));
+        assert_eq!(session.configured_filter, Some(0));
+        assert_eq!(
+            session.tick(&mut bus, 13, next, |_, _| false),
+            Ok(Some(Update::Tuning))
+        );
+        assert_eq!(bus.writes[1], [0x12, 0, 0x31, 2, 0, 4]);
+        assert_eq!(
+            session.tick(&mut bus, 25, next, |_, _| false),
+            Ok(Some(Update::Tuning))
+        );
+        assert_eq!(bus.writes[2], [0x40, 0, 0x17, 0xbb, 0, 1]);
+        assert_eq!(session.at, 35);
+    }
+
+    #[test]
+    fn listening_property_errors_and_cts_timeout_do_not_commit_filter() {
+        let tuning = am(6070);
+        for error in [4, CTS_PENDING] {
+            let mut session = listening_am(tuning);
+            let mut bus = Mock::default();
+            session.set_processing(
+                Processing {
+                    filter: AmFilter::Narrow1k,
+                    soft_mute: false,
+                },
+                true,
+            );
+            assert_eq!(session.tick(&mut bus, 0, tuning, |_, _| false), Ok(None));
+            bus.read_error = Some(error);
+            if error == CTS_PENDING {
+                assert_eq!(session.tick(&mut bus, 12, tuning, |_, _| false), Ok(None));
+                assert_eq!(session.tick(&mut bus, 258, tuning, |_, _| false), Ok(None));
+            }
+            let deadline = if error == CTS_PENDING { 262 } else { 12 };
+            assert_eq!(
+                session.tick(&mut bus, deadline, tuning, |_, _| false),
+                Err(0x40 | error)
+            );
+            assert_eq!(session.configured_filter, Some(2));
+            assert_eq!(session.tuned, Some(tuning));
+            assert_eq!(bus.writes.len(), 1);
+        }
     }
 
     #[test]
@@ -620,14 +793,18 @@ mod tests {
         for phase in [Phase::ReadTune, Phase::ReadQuality] {
             let mut session = Session::new(0);
             session.phase = phase;
+            session.set_sweep_mode(true);
             session.at = 0;
             session.tuned = Some(tuning);
             session.configured_filter = Some(0);
             session.configured_attenuation = Some(0);
-            session.set_processing(Processing {
-                filter: AmFilter::Narrow1k,
-                soft_mute: false,
-            });
+            session.set_processing(
+                Processing {
+                    filter: AmFilter::Narrow1k,
+                    soft_mute: false,
+                },
+                true,
+            );
             let mut bus = Mock::default();
             bus.reply = [0x80, 0, 0x1b, 0xbc, 40, 12, 0, 1, 0];
             assert_eq!(session.tick(&mut bus, 0, tuning, |_, _| false), Ok(None));

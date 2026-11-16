@@ -2028,7 +2028,13 @@ fn main() -> ! {
             }
             let session = tuner_session.as_mut().unwrap();
             session.set_sweep_mode(scope_enabled);
-            session.set_processing(tuner_processing);
+            session.set_processing(
+                tuner_processing,
+                matches!(
+                    tuner_view.shortwave_status,
+                    ShortwaveStatus::Listening { .. }
+                ) && !tuner_view.shortwave_scan,
+            );
             let tuner_result =
                 session.tick(&mut tuner_bus, now, requested_tuning, |offset, bytes| {
                     app.read_shortwave_patch(offset, bytes)
