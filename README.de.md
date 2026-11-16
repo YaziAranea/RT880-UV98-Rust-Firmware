@@ -61,7 +61,7 @@ Unter **Firmware → BIN auswählen…** lässt sich eine kompatible Anwendungs-
 
 ## Funktionen in R42
 
-- **Funkgerätename nach PTT.** Unter **SYSTEM / TX** den **FUNKGERÄTENAME** eingeben und **NAME NACH PTT** einschalten. Der Name umfasst bis zu 16 lateinische Großbuchstaben, Ziffern und Leerzeichen. Bei aktivierter Option sendet das Gerät den Namen im Roger-Format der Originalfirmware RT880 1.16. Name und Schalter bleiben beim Ausschalten gespeichert. Nach einem vollständigen Firmware-Update ist das interne Journal leer, und beim Start werden gültige Originaleinstellungen geladen. [Name eingeben und speichern](docs/GETTING-STARTED.de.md#funkgerätename-nach-ptt)
+- **Funkgerätename nach PTT.** Unter **SYSTEM / TX** den **FUNKGERÄTENAME** eingeben und **NAME NACH PTT** einschalten. Der Name umfasst bis zu 16 lateinische Großbuchstaben, Ziffern und Leerzeichen. Bei aktivierter Option sendet das Gerät den Namen im Roger-Format der Originalfirmware RT880 1.16. Name und Schalter werden im internen Flash gespeichert. Beide Werte nach dem Aus- und Einschalten prüfen. Nach einem vollständigen Firmware-Update ist das interne Journal leer, und beim Start werden gültige Originaleinstellungen geladen. [Name eingeben und speichern](docs/GETTING-STARTED.de.md#funkgerätename-nach-ptt)
 - **Leistungsanzeige.** Ein großes rotes **L**, gelbes **M** oder grünes **H** zeigt die gewählte Leistungsstufe des sendenden VFOs, auch wenn B sendet und A ausgewählt ist.
 
 - **CB-Kanalraster.** Für VFO A stehen 40 Kanäle zur Wahl. Beim ersten Öffnen ist Kanal 15 AM auf 27,135 MHz im CEPT-Raster ausgewählt. Mit `#` zum 0er-Raster wechseln. Eine lange Zifferntaste kann das Raster öffnen. Dort EXIT gedrückt halten, um die vorherige Einstellung von A wiederherzustellen. Im CB-Raster von VFO A empfängt AM auf der Kanalfrequenz. Beim Drücken der PTT sendet das Gerät experimentell in Schmalband-FM 2 kHz höher. Auf CEPT-Kanal 15 liegt RX bei 27,135 MHz und TX bei 27,137 MHz. [CB-Bedienung](docs/GETTING-STARTED.de.md#cb-kanalraster)
@@ -104,7 +104,7 @@ Für R42 stehen Gerätetests zur Namensübertragung und Speicherung über das Au
 - Der KW-Wasserfall stimmt den einzigen Si4732 nacheinander ab und unterbricht dabei die Audiowiedergabe. Er ist keine FFT.
 - APRS sendet derzeit manuell. Eine APRS-Empfangsansicht, automatische Baken und das alternative GPIO-Modem sind noch nicht fertig.
 - AM-Filter und Soft Mute sind vorhanden; allgemeine Sprachrauschunterdrückung NR/NB für den Haupt-BK4819 ist nicht implementiert.
-- Name und PTT-Namensschalter liegen im internen Journal. Andere Änderungen am Funkgerät bleiben bis zum Ausschalten im RAM. Die geflashte BIN legt die Anzeigesprache fest.
+- Name, PTT-Namensschalter und Mikrofonverstärkung liegen im internen Journal. Andere Änderungen am Funkgerät bleiben bis zum Ausschalten im RAM. Die geflashte BIN legt die Anzeigesprache fest.
 
 ## Quellcode und Entwicklung
 

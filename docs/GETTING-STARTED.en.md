@@ -152,7 +152,7 @@ When enabled, the radio sends the name after PTT in the stock RT880 1.16 Roger f
 
 ### Separate PA5 audio test
 
-The RX-only PA5 image records one short receive-audio block for inspection on a PC. [PA5 test procedure (Russian)](../research/r42/PA5-TEST-RU.txt)
+The RX-only PA5 image records a short block of PA5 ADC samples during reception for inspection on a PC. [PA5 test procedure (Russian)](../research/r42/PA5-TEST-RU.txt)
 
 ## 6. Return to stock if needed
 

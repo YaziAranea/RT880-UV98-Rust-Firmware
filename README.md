@@ -61,7 +61,7 @@ In **Firmware → Select BIN…**, open a compatible application BIN with a cali
 
 ## R42 features
 
-- **Radio name after PTT.** Set **RADIO NAME** and **NAME AFTER PTT** in **SYSTEM / TX**. The name uses up to 16 uppercase Latin letters, digits and spaces. The radio sends it in the stock RT880 1.16 Roger format when enabled. These settings survive power-off. A full firmware update clears the internal journal, and startup then loads usable stock settings. [Name entry and saving](docs/GETTING-STARTED.en.md#radio-name-after-ptt)
+- **Radio name after PTT.** Set **RADIO NAME** and **NAME AFTER PTT** in **SYSTEM / TX**. The name uses up to 16 uppercase Latin letters, digits and spaces. The radio sends it in the stock RT880 1.16 Roger format when enabled. These settings are stored in internal Flash; verify them after power cycling. A full firmware update clears the internal journal, and startup then loads usable stock settings. [Name entry and saving](docs/GETTING-STARTED.en.md#radio-name-after-ptt)
 - **Power indicator.** A large red **L**, yellow **M** or green **H** indicates the configured power of the transmitting slot, including B while A is selected.
 
 - **CB grid.** The 40-channel CEPT grid for VFO A opens on channel 15 AM at 27.135 MHz on first use. Use `#` for the zero-ending frequencies. Assign a long digit to open the grid. Hold EXIT on the grid to restore the previous A context. In the CB grid on A, AM receives on the channel frequency. PTT uses experimental narrow FM 2 kHz higher. On CEPT channel 15, RX is 27.135 MHz and TX is 27.137 MHz. [CB controls](docs/GETTING-STARTED.en.md#cb-grid)
@@ -104,7 +104,7 @@ R42 still needs on-radio checks of name signalling and saving across power-off, 
 - The HF waterfall retunes one Si4732 and interrupts audio during the sweep; it is not an FFT.
 - APRS is currently a manual beacon. An APRS receive UI, automatic beacons and the alternative GPIO modem remain unfinished.
 - AM filters/soft mute are available; general-purpose voice NR/NB on the main BK4819 is not implemented.
-- The radio name and its PTT toggle use the internal journal. Other on-radio edits remain in RAM until power-off. The flashed BIN fixes the interface language.
+- The radio name, its PTT toggle and microphone gain use the internal journal. Other on-radio edits remain in RAM until power-off. The flashed BIN fixes the interface language.
 
 ## Source and development
 
