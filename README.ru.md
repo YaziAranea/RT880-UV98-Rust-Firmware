@@ -10,7 +10,7 @@
 
 [English](README.md) · [Deutsch](README.de.md) · **Русский**
 
-[**Бинарник прошивки**](https://github.com/YaziAranea/uv98-rust/releases/download/r38/UV98-r38.bin) · [**Комплект с CPS 0.7.0**](https://github.com/YaziAranea/uv98-rust/releases/download/r38/UV98-r38-2026-11-16.zip) · [**Начать здесь: бэкап и установка**](docs/GETTING-STARTED.ru.md) · [Описание выпуска](https://github.com/YaziAranea/uv98-rust/releases/tag/r38)
+[**Бинарник прошивки**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r38/UV98-r38.bin) · [**Комплект с CPS 0.7.0**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r38/UV98-r38-2026-11-16.zip) · [**Начать здесь: бэкап и установка**](docs/GETTING-STARTED.ru.md) · [Описание выпуска](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r38)
 
 > **Экспериментальная прошивка для исследованного профиля платы AT32F423.** Перед записью подготовьте в CPS персональный образ R38 по проверенному NOR-бэкапу своей станции. CPS привяжет образ к вашим заводским калибровкам. Сначала проверьте совместимость платы. [Инструкция резервирования и подготовки](docs/GETTING-STARTED.ru.md#4-проверьте-совместимость-перед-прошивкой)
 
@@ -18,7 +18,7 @@
 
 В списке **Язык / Language / Sprache** на панели выберите **Русский**, **English** или **Deutsch**. Все восемь вкладок и уже показанные сообщения меняют язык сразу. Несохранённые правки остаются в формах, а выбор языка запоминается в профиле Windows. Заголовки и фильтры файловых диалогов следуют языку CPS, стандартные кнопки — языку Windows.
 
-В комплект R38 входит выпущенная сборка CPS 0.7.0. [Исходники CPS 0.7.0](https://github.com/YaziAranea/uv98-rust/tree/cps-v0.7.0)
+В комплект R38 входит выпущенная сборка CPS 0.7.0. [Исходники CPS 0.7.0](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/tree/cps-v0.7.0)
 
 ![Редактор каналов CPS 0.7.0 на русском](docs/images/cps-0.7.0/ru-channels.png)
 
@@ -79,7 +79,7 @@
 
 ## Текущие границы
 
-R33 остаётся принятой владельцем опорной версией на рации. Для R38 предстоит проверить красную рамку TX, скорость дисплея, работу CB/КВ и декодирование MDC1200 на рации. [Отчёты о сборке и симуляции](https://github.com/YaziAranea/uv98-rust/releases/tag/r38)
+R33 остаётся принятой владельцем опорной версией на рации. Для R38 предстоит проверить красную рамку TX, скорость дисплея, работу CB/КВ и декодирование MDC1200 на рации. [Отчёты о сборке и симуляции](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r38)
 
 - Dual Watch поочерёдно слушает A/B. Одновременного звука двух BK4819 нет.
 - КВ-водопад перестраивает единственный Si4732 и прерывает звук на время обзора. Это не FFT.

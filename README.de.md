@@ -10,7 +10,7 @@ Unabhängige A/B-Einstellungen, ein farbiges Spektrum, Kurzwellenfunktionen und 
 
 [English](README.md) · **Deutsch** · [Русский](README.ru.md)
 
-[**Firmware-BIN**](https://github.com/YaziAranea/uv98-rust/releases/download/r38/UV98-r38.bin) · [**Firmware und CPS 0.7.0**](https://github.com/YaziAranea/uv98-rust/releases/download/r38/UV98-r38-2026-11-16.zip) · [**Hier beginnen: Sicherung und Installation**](docs/GETTING-STARTED.de.md) · [Versionshinweise](https://github.com/YaziAranea/uv98-rust/releases/tag/r38)
+[**Firmware-BIN**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r38/UV98-r38.bin) · [**Firmware und CPS 0.7.0**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r38/UV98-r38-2026-11-16.zip) · [**Hier beginnen: Sicherung und Installation**](docs/GETTING-STARTED.de.md) · [Versionshinweise](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r38)
 
 > **Experimentelle Firmware für das untersuchte AT32F423-Platinenprofil.** Vor dem Flashen mit CPS ein persönliches R38-Image aus der geprüften NOR-Sicherung des eigenen Geräts erstellen. CPS bindet das Image an die eigenen Werkskalibrierungen. Zuerst die Platinenkompatibilität prüfen. [Sicherungs- und Vorbereitungsanleitung](docs/GETTING-STARTED.de.md#4-kompatibilität-vor-dem-flashen-prüfen)
 
@@ -18,7 +18,7 @@ Unabhängige A/B-Einstellungen, ein farbiges Spektrum, Kurzwellenfunktionen und 
 
 Wählen Sie in der Symbolleiste unter **Язык / Language / Sprache** zwischen **Русский**, **English** und **Deutsch**. Alle acht Reiter und bereits angezeigte Statusmeldungen wechseln sofort die Sprache. Ungespeicherte Änderungen bleiben erhalten. CPS speichert die Sprachwahl im Windows-Benutzerprofil. Titel und Filter der Dateidialoge folgen der CPS-Sprache. Die Standardschaltflächen folgen der Windows-Sprache.
 
-Das R38-Paket enthält die veröffentlichte CPS 0.7.0. [Quellcode der CPS 0.7.0](https://github.com/YaziAranea/uv98-rust/tree/cps-v0.7.0)
+Das R38-Paket enthält die veröffentlichte CPS 0.7.0. [Quellcode der CPS 0.7.0](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/tree/cps-v0.7.0)
 
 ![Kanaleditor der CPS 0.7.0 auf Deutsch](docs/images/cps-0.7.0/de-channels.png)
 
@@ -79,7 +79,7 @@ Die [Schritt-für-Schritt-Anleitung](docs/GETTING-STARTED.de.md) nennt die CPS-S
 
 ## Aktuelle Grenzen
 
-R33 bleibt die vom Besitzer am Gerät akzeptierte Ausgangsversion. Bei R38 stehen Gerätetests für den TX-Rahmen, die LCD-Zeiten, CB/Kurzwelle und die MDC1200-Dekodierung aus. [Build- und Simulationsergebnisse für R38](https://github.com/YaziAranea/uv98-rust/releases/tag/r38)
+R33 bleibt die vom Besitzer am Gerät akzeptierte Ausgangsversion. Bei R38 stehen Gerätetests für den TX-Rahmen, die LCD-Zeiten, CB/Kurzwelle und die MDC1200-Dekodierung aus. [Build- und Simulationsergebnisse für R38](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r38)
 
 - Dual Watch hört A/B abwechselnd ab. Gleichzeitige Audiowiedergabe beider BK4819-Empfänger ist nicht implementiert.
 - Der KW-Wasserfall stimmt den einzigen Si4732 nacheinander ab und unterbricht dabei die Audiowiedergabe. Er ist keine FFT.

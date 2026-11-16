@@ -10,7 +10,7 @@ Independent A/B operation, a colour spectrum display, shortwave tools and access
 
 **English** · [Deutsch](README.de.md) · [Русский](README.ru.md)
 
-[**Firmware BIN**](https://github.com/YaziAranea/uv98-rust/releases/download/r38/UV98-r38.bin) · [**Firmware + CPS 0.7.0**](https://github.com/YaziAranea/uv98-rust/releases/download/r38/UV98-r38-2026-11-16.zip) · [**Start here: backup and installation**](docs/GETTING-STARTED.en.md) · [Release notes](https://github.com/YaziAranea/uv98-rust/releases/tag/r38)
+[**Firmware BIN**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r38/UV98-r38.bin) · [**Firmware + CPS 0.7.0**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r38/UV98-r38-2026-11-16.zip) · [**Start here: backup and installation**](docs/GETTING-STARTED.en.md) · [Release notes](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r38)
 
 > **Experimental firmware for the investigated AT32F423 board profile.** Use CPS to prepare a personal R38 image from your radio's verified NOR backup before flashing. CPS binds the image to your factory calibration. Verify board compatibility before proceeding. [Backup and preparation guide](docs/GETTING-STARTED.en.md#4-check-compatibility-before-flashing)
 
@@ -18,7 +18,7 @@ Independent A/B operation, a colour spectrum display, shortwave tools and access
 
 Use **Язык / Language / Sprache** in the toolbar to select **Русский**, **English** or **Deutsch**. All eight tabs and existing status messages switch immediately. Unsaved edits stay in place, and CPS remembers the selection in your Windows user profile. File dialog titles and filters follow CPS. Standard dialog buttons follow Windows.
 
-The R38 kit bundles the released CPS 0.7.0 build. [CPS 0.7.0 source](https://github.com/YaziAranea/uv98-rust/tree/cps-v0.7.0)
+The R38 kit bundles the released CPS 0.7.0 build. [CPS 0.7.0 source](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/tree/cps-v0.7.0)
 
 ![CPS 0.7.0 channel editor in English](docs/images/cps-0.7.0/en-channels.png)
 
@@ -79,7 +79,7 @@ The [file checklist and step-by-step guide](docs/GETTING-STARTED.en.md) names ev
 
 ## Current limits
 
-R33 is the owner's accepted hardware baseline. R38 still needs on-radio checks of TX indication, display timing, CB/HF operation and MDC1200 decoding. Build and simulation results are in the [R38 release notes](https://github.com/YaziAranea/uv98-rust/releases/tag/r38).
+R33 is the owner's accepted hardware baseline. R38 still needs on-radio checks of TX indication, display timing, CB/HF operation and MDC1200 decoding. Build and simulation results are in the [R38 release notes](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r38).
 
 - Dual Watch alternates the receiver. Simultaneous audio from two BK4819 receivers is not implemented.
 - The HF waterfall retunes one Si4732 and interrupts audio during the sweep; it is not an FFT.
