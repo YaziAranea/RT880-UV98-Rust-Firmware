@@ -737,8 +737,13 @@ fn continuous_50ms_rssi_cannot_starve_a_full_home_pass_or_lose_the_latest_value(
 
 #[test]
 fn menu_and_up_are_not_lost_during_a_partial_home_frame_with_flickering_rssi() {
-    let panel = Panel::default();
+    let capture = Rc::new(RefCell::new(CapturedFrame::new()));
+    let panel = Panel {
+        capture: Some(capture.clone()),
+        ..Panel::default()
+    };
     let lcd_writes = panel.observed_writes.clone();
+    let windows = panel.windows.clone();
     let mut app = App::new(
         Memory::new(),
         panel,
@@ -776,7 +781,7 @@ fn menu_and_up_are_not_lost_during_a_partial_home_frame_with_flickering_rssi() {
     app.sample(160, release).unwrap();
     assert_eq!(app.sample(190, release).unwrap().pressed, Some(Key::Menu));
     assert_eq!(app.status.view.screen, Screen::Menu);
-    assert_eq!(app.row_cursor, 0); // New page paints retained damage from the top.
+    assert_eq!(app.row_cursor, 0); // The ordinary queue restarts at the top.
     let up = InputSample::Stable {
         matrix: 0x2000,
         ptt_pressed: false,
@@ -792,7 +797,9 @@ fn menu_and_up_are_not_lost_during_a_partial_home_frame_with_flickering_rssi() {
     assert_eq!(lcd_writes.get(), before_input); // Input never flushes the LCD.
     let required = app.pending_rows;
     let mut seen = [false; render::HEIGHT as usize];
-    for batch in 0..80 {
+    // A full frame needs 80 four-row batches. Priority boundaries can split
+    // a few of those windows, so allow the endpoints of both priority ranges.
+    for batch in 0..84 {
         if !app.render_pending() {
             break;
         }
@@ -802,11 +809,13 @@ fn menu_and_up_are_not_lost_during_a_partial_home_frame_with_flickering_rssi() {
             app.set_radio_view(radio).unwrap();
         }
         assert_eq!(app.sample(now, release).unwrap().pressed, None);
-        let start = app.pending_rows.next(app.row_cursor).unwrap();
+        let before = windows.borrow().len();
         let progress = app.render_step(4).unwrap();
-        for row in start..start + progress.rows {
-            seen[row as usize] = true;
-        }
+        let painted = windows.borrow();
+        assert_eq!(painted.len(), before + 1);
+        let (start, end) = painted[before];
+        assert_eq!(end - start, progress.rows);
+        seen[usize::from(start)..usize::from(end)].fill(true);
     }
     for row in 0..render::HEIGHT {
         assert!(
@@ -818,6 +827,7 @@ fn menu_and_up_are_not_lost_during_a_partial_home_frame_with_flickering_rssi() {
     assert_eq!(app.status.view.screen, Screen::Menu);
     assert_eq!(app.radio_view(), radio);
     assert_eq!(app.status.presses, 2);
+    assert_matches_complete_frame(&mut app, &capture);
     event(&mut app, InputEvent::Short(Key::Exit));
     assert_eq!(app.status.view.screen, Screen::Home);
     assert_eq!(app.radio_view(), radio); // Latest metadata survives page changes.
