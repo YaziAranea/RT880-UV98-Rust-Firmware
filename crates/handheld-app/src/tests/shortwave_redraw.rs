@@ -36,7 +36,9 @@ fn hf_acquisition_redraws_progress_only_and_complete_sweeps_match_full_frame() {
             if sweep == 0 && bin == 0 {
                 assert_eq!(rows, 228);
             } else if bin == 31 {
-                assert_eq!(rows, 125);
+                // First plot: 37 graph rows and one four-row band. Following
+                // +1 RSSI sweep: 29 graph rows, two bands. Each adds progress.
+                assert_eq!(rows, if sweep == 0 { 43 } else { 39 });
             } else {
                 assert_eq!(rows, 2);
                 let frame = capture.borrow();
@@ -55,8 +57,8 @@ fn hf_acquisition_redraws_progress_only_and_complete_sweeps_match_full_frame() {
             assert_matches_complete_frame(&mut app, &capture);
         }
     }
-    // Previously every sample invalidated 185 rows: 5920 rows per sweep.
-    assert_eq!(sampled_rows, 31 * 2 + 125);
+    // This fixture needs 101 rows instead of the previous 187.
+    assert_eq!(sampled_rows, 101);
     assert_eq!(app.shortwave_scope.history_rows(), 2);
     // A changed measurement context clears old history before the next bin,
     // even when its centre and bin spacing are unchanged.
@@ -80,5 +82,59 @@ fn hf_acquisition_redraws_progress_only_and_complete_sweeps_match_full_frame() {
             app.render_step(6).unwrap();
         }
         assert_eq!(app.shortwave_scope.history_rows(), 1);
+    }
+}
+
+#[test]
+fn hf_stable_full_waterfall_preserves_history_and_skips_unchanged_colors() {
+    let capture = Rc::new(RefCell::new(CapturedFrame::new()));
+    let panel = Panel {
+        capture: Some(capture.clone()),
+        ..Panel::default()
+    };
+    let mut app = App::new(
+        Memory::new(),
+        panel,
+        NoDelay,
+        Timing::new(30, 600).unwrap(),
+        PRESERVED_CALIBRATION_SHA256,
+    );
+    app.start(0).unwrap();
+    menu(&mut app, controller::MenuItem::Shortwave);
+    event(&mut app, InputEvent::Hold(Key::Digit0));
+    while app.render_pending() {
+        app.render_step(6).unwrap();
+    }
+    for sweep in 0..18 {
+        // 63..=79 differ in raw RSSI but saturate to the same plot and tint.
+        let rssi = if sweep == 17 { 0 } else { 63 + sweep };
+        let mut total_rows = 0;
+        let before = capture.borrow().pixels.clone();
+        for bin in 0..32 {
+            app.shortwave_scope_sample(7_084_000, 1000, bin, rssi, 8, bin == 31)
+                .unwrap();
+            while app.render_pending() {
+                total_rows += app.render_step(6).unwrap().rows;
+            }
+        }
+        if sweep == 16 {
+            assert_eq!(app.shortwave_scope.history_rows(), 16);
+            assert_eq!(total_rows, 64);
+            assert_eq!(capture.borrow().pixels, before);
+        }
+        if sweep == 17 {
+            let actual = capture.borrow();
+            // The changed sweep paints 59 graph rows and just the newest band.
+            assert_eq!(total_rows, 64 + 59 + 4);
+            assert_ne!(
+                &actual.pixels[172 * 240..176 * 240],
+                &before[172 * 240..176 * 240]
+            );
+            assert_eq!(
+                &actual.pixels[176 * 240..236 * 240],
+                &before[172 * 240..232 * 240]
+            );
+        }
+        assert_matches_complete_frame(&mut app, &capture);
     }
 }

@@ -4,6 +4,33 @@ use crate::controller::{AprsStatus, ShortwaveMode};
 
 const BINS: usize = 32;
 const ROWS: usize = 16;
+const GRAPH_TOP: u16 = 96;
+const GRAPH_BOTTOM: u16 = 154;
+const PROGRESS_TOP: u16 = 168;
+const HISTORY_TOP: u16 = 172;
+const HISTORY_ROW_HEIGHT: u16 = 4;
+const HISTORY_LAST: u16 = HISTORY_TOP + ROWS as u16 * HISTORY_ROW_HEIGHT - 1;
+
+/// LCD damage in full-width rows, after accounting for the displayed RSSI scale.
+#[derive(Default)]
+struct ShortwaveDamage {
+    graph: u64,
+    history: u16,
+    progress: bool,
+}
+
+impl ShortwaveDamage {
+    fn ranges(self) -> impl Iterator<Item = (u16, u16)> {
+        (GRAPH_TOP..=GRAPH_BOTTOM)
+            .filter(move |row| self.graph & (1 << (*row - GRAPH_TOP)) != 0)
+            .map(|row| (row, row + 1))
+            .chain(self.progress.then_some((PROGRESS_TOP, PROGRESS_TOP + 2)))
+            .chain((0..ROWS as u16).filter_map(move |age| {
+                let top = HISTORY_TOP + age * HISTORY_ROW_HEIGHT;
+                (self.history & (1 << age) != 0).then_some((top, top + HISTORY_ROW_HEIGHT))
+            }))
+    }
+}
 
 /// Owned by the app, borrowed by Model. Never copied with each View/input event.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,24 +73,54 @@ impl ShortwaveScope {
     /// Stage measurements separately from the visible graph. Only a complete
     /// measured sweep publishes a new graph/history row; a partially acquired
     /// row must never erase the last complete sweep while the LCD is drawing.
-    /// Returns true exactly when a complete row was published.
-    pub fn sample(&mut self, bin: u8, rssi: u8, _snr: u8, complete: bool) -> bool {
+    /// Returns half-open ranges of changed panel rows.
+    pub fn sample(
+        &mut self,
+        bin: u8,
+        rssi: u8,
+        _snr: u8,
+        complete: bool,
+    ) -> impl Iterator<Item = (u16, u16)> {
         let bin = usize::from(bin);
+        let mut damage = ShortwaveDamage::default();
         if bin >= BINS || self.step_hz == 0 {
-            return false;
+            return damage.ranges();
         }
+        let old_progress = self.valid.count_ones();
         if bin == 0 {
             self.valid = 0;
         }
         self.samples[bin] = rssi;
         self.valid |= 1 << bin;
+        damage.progress = self.valid.count_ones() != old_progress;
         if complete && self.valid == u32::MAX {
+            let previous = self.displayed_samples();
+            for (bin, &sample) in self.samples.iter().enumerate() {
+                let old_bar = previous.map_or(0, |old| graph_mask(old[bin]));
+                damage.graph |= old_bar ^ graph_mask(sample);
+            }
+            let rows = (self.rows + 1).min(ROWS);
+            for age in 0..rows {
+                // Compare at the visible age, before the ring overwrites the
+                // oldest sample row. A changed RSSI in the same color is free.
+                let incoming = if age == 0 {
+                    &self.samples
+                } else {
+                    self.history_row(age - 1).unwrap()
+                };
+                if self.history_row(age).is_none_or(|old| {
+                    old.iter()
+                        .zip(incoming)
+                        .any(|(&before, &after)| waterfall_ink(before) != waterfall_ink(after))
+                }) {
+                    damage.history |= 1 << age;
+                }
+            }
             self.newest = (self.newest + 1) % ROWS;
             self.history[self.newest] = self.samples;
-            self.rows = (self.rows + 1).min(ROWS);
-            return true;
+            self.rows = rows;
         }
-        false
+        damage.ranges()
     }
 
     pub fn measured_bins(&self) -> u32 {
@@ -74,8 +131,26 @@ impl ShortwaveScope {
     }
 
     pub fn displayed_samples(&self) -> Option<&[u8; BINS]> {
-        (self.rows > 0).then(|| &self.history[self.newest])
+        self.history_row(0)
     }
+
+    fn history_row(&self, age: usize) -> Option<&[u8; BINS]> {
+        (age < self.rows).then(|| &self.history[(self.newest + ROWS - age) % ROWS])
+    }
+}
+
+fn bar_height(sample: u8) -> u16 {
+    u16::from(sample.min(63)) * (GRAPH_BOTTOM - GRAPH_TOP) / 63
+}
+
+fn graph_mask(sample: u8) -> u64 {
+    let height = bar_height(sample);
+    // A zero-height bar is still one baseline pixel.
+    ((1 << height.max(1)) - 1) << (GRAPH_BOTTOM - GRAPH_TOP - height)
+}
+
+fn waterfall_ink(rssi: u8) -> u16 {
+    WATERFALL_COLORS[1 + usize::from(rssi / 10).min(6)]
 }
 
 #[cfg(test)]
@@ -86,15 +161,15 @@ mod tests {
     fn waterfall_contains_only_complete_measured_sweeps_and_resets_grid() {
         let mut scope = ShortwaveScope::new();
         scope.reset(7_020_000, 5_000);
-        scope.sample(31, 40, 8, true);
+        let _ = scope.sample(31, 40, 8, true);
         assert_eq!(scope.history_rows(), 0);
         for bin in 0..32 {
-            scope.sample(bin, bin + 10, 4, bin == 31);
+            let _ = scope.sample(bin, bin + 10, 4, bin == 31);
         }
         assert_eq!(scope.history_rows(), 1);
         assert_eq!(scope.measured_bins(), u32::MAX);
-        scope.sample(0, 30, 5, false);
-        scope.sample(31, 40, 8, true);
+        let _ = scope.sample(0, 30, 5, false);
+        let _ = scope.sample(31, 40, 8, true);
         assert_eq!(scope.history_rows(), 1);
         scope.reset(14_100_000, 1_000);
         assert_eq!(scope.history_rows(), 0);
@@ -107,18 +182,19 @@ mod tests {
         scope.reset(7_084_000, 1_000);
         assert_eq!(scope.displayed_samples(), None);
         for bin in 0..32 {
-            assert_eq!(scope.sample(bin, bin + 10, 4, bin == 31), bin == 31);
+            let _ = scope.sample(bin, bin + 10, 4, bin == 31);
+            assert_eq!(scope.history_rows(), usize::from(bin == 31));
         }
         let complete = *scope.displayed_samples().unwrap();
         for bin in 0..31 {
-            assert!(!scope.sample(bin, 60, 4, false));
+            let _ = scope.sample(bin, 60, 4, false);
             assert_eq!(scope.displayed_samples(), Some(&complete));
         }
-        assert!(scope.sample(31, 60, 4, true));
+        let _ = scope.sample(31, 60, 4, true);
         assert_eq!(scope.displayed_samples(), Some(&[60; 32]));
-        scope.sample(0, 4, 1, false);
-        assert!(!scope.sample(31, 4, 1, true));
-        assert!(!scope.sample(32, 4, 1, true));
+        let _ = scope.sample(0, 4, 1, false);
+        let _ = scope.sample(31, 4, 1, true);
+        assert_eq!(scope.sample(32, 4, 1, true).count(), 0);
         assert_eq!(scope.displayed_samples(), Some(&[60; 32]));
         assert_eq!(scope.history_rows(), 2);
     }
@@ -144,84 +220,83 @@ pub(super) fn shortwave_processing_label(row: u16, out: &mut Row<'_>, view: View
 }
 
 pub(super) fn shortwave_scope_page(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
-    let view = model.view;
-    let mut title = Text::new();
-    let _ = write!(
-        title,
-        "{}  {}.{:03} \x1f08E",
-        view.shortwave_mode.label(),
-        view.shortwave_khz,
-        view.shortwave_fraction_hz
-    );
-    centered(row, out, 55, 2, title.as_str(), color::TEXT);
+    let view = &model.view;
+    if (55..69).contains(&row) {
+        let mut title = Text::new();
+        let _ = write!(
+            title,
+            "{}  {}.{:03} \x1f08E",
+            view.shortwave_mode.label(),
+            view.shortwave_khz,
+            view.shortwave_fraction_hz
+        );
+        centered(row, out, 55, 2, title.as_str(), color::TEXT);
+        return;
+    }
     let Some(scope) = model.shortwave_scope.filter(|scope| scope.step_hz > 0) else {
         centered(row, out, 136, 2, "\x1f0AF", color::MUTED);
         centered(row, out, 266, 1, "\x1f017", color::ACCENT);
         return;
     };
-    let mut width = Text::new();
-    let _ = write!(
-        width,
-        "\x1f13A {} \x1f090 {} \x1f08E",
-        scope.step_hz / 1000,
-        scope.step_hz * 31 / 1000
-    );
-    centered(row, out, 78, 1, width.as_str(), color::ACCENT);
     const X: usize = 12;
     const PITCH: usize = 7;
-    const TOP: u16 = 96;
-    const BOTTOM: u16 = 154;
-    // Fixed RSSI scale keeps signals comparable across sweeps. A sliding floor
-    // would make equal levels change colour as the receiver visits other bins.
-    for (index, &sample) in scope.displayed_samples().into_iter().flatten().enumerate() {
-        let height = u16::from(sample.min(63)) * (BOTTOM - TOP) / 63;
-        rect(
-            row,
-            out,
-            X + index * PITCH,
-            BOTTOM - height,
-            6,
-            height.max(1),
-            color::ACCENT,
-        );
-    }
-    // Two rows of acquisition progress, independent of the stable graph and
-    // waterfall. This is measured-bin progress, never interpolated RF data.
-    let progress = scope.measured_bins().count_ones() as usize * PITCH;
-    rect(row, out, X, 168, progress, 2, color::MUTED);
-    for (index, x) in [(0, 12), (16, 98), (31, 194)] {
-        let khz = (scope.first_hz + scope.step_hz * index) / 1000;
-        let mut label = Text::new();
-        let _ = write!(label, "{khz}");
-        text(row, out, x, 158, 1, label.as_str(), color::MUTED);
-    }
-    let selected_hz = view.shortwave_khz * 1000 + u32::from(view.shortwave_fraction_hz);
-    let cursor = selected_hz.saturating_sub(scope.first_hz) / scope.step_hz;
-    if cursor < BINS as u32 {
-        rect(
-            row,
-            out,
-            X + cursor as usize * PITCH + 3,
-            TOP,
-            1,
-            BOTTOM - TOP + 1,
-            color::WARNING,
-        );
-    }
-    for age in 0..scope.rows {
-        let y = 172 + age as u16 * 4;
-        if !(y..y + 4).contains(&row) {
-            continue;
+    match row {
+        78..=84 => {
+            let mut width = Text::new();
+            let _ = write!(
+                width,
+                "\x1f13A {} \x1f090 {} \x1f08E",
+                scope.step_hz / 1000,
+                scope.step_hz * 31 / 1000
+            );
+            centered(row, out, 78, 1, width.as_str(), color::ACCENT);
         }
-        let samples = &scope.history[(scope.newest + ROWS - age) % ROWS];
-        for (bin, &rssi) in samples.iter().enumerate() {
-            let tint = WATERFALL_COLORS[1 + usize::from(rssi / 10).min(6)];
-            rect(row, out, X + bin * PITCH, y, PITCH, 4, tint);
+        GRAPH_TOP..=GRAPH_BOTTOM => {
+            // The fixed RSSI scale keeps levels comparable across sweeps.
+            for (index, &sample) in scope.displayed_samples().into_iter().flatten().enumerate() {
+                let height = bar_height(sample);
+                rect(
+                    row,
+                    out,
+                    X + index * PITCH,
+                    GRAPH_BOTTOM - height,
+                    6,
+                    height.max(1),
+                    color::ACCENT,
+                );
+            }
+            let selected_hz = view.shortwave_khz * 1000 + u32::from(view.shortwave_fraction_hz);
+            let cursor = selected_hz.saturating_sub(scope.first_hz) / scope.step_hz;
+            if cursor < BINS as u32 {
+                out[X + cursor as usize * PITCH + 3] = color::WARNING;
+            }
         }
+        158..=164 => {
+            for (index, x) in [(0, 12), (16, 98), (31, 194)] {
+                let khz = (scope.first_hz + scope.step_hz * index) / 1000;
+                let mut label = Text::new();
+                let _ = write!(label, "{khz}");
+                text(row, out, x, 158, 1, label.as_str(), color::MUTED);
+            }
+        }
+        PROGRESS_TOP..=169 => {
+            let progress = scope.measured_bins().count_ones() as usize * PITCH;
+            out[X..X + progress].fill(color::MUTED);
+        }
+        HISTORY_TOP..=HISTORY_LAST => {
+            let age = usize::from((row - HISTORY_TOP) / HISTORY_ROW_HEIGHT);
+            if let Some(samples) = scope.history_row(age) {
+                for (bin, &rssi) in samples.iter().enumerate() {
+                    let x = X + bin * PITCH;
+                    out[x..x + PITCH].fill(waterfall_ink(rssi));
+                }
+            }
+        }
+        244..=250 => shortwave_processing_label(row, out, *view, 244),
+        260..=266 => centered(row, out, 260, 1, "\x1f0C8", color::MUTED),
+        276..=282 => centered(row, out, 276, 1, "\x1f144", color::ACCENT),
+        _ => {}
     }
-    shortwave_processing_label(row, out, view, 244);
-    centered(row, out, 260, 1, "\x1f0C8", color::MUTED);
-    centered(row, out, 276, 1, "\x1f144", color::ACCENT);
 }
 
 fn coordinate(value: i32, positive: &str, negative: &str) -> Text {

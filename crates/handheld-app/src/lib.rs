@@ -471,7 +471,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         snr: u8,
         complete: bool,
     ) -> Result<(), Error<N::Error, L::Error>> {
-        let view = self.status.view;
+        let view = &self.status.view;
         let selection = (
             view.shortwave_mode,
             view.shortwave_fraction_hz,
@@ -486,15 +486,15 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             self.shortwave_scope.reset(first_hz, step_hz);
             self.shortwave_scope_selection = Some(selection);
         }
-        let published = self.shortwave_scope.sample(bin, rssi, snr, complete);
+        let damage = self.shortwave_scope.sample(bin, rssi, snr, complete);
         if self.status.view.screen == Screen::Shortwave && self.status.view.shortwave_scope {
             if reset {
                 self.pending_rows.mark(55, 283);
-            } else if published {
-                self.pending_rows.mark(96, 155);
-                self.pending_rows.mark(172, 236);
+            } else {
+                for (start, end) in damage {
+                    self.pending_rows.mark(start, end);
+                }
             }
-            self.pending_rows.mark(168, 170);
         }
         Ok(())
     }
