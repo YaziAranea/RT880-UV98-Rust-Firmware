@@ -10,13 +10,13 @@
 
 [English](README.md) · [Deutsch](README.de.md) · **Русский**
 
-[**Выпуск R43.2**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r43.2) · [**Начать здесь — бэкап и установка**](docs/GETTING-STARTED.ru.md)
+[**Выпуск R43.3**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r43.3) · [**Начать здесь — бэкап и установка**](docs/GETTING-STARTED.ru.md)
 
-[**CPS 0.8.0 для Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.2/UV98-CPS-0.8.0.zip) · BIN R43.2 [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.2/UV98-r43.2-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.2/UV98-r43.2-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.2/UV98-r43.2-de.bin)
+[**CPS 0.8.0 для Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.3/UV98-CPS-0.8.0.zip) · BIN R43.3 [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.3/UV98-r43.3-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.3/UV98-r43.3-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.3/UV98-r43.3-de.bin)
 
-> **Экспериментальная прошивка для исследованного профиля платы AT32F423.** Сначала проверьте совместимость платы. Перед записью подготовьте в CPS персональный образ R43.2 по проверенному NOR-бэкапу своей станции. CPS привяжет образ к вашим заводским калибровкам. [Инструкция резервирования и подготовки](docs/GETTING-STARTED.ru.md#4-проверьте-совместимость-перед-прошивкой)
+> **Экспериментальная прошивка для исследованного профиля платы AT32F423.** Сначала проверьте совместимость платы. Перед записью подготовьте в CPS персональный образ R43.3 по проверенному NOR-бэкапу своей станции. CPS привяжет образ к вашим заводским калибровкам. [Инструкция резервирования и подготовки](docs/GETTING-STARTED.ru.md#4-проверьте-совместимость-перед-прошивкой)
 
-R43.2 быстрее распознаёт короткие нажатия A и B и повторно проверяет удержание перед запуском TX. Сохранены приоритет приёма после PTT, временный пропуск в скане и предпросмотр частоты TX. [Изменения и проверка](R43.2-NOTES-RU.txt).
+В R43.3 освобождено 10 264 байта Flash в каждой локали. Функции R43.2 и разметка журнала настроек сохранены. [Изменения и проверка](R43.3-NOTES-RU.txt).
 
 ## CPS 0.8.0 для Windows
 
@@ -92,7 +92,7 @@ R43.2 быстрее распознаёт короткие нажатия A и B
 1. Оставьте стоковую прошивку и сохраните исходный `.880dmf` / `.98pdmf` своей станции.
 2. Через нашу CPS считайте **калибровки**, **4 МиБ NOR** и **секции настроек/каналов**. Каждая операция читает данные дважды и сравнивает их.
 3. Сохраните целые папки снимков и подходящий заводской BIN в двух местах. Публичный комплект не содержит прошивку производителя.
-4. Проверьте совместимость платы, затем подготовьте в CPS персональный образ R43.2 по проверенному снимку NOR. Компилятор Rust для этого не нужен.
+4. Проверьте совместимость платы, затем подготовьте в CPS персональный образ R43.3 по проверенному снимку NOR. Компилятор Rust для этого не нужен.
 
 В [пошаговой инструкции](docs/GETTING-STARTED.ru.md) указаны кнопки CPS, ожидаемые файлы, проверка результата и откат. **Дамп NOR 4 МиБ не содержит прошивку MCU и загрузчик.**
 
