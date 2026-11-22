@@ -826,12 +826,17 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         Ok(())
     }
 
-    /// Physical identification of the lower side key, separate from its
-    /// assigned action. Callers pass true only after a traced input works.
     pub fn enable_fast_matrix_input(&mut self) {
         self.input.enable_fast_matrix();
     }
 
+    /// Use the shorter PTT debounce with isolated physical input and an RF guard.
+    pub fn enable_fast_ptt_input(&mut self) {
+        self.input.enable_fast_ptt();
+    }
+
+    /// Physical identification of the lower side key, separate from its
+    /// assigned action. Callers pass true only after a traced input works.
     pub fn set_lower_side_mapped(&mut self, mapped: bool) -> Result<(), Error<N::Error, L::Error>> {
         if self.status.state != State::Ready {
             return Err(Error::State);

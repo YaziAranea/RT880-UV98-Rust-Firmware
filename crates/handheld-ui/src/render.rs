@@ -1748,7 +1748,7 @@ fn radio_name_page(row: u16, out: &mut Row<'_>, view: &View) {
 
 /// One user-visible build identity for the header and the About page.
 #[cfg(not(feature = "pa5-audio"))]
-pub const VERSION: &str = "0.1.8-r43.1";
+pub const VERSION: &str = "0.1.8-r43.2";
 #[cfg(feature = "pa5-audio")]
 pub const VERSION: &str = "R42-PA5";
 /// Header has a fixed 42 px slot; About shows the full string.

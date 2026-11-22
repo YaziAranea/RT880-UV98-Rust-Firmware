@@ -3,6 +3,8 @@
 use uv98_keys::{ClockError, Key, Timing};
 
 pub const REPEAT_MS: u32 = 180;
+const PTT_DEBOUNCE_MS: u32 = 12;
+const PTT_CONFIRMATION_SAMPLES: u8 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sample {
@@ -33,9 +35,23 @@ pub enum InputState {
 struct Press {
     key: Key,
     since: u32,
+    samples: u8,
     accepted: bool,
     held: bool,
     repeat_at: u32,
+}
+
+impl Press {
+    const fn new(key: Key, now_ms: u32) -> Self {
+        Self {
+            key,
+            since: now_ms,
+            samples: 1,
+            accepted: false,
+            held: false,
+            repeat_at: now_ms,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,6 +63,7 @@ pub struct InputTracker {
     press: Option<Press>,
     aux16_ptt: bool,
     fast_matrix: bool,
+    fast_ptt: bool,
     uncertain_since: Option<u32>,
 }
 
@@ -60,6 +77,7 @@ impl InputTracker {
             press: None,
             aux16_ptt: true,
             fast_matrix: false,
+            fast_ptt: false,
             uncertain_since: None,
         }
     }
@@ -72,8 +90,19 @@ impl InputTracker {
         self.fast_matrix = true;
     }
 
+    /// Use only when PTT input comes from fresh isolated physical samples.
+    pub fn enable_fast_ptt(&mut self) {
+        self.fast_ptt = true;
+    }
+
+    fn fast_ptt_key(&self, key: Key) -> bool {
+        self.fast_ptt && side_event(key, true, self.aux16_ptt).is_some()
+    }
+
     fn key_debounce(&self, key: Key, release: bool) -> u32 {
-        if self.fast_matrix && is_matrix(key) {
+        if self.fast_ptt_key(key) {
+            PTT_DEBOUNCE_MS
+        } else if self.fast_matrix && is_matrix(key) {
             if release {
                 8
             } else {
@@ -134,6 +163,13 @@ impl InputTracker {
         match sample {
             Sample::Invalid | Sample::UncertainMatrix => Ok(self.invalidate()),
             Sample::Released => {
+                // Do not combine separate short taps into one qualified press.
+                if self
+                    .press
+                    .is_some_and(|press| !press.accepted && self.fast_ptt_key(press.key))
+                {
+                    self.press = None;
+                }
                 let Some(since) = self.release_since else {
                     self.release_since = Some(now_ms);
                     return Ok(None);
@@ -164,13 +200,7 @@ impl InputTracker {
                     return Ok(None);
                 }
                 let Some(mut press) = self.press else {
-                    self.press = Some(Press {
-                        key,
-                        since: now_ms,
-                        accepted: false,
-                        held: false,
-                        repeat_at: now_ms,
-                    });
+                    self.press = Some(Press::new(key, now_ms));
                     return Ok(None);
                 };
                 if press.key != key {
@@ -179,19 +209,20 @@ impl InputTracker {
                         && is_matrix(key)
                         && released_at.is_some_and(|since| now_ms.wrapping_sub(since) >= 4)
                     {
-                        self.press = Some(Press {
-                            key,
-                            since: now_ms,
-                            accepted: false,
-                            held: false,
-                            repeat_at: now_ms,
-                        });
+                        self.press = Some(Press::new(key, now_ms));
                         return Ok((press.accepted && delayed_short(press.key) && !press.held)
                             .then_some(InputEvent::Short(press.key)));
                     }
                     return Ok(self.invalidate());
                 }
                 if !press.accepted {
+                    if self.fast_ptt_key(key) && press.samples < PTT_CONFIRMATION_SAMPLES {
+                        press.samples += 1;
+                        self.press = Some(press);
+                        if press.samples < PTT_CONFIRMATION_SAMPLES {
+                            return Ok(None);
+                        }
+                    }
                     if now_ms.wrapping_sub(press.since) < self.key_debounce(key, false) {
                         return Ok(None);
                     }
@@ -416,6 +447,41 @@ mod tests {
             input.sample(5230, Sample::Released),
             Ok(Some(InputEvent::Ptt(false)))
         );
+    }
+
+    #[test]
+    fn short_ptt_and_repress_after_a_short_clean_release() {
+        for key in [Key::Ptt, Key::Aux16] {
+            let mut input = ready();
+            input.enable_fast_ptt();
+            let pressed = Sample::Key(key);
+            let down = side_event(key, true, true);
+            let up = side_event(key, false, true);
+            assert_eq!(input.sample(100, pressed), Ok(None));
+            assert_eq!(input.sample(108, pressed), Ok(None));
+            assert_eq!(input.sample(111, pressed), Ok(None));
+            assert_eq!(input.sample(112, pressed), Ok(down));
+            assert_eq!(input.sample(140, Sample::Released), Ok(None));
+            assert_eq!(input.sample(151, Sample::Released), Ok(None));
+            assert_eq!(input.sample(152, Sample::Released), Ok(up));
+            assert_eq!(input.sample(155, pressed), Ok(None));
+            assert_eq!(input.sample(167, pressed), Ok(None));
+            assert_eq!(input.sample(168, pressed), Ok(down));
+        }
+    }
+
+    #[test]
+    fn short_ptt_does_not_combine_pulses_across_a_release() {
+        let mut input = ready();
+        input.enable_fast_ptt();
+        let pressed = Sample::Key(Key::Ptt);
+        assert_eq!(input.sample(100, pressed), Ok(None));
+        assert_eq!(input.sample(107, pressed), Ok(None));
+        assert_eq!(input.sample(108, Sample::Released), Ok(None));
+        assert_eq!(input.sample(112, pressed), Ok(None));
+        assert_eq!(input.sample(116, pressed), Ok(None));
+        assert_eq!(input.sample(123, pressed), Ok(None));
+        assert_eq!(input.sample(124, pressed), Ok(Some(InputEvent::Ptt(true))));
     }
 
     #[test]

@@ -968,6 +968,9 @@ fn main() -> ! {
     let mut battery_at = now.wrapping_sub(250);
     let mut ui_aux = uv98_handheld_ui::input::AuxFilter::default();
     app.enable_fast_matrix_input();
+    if LOWER_PTT_ENABLED {
+        app.enable_fast_ptt_input();
+    }
     let mut tx_tones = signaling::TransmitTones::new();
     let mut tx_key_latched = false;
     let mut uncertain_tx_since: Option<u32> = None;
@@ -1311,19 +1314,21 @@ fn main() -> ! {
             );
             adc_previous = Some((adc_code, upper));
         }
-        let aux_now = require(time.sample(DWT::cycle_count()), 0xE016);
-        // Broad stock Aux16 includes a top-key + lower-key chord. Only the
-        // isolated lower-key ADC window may enter the PTT event stream.
+        // Lower PTT uses the isolated ADC window directly in both directions.
+        // The auxiliary filter must not retain it after physical release.
         let auxiliary = uv98_keys::auxiliary_key(adc.raw)
-            .filter(|key| !LOWER_PTT_ENABLED || *key != uv98_keys::Key::Aux16 || lower);
-        let stable_aux = ui_aux.sample(aux_now, auxiliary);
+            .filter(|key| !LOWER_PTT_ENABLED || *key != uv98_keys::Key::Aux16);
+        let stable_aux = ui_aux.sample(input_at, auxiliary);
         let sample = match raw {
+            Some(_) if LOWER_PTT_ENABLED && (upper || lower) && !raw_ptt.clean => {
+                InputSample::Unstable
+            }
             Some((matrix, ptt_pressed)) => InputSample::WithAux {
                 matrix: if tx_key_latched { 0 } else { matrix },
                 ptt_pressed,
                 aux: if lower {
                     Some(uv98_keys::Key::Aux16)
-                } else if matrix == 0 {
+                } else if matrix == 0 && !(LOWER_PTT_ENABLED && upper) {
                     stable_aux
                 } else {
                     None
@@ -1349,7 +1354,7 @@ fn main() -> ! {
             restart_spectrum = false;
         }
         scope.event(now, spectrum::Event::Ptt(side_activity));
-        let update = checked(&mut log, app.sample(now, sample), 0xE032);
+        let update = checked(&mut log, app.sample(input_at, sample), 0xE032);
         if reply_window.active() {
             if quiet_input
                 && current.is_some()
@@ -2474,8 +2479,23 @@ fn main() -> ! {
                         Some(c) => c,
                         None => stop(0xE050),
                     };
-                    if uv98_rf_sequence::transmit(&calibration, tx).is_ok()
-                        && ptt_guard.arm(raw_ptt)
+                    let mut launch_ptt = raw_ptt;
+                    if LOWER_PTT_ENABLED {
+                        // UI and RF polling follow the original sample. Check
+                        // the same physical source again before disturbing RX.
+                        let fresh_adc = checked(&mut log, side.sample(), 0xE055);
+                        let guard = keys.guard_scan();
+                        let lower = ptt::lower_pressed(fresh_adc.raw);
+                        launch_ptt = ptt::Input {
+                            upper: guard.as_ref().is_ok_and(|s| s.ptt_pressed()),
+                            lower,
+                            clean: guard.as_ref().is_ok_and(|s| s.matrix_clear())
+                                && (ptt::side_idle(fresh_adc.raw) || lower),
+                        };
+                    }
+                    if launch_ptt == raw_ptt
+                        && uv98_rf_sequence::transmit(&calibration, tx).is_ok()
+                        && ptt_guard.arm(launch_ptt)
                     {
                         checked(&mut log, radio.stop(), 0xE057);
                         checked(
@@ -2495,7 +2515,7 @@ fn main() -> ! {
                             &app.status().view,
                             &target,
                             tx_profile,
-                            raw_ptt,
+                            launch_ptt,
                         )
                         .ok();
                         current = Some(tx_profile);
@@ -3067,6 +3087,11 @@ fn main() -> ! {
         } else {
             (6, LCD_BATCH_ADMISSION_CYCLES)
         };
+        let check_idle_home_input = LOWER_PTT_ENABLED
+            && row_budget == 16
+            && radio.state() == RfState::Receiving
+            && app.status().view.screen == Screen::Home
+            && raw == Some((0, false));
         let drawn = checked(
             &mut log,
             app.render_batch(row_budget, || {
@@ -3080,6 +3105,16 @@ fn main() -> ! {
                         .map(|scan| (scan.matrix_raw(), scan.ptt_pressed()));
                     let side_idle = side.sample().is_ok_and(|sample| ptt::side_idle(sample.raw));
                     if fresh != raw || !side_idle {
+                        return false;
+                    }
+                } else if check_idle_home_input {
+                    // A new contact observed between LCD windows returns to
+                    // the full input path. This check never records an edge.
+                    let quiet_keys = keys
+                        .guard_scan()
+                        .is_ok_and(|sample| sample.matrix_clear() && !sample.ptt_pressed());
+                    if !quiet_keys || !side.sample().is_ok_and(|sample| ptt::side_idle(sample.raw))
+                    {
                         return false;
                     }
                 }

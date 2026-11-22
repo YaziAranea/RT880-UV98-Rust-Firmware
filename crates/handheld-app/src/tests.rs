@@ -726,6 +726,57 @@ fn pending_render_does_not_block_input_and_scan_ptt_requires_new_edge() {
 }
 
 #[test]
+fn short_ptt_handoff_needs_a_clean_release_and_a_new_edge() {
+    let mut app = app(Memory::new(), PRESERVED_CALIBRATION_SHA256);
+    app.start(0).unwrap();
+    app.enable_fast_ptt_input();
+    let release = InputSample::Stable {
+        matrix: 0,
+        ptt_pressed: false,
+    };
+    let upper = InputSample::Stable {
+        matrix: 0,
+        ptt_pressed: true,
+    };
+    let lower = InputSample::WithAux {
+        matrix: 0,
+        ptt_pressed: false,
+        aux: Some(Key::Aux16),
+    };
+    // Boot with a button down, then qualify the unchanged 30 ms clean release.
+    for now in [1, 10, 20, 60] {
+        assert!(!app.sample(now, lower).unwrap().ptt_tx_requested);
+    }
+    app.sample(70, release).unwrap();
+    app.sample(99, release).unwrap();
+    assert!(!app.status.input_ready);
+    app.sample(100, release).unwrap();
+    assert!(app.status.input_ready);
+
+    assert!(!app.sample(110, lower).unwrap().ptt_tx_requested);
+    assert!(!app.sample(116, lower).unwrap().ptt_tx_requested);
+    let edge = app.sample(122, lower).unwrap();
+    assert!(edge.ptt_tx_requested);
+    assert_eq!(edge.ptt_slot, Some(Slot::B));
+    app.sample(136, release).unwrap();
+    app.sample(148, release).unwrap();
+    assert!(!app.status.view.ptt_down);
+
+    assert!(!app.sample(151, upper).unwrap().ptt_tx_requested);
+    assert!(!app.sample(157, upper).unwrap().ptt_tx_requested);
+    let edge = app.sample(163, upper).unwrap();
+    assert!(edge.ptt_tx_requested);
+    assert_eq!(edge.ptt_slot, Some(Slot::A));
+    assert_eq!(app.radio_view(), RadioView::OFF);
+
+    // A handoff with no observed release is neither a new press nor TX.
+    assert!(!app.sample(164, lower).unwrap().ptt_tx_requested);
+    assert!(!app.sample(179, lower).unwrap().ptt_tx_requested);
+    assert!(!app.status.input_ready);
+    assert!(!app.status.view.ptt_down);
+}
+
+#[test]
 fn backend_metadata_damage_is_bounded_and_simulation_never_writes_nor() {
     let mut app = app(Memory::new(), PRESERVED_CALIBRATION_SHA256);
     app.start(0).unwrap();
