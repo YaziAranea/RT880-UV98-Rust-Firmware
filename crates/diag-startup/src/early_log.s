@@ -1,6 +1,7 @@
 /* Pre-RAM TX-only diagnostics. No stack, data RAM, BL or callee-saved registers.
  * r12: bit31 UART ready, bit30 checksum frozen, bits24..28 hex shift,
- * bits16..19 shared failure code nibble, low16 ASCII sum (low8 transmitted).
+ * bits16..19 shared failure code nibble or GPIO descriptor index,
+ * low16 ASCII sum (low8 transmitted).
  * LR preserved. Even 255 per frame byte cannot carry out of the sum field.
  * UART byte helper's private tail-branch ABI: r0 byte, r3 Thumb continuation;
  * clobbers r1/r2/r12 only. Clock decode never writes a clock source/divider.
@@ -28,7 +29,8 @@
 .endm
 
 /* kind 0=constant, 1=MMIO word, 2=MMIO halfword, 3=IPSR, 4=CONTROL, 5=MSP,
- * 6=early failure code with its low nibble saved in r12.
+ * 6=early failure code, 7=GPIO port, 8=GPIO lock readback, 9=GPIO pin mask.
+ * Kinds 6..9 use the tag saved in r12.
  * Stackless pre-init leaves CONTROL/MSP unchanged throughout each frame.
  * Identity registers
  * are immutable; fault registers are best-effort samples, not an atomic dump. */
@@ -48,6 +50,19 @@
         .elseif \kind == 6
             ubfx r0, r12, #16, #4
             movt r0, #0xe100
+        .elseif \kind >= 7
+            ubfx r1, r12, #16, #4
+            movw r0, #:lower16:.Ldiag_gpio_lock_descriptors
+            movt r0, #:upper16:.Ldiag_gpio_lock_descriptors
+            add r0, r0, r1, lsl #3
+            .if \kind == 9
+                ldr r0, [r0, #4]
+            .else
+                ldr r0, [r0]
+                .if \kind == 8
+                    ldr r0, [r0, #0x1c]
+                .endif
+            .endif
         .else
             diag_load r0, \value
             .if \kind == 1
@@ -71,13 +86,13 @@
 .Lhex_done\@:
 .endm
 
-.macro diag_frame code, ak=1, av=0xe0042000, bk=1, bv=0xe0042020, ck=2, cv=0x1ffff7e0, code_kind=0
+.macro diag_frame code, ak=1, av=0xe0042000, bk=1, bv=0xe0042020, ck=2, cv=0x1ffff7e0, code_kind=0, tagged=0
     tst r12, #0x80000000
     beq.w .Lframe_done\@
     and r12, r12, #0x80000000
-    .if \code_kind == 6
-        /* r0 holds the failure code's low nibble until the first UART byte. */
-        orr r12, r12, r0, lsl #16
+    .if \tagged
+        /* Keep the fault tag after the first UART byte overwrites r0. */
+        bfi r12, r0, #16, #4
     .endif
     .irp char,85,86,57,56,68,49,32
         diag_byte \char

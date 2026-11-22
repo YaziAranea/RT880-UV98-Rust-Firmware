@@ -141,6 +141,12 @@
     diag_poll 0x400238a4, 0x00070030, 0, \bad
 .endm
 
+.pushsection .rodata.diag_gpio_lock, "a", %progbits
+.balign 4
+.Ldiag_gpio_lock_descriptors:
+.popsection
+.set .Ldiag_gpio_lock_index, 0
+
 /* mode_mask: two bits per owned pin; mode_bits: output 01 per pin.
  * drive_bits: moderate drive 10 per pin. drain: 0 or owned pin mask.
  * Latch is preloaded before the output mode is exposed. No whole-port reset.
@@ -154,8 +160,16 @@
     tst r1, r2
     beq .Lunlocked\@
 .if \terminal == 0
-    diag_frame 0xe1000006, 0, \port, 1, (\port + 0x1c), 0, \mask
-    b.w .Ldiag_pre_init_fail
+    /* Emit the exact arguments at the lock check, outside the code section. */
+    .pushsection .rodata.diag_gpio_lock, "a", %progbits
+    .word \port, \mask
+    .popsection
+    .if .Ldiag_gpio_lock_index > 15
+        .error "GPIO lock descriptor index exceeds the fault tag"
+    .endif
+    movs r0, #.Ldiag_gpio_lock_index
+    .set .Ldiag_gpio_lock_index, .Ldiag_gpio_lock_index + 1
+    b.w .Ldiag_gpio_lock_fail
 .else
     b.w \bad
 .endif
@@ -490,7 +504,10 @@ __pre_init:
 .Ldiag_rf_off_fail:
     movs r0, #10
 .Ldiag_default_fail_frame:
-    diag_frame 0xe1000000, code_kind=6
+    diag_frame 0xe1000000, code_kind=6, tagged=1
+    b.w .Ldiag_pre_init_fail
+.Ldiag_gpio_lock_fail:
+    diag_frame 0xe1000006, ak=7, bk=8, ck=9, tagged=1
     b.w .Ldiag_pre_init_fail
 .Ldiag_context_fail:
     diag_frame 0xe1000008, 4, 0, 3, 0, 5, 0
