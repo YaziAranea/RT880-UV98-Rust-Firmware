@@ -174,7 +174,7 @@ def run_case(name, image, start, instructions, overrides, expect_return, expecte
              serial_block_after=None, expected_partial_bytes=0, early_bootstrap=True,
              hick_ready=True, switch_ready=True, gpio_clocks_latch=True,
              expected_rf_shutdown=None, gpio_stuck_high=None, expected_b_shutdown=None,
-             late_gpio_lock=None):
+             late_gpio_lock=None, late_gpio_clock_failure=False):
     if expected_rf_shutdown is None:
         expected_rf_shutdown = expect_return or terminal_low
     if expected_b_shutdown is None:
@@ -328,9 +328,10 @@ def run_case(name, image, start, instructions, overrides, expect_return, expecte
                 serial_wait = serial_delay
                 # Inject a fault after the startup lock snapshots to exercise
                 # the later output checks independently of initial RF shutdown.
-                if late_gpio_lock is not None and len(serial_bytes) == len(SNAPSHOT_CODES) * 47:
-                    port, mask = late_gpio_lock
-                    uc.mem_write(port + 0x1c, struct.pack("<I", 0x10000 | mask))
+                if late_gpio_lock is not None:
+                    port, mask, after_frames = late_gpio_lock
+                    if len(serial_bytes) == after_frames * 47:
+                        uc.mem_write(port + 0x1c, struct.pack("<I", 0x10000 | mask))
             for port in GPIO:
                 if port <= address < port + 0x400:
                     mask = {0: 0x00c00000, 4: 0x800, 8: 0x00c00000,
@@ -394,7 +395,10 @@ def run_case(name, image, start, instructions, overrides, expect_return, expecte
             elif address == CRM + 8 and switch_ready:
                 current = read32(address)
                 uc.mem_write(address, struct.pack("<I", (current & ~12) | ((current & 3) << 2)))
-            elif address == CRM + 0x30 and not gpio_clocks_latch:
+            elif address == CRM + 0x30 and (
+                not gpio_clocks_latch
+                or late_gpio_clock_failure and len(serial_bytes) >= len(GUARD_CODES) * 47
+            ):
                 uc.mem_write(address, struct.pack("<I", read32(address) & ~0x26))
             if address == UART and serial_block_after is not None and len(serial_bytes) >= serial_block_after:
                 uc.mem_write(UART, struct.pack("<I", 0))
@@ -507,7 +511,7 @@ def run_case(name, image, start, instructions, overrides, expect_return, expecte
         if frame[0] == 0xe1000006:
             port, lock, required = frame[1:]
             if late_gpio_lock is not None:
-                expected_port, expected_mask = late_gpio_lock
+                expected_port, expected_mask, _ = late_gpio_lock
                 require((port, lock, required) == (expected_port, 0x10000 | expected_mask, expected_mask),
                         f"{name}: GPIO lock details differ")
             else:
@@ -590,7 +594,14 @@ def check(path):
         codes = SNAPSHOT_CODES + ([2] if index >= 4 else []) + [0xe1000006]
         results.append(run_case(f"startup_late_gpio_lock_{index}", image, start, pre_decode,
                                 {}, False, 4, expected_codes=codes, expected_rf_shutdown=True,
-                                late_gpio_lock=(port, mask)))
+                                late_gpio_lock=(port, mask, len(SNAPSHOT_CODES))))
+    results.append(run_case("startup_late_gpio_clock_failure", image, start, pre_decode,
+                            {}, False, 4, expected_codes=GUARD_CODES + [0xe1000005],
+                            expected_rf_shutdown=True, late_gpio_clock_failure=True))
+    results.append(run_case("startup_late_rf_off_lock", image, start, pre_decode,
+                            {}, False, 4, expected_codes=SNAPSHOT_CODES + [2, 0xe100000a],
+                            expected_rf_shutdown=True,
+                            late_gpio_lock=(GPIO[3], 0x0040, len(SNAPSHOT_CODES) + 1)))
     results.append(run_case("watchdog_updating_observed_without_write", image, start, pre_decode,
                             {0x4000300C: 7, 0x40003004: 6, 0x40003008: 0xABC,
                              0x40003010: 0x789, 0x40002C00: 0xFF}, True, 4,
