@@ -1,5 +1,7 @@
 #[path = "../../../firmware-diagnostic/src/signaling.rs"]
 mod signaling;
+#[path = "../../../firmware-diagnostic/src/reply.rs"]
+mod reply;
 
 use signaling::{mdc_config, Sample, TransmitTones};
 use std::{cell::RefCell, convert::Infallible, rc::Rc};
@@ -594,6 +596,7 @@ fn post_tx_receive_burst_can_open_a_short_tone_qualified_reply() {
     assert_eq!(h.radio.state(), State::Configuring);
     signaling::advance_receive(&mut h.radio, || Some(at)).unwrap();
     assert_ne!(h.bus.reg(0x30), 0xbff1);
+    let mut reply_window = reply::ReplyWindow::Tuning;
     let mut audible = false;
     for elapsed in 1..48 {
         let now = at + elapsed;
@@ -601,9 +604,11 @@ fn post_tx_receive_burst_can_open_a_short_tone_qualified_reply() {
         if elapsed < 40 {
             assert_eq!(h.radio.state(), State::Configuring);
             assert!(!h.radio.audio_open());
+            assert!(!reply_window.sample_due(now, false));
             continue;
         }
         assert_eq!(h.radio.state(), State::Receiving);
+        assert_eq!(reply_window.sample_due(now, true), elapsed <= 42);
         h.bus.0.borrow_mut().registers[0x0c] = match elapsed {
             41 => 2,          // Carrier without the programmed tone.
             42..=46 => 0x402, // Qualified carrier for five milliseconds.
@@ -613,6 +618,7 @@ fn post_tx_receive_burst_can_open_a_short_tone_qualified_reply() {
             .radio
             .observe_signaling_for_slot(audio, tone, Slot::A)
             .unwrap();
+        reply_window.observed(now, signal.audio_open);
         assert_eq!(signal.audio_open, (42..=46).contains(&elapsed));
         audible |= signal.audio_open;
     }

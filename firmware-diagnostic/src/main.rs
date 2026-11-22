@@ -12,6 +12,7 @@ mod audio_capture;
 mod beacon;
 #[path = "shortwave.rs"]
 mod shortwave_bus;
+mod reply;
 mod signaling;
 use at32f4xx_pac::at32f423::interrupt;
 
@@ -942,7 +943,7 @@ fn main() -> ! {
     let mut dual_watch = None;
     let mut relay_active = false;
     let mut last_signal = None;
-    let mut release_rx_pending = false;
+    let mut reply_window = reply::ReplyWindow::Idle;
     let mut signal_at = now;
     let mut meter_floor = uv98_handheld_ui::meter::NoiseFloor::default();
     let mut meter_receive = None;
@@ -1222,7 +1223,7 @@ fn main() -> ! {
             tx_authorization = None;
             current = None;
             last_signal = None;
-            release_rx_pending = false;
+            reply_window = reply::ReplyWindow::Idle;
             if view.screen == Screen::Home
                 && !tx_context_blocked
                 && !relay_active
@@ -1237,14 +1238,14 @@ fn main() -> ! {
                             let now = require(time.sample(DWT::cycle_count()), 0xE016);
                             checked(&mut log, radio.receive(&calibration, rx, now), 0xE058);
                             current = Some(profile);
-                            release_rx_pending = true;
+                            reply_window = reply::ReplyWindow::Tuning;
                             telemetry_samples = 4;
                         }
                     }
                 }
             }
         }
-        let started_release_rx = tx_ended && release_rx_pending;
+        let started_release_rx = tx_ended && reply_window.active();
         // A just-unkeyed receiver can execute its first non-transmitting
         // operations in this same pass. Preserve all explicit settle waits.
         if !beacon.active() && radio.state() == RfState::Configuring {
@@ -1262,27 +1263,30 @@ fn main() -> ! {
             && uncertain_tx_since.is_none()
             && !lower
             && ptt::side_idle(adc.raw);
-        if release_rx_pending && radio.state() == RfState::Receiving {
-            if quiet_input {
+        let mut observed_release_rx = false;
+        if reply_window.active() {
+            let now = require(time.sample(DWT::cycle_count()), 0xE016);
+            if reply_window.sample_due(now, radio.state() == RfState::Receiving) && quiet_input {
                 if let Some(p) = current {
-                    let now = require(time.sample(DWT::cycle_count()), 0xE016);
                     let tone = p.receive.map_or(0, |rx| rx.tone);
                     let observed = if p.audio.modulation == Modulation::Fm {
                         radio.observe_signaling_for_slot(p.audio, tone, view.active_slot)
                     } else {
                         radio.observe(p.audio, tone)
                     };
-                    last_signal = Some(checked(&mut log, observed, 0xE05A));
+                    let signal = checked(&mut log, observed, 0xE05A);
+                    reply_window.observed(now, signal.audio_open);
+                    last_signal = Some(signal);
                     signal_at = now;
+                    observed_release_rx = true;
                 }
             }
-            release_rx_pending = false;
         }
         // UART logging can block for a frame; physical TX release is handled
         // first. Side-button identities are still telemetry, not inferred PTTs.
         if !radio.tx_active_or_starting()
             && !beacon.active()
-            && !release_rx_pending
+            && !reply_window.active()
             && adc_previous != Some((adc_code, upper))
         {
             event(
@@ -1331,20 +1335,23 @@ fn main() -> ! {
         }
         scope.event(now, spectrum::Event::Ptt(side_activity));
         let update = checked(&mut log, app.sample(now, sample), 0xE032);
-        if release_rx_pending
-            && quiet_input
-            && radio.state() == RfState::Configuring
-            && update.request.is_none()
-            && !update.cancel_temporary
-            && !update.ptt_tx_requested
-            && !update.channel_changed
-            && !update.zone_changed
-            && !update.slot_changed
-        {
-            // The ordinary app still sees physical release. Let the next
-            // fresh poll service the short RF wait ahead of unrelated work.
-            idle.us(100);
-            continue;
+        if reply_window.active() {
+            if quiet_input
+                && current.is_some()
+                && update.request.is_none()
+                && !update.cancel_temporary
+                && !update.ptt_tx_requested
+                && !update.channel_changed
+                && !update.zone_changed
+                && !update.slot_changed
+            {
+                // The first status can precede the repeater's carrier or tone.
+                // Keep polling before LCD/UART work until audio opens or the
+                // window expires. The normal input path still runs every pass.
+                idle.us(100);
+                continue;
+            }
+            reply_window = reply::ReplyWindow::Idle;
         }
 
         #[cfg(not(feature = "pa5-audio"))]
@@ -2411,7 +2418,6 @@ fn main() -> ! {
             }
             current = wanted;
             if retune {
-                release_rx_pending = false;
                 if radio.state() != RfState::Off {
                     checked(&mut log, radio.stop(), 0xE057);
                 }
@@ -2482,6 +2488,7 @@ fn main() -> ! {
         let now = require(time.sample(DWT::cycle_count()), 0xE016);
         if radio.state() == RfState::Receiving
             && (!scope.active() || scope.listening())
+            && !observed_release_rx
             && now.wrapping_sub(signal_at) >= 1
         {
             if let Some(p) = current {
