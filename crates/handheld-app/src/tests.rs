@@ -1222,10 +1222,14 @@ fn off_focus_tx_badges_preempt_page_work_and_clear_after_tail() {
             ..receiving
         })
         .unwrap();
-        app.render_step(4).unwrap();
+        assert_eq!(app.render_step(4).unwrap().rows, 1);
         let start = render::home_slot_rows(tx_slot).0;
         let end = render::home_ptt_badge_rows(tx_slot).1;
-        assert_eq!(windows.borrow()[0], (start, start + 4));
+        assert_eq!(windows.borrow()[0], (start, start + 1));
+        assert_eq!(
+            capture.borrow().pixels[usize::from(start) * render::WIDTH + 4],
+            0x001f
+        );
         assert!(app.priority_rows.has(end - 1));
         assert_eq!(app.status.view.active_slot, focus);
         assert!(!app.status.view.ptt_down);

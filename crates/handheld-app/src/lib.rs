@@ -1212,20 +1212,32 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         let normal_start = ordinary.next(self.row_cursor);
         let admit_priority = normal_start.is_none() || self.priority_run < PRIORITY_BURST_ROWS;
         let priority = admit_priority && self.priority_rows.any();
-        if !priority && admit_priority {
-            if let Some(edge) = render::HomeOutlineEdge::next(self.pending_outlines) {
-                self.status.state = State::Failed;
-                render::render_home_outline_edge(
-                    &mut self.display,
-                    edge,
-                    self.status.view.active_slot,
-                    self.render_radio,
-                )
-                .map_err(Error::Render)?;
-                self.pending_outlines &= !edge.bit();
-                self.priority_run = self.priority_run.saturating_add(1);
-                return Ok(self.finish_render_step(1));
+        // One narrow transfer makes confirmed TX visible even when an older
+        // pop-up spent the priority budget. Everything else keeps its quota.
+        let tx_top = self
+            .render_radio
+            .transmitting_slot()
+            .map(render::HomeOutlineEdge::top)
+            .filter(|edge| self.pending_outlines & edge.bit() != 0);
+        let edge = tx_top.or_else(|| {
+            if !priority && admit_priority {
+                render::HomeOutlineEdge::next(self.pending_outlines)
+            } else {
+                None
             }
+        });
+        if let Some(edge) = edge {
+            self.status.state = State::Failed;
+            render::render_home_outline_edge(
+                &mut self.display,
+                edge,
+                self.status.view.active_slot,
+                self.render_radio,
+            )
+            .map_err(Error::Render)?;
+            self.pending_outlines &= !edge.bit();
+            self.priority_run = self.priority_run.saturating_add(1);
+            return Ok(self.finish_render_step(1));
         }
         let menu = if !priority && self.menu_run < MENU_BURST_ROWS {
             self.menu_priority.iter().find_map(|&(start, end)| {
@@ -1764,6 +1776,9 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         let new_tx = self.radio.transmitting_slot();
         let badge_changed = screen == Screen::Home && old_tx != new_tx;
         if badge_changed {
+            if let Some(slot) = new_tx {
+                self.pending_outlines |= render::HomeOutlineEdge::top(slot).bit();
+            }
             for slot in [old_tx, new_tx].into_iter().flatten() {
                 let start = render::home_slot_rows(slot).0;
                 let end = render::home_ptt_badge_rows(slot).1;

@@ -265,6 +265,11 @@ fn incoming_name_interrupts_pending_paint_and_yields_to_tx_badge() {
     let tx_row = render::home_slot_rows(Slot::B).0;
     assert!(app.priority_rows.has(tx_row));
     assert_eq!(app.priority_run, PRIORITY_BURST_ROWS);
+    let top_edge_pixel = usize::from(tx_row) * render::WIDTH + 4;
+    // Even if only the first window of a brief confirmed TX is admitted,
+    // it must deliver a visible trace of TX on the selected transmit card.
+    assert_eq!(app.render_step(1).unwrap().rows, 1);
+    assert_eq!(capture.borrow().pixels[top_edge_pixel], 0x001f);
     assert_eq!(app.render_step(2).unwrap().rows, 2);
     assert_eq!(app.priority_run, 0); // One ordinary fairness slice.
     assert_eq!(app.render_step(2).unwrap().rows, 2);

@@ -985,9 +985,13 @@ fn main() -> ! {
     loop {
         let loop_started = DWT::cycle_count();
         feed();
-        let adc = checked(&mut log, side.sample(), 0xE055);
+        let mut adc = checked(&mut log, side.sample(), 0xE055);
+        let key_sample = if radio.state() == RfState::Receiving && !reply_window.active() {
+            keys.scan_with_ptt_recheck(|| adc = checked(&mut log, side.sample(), 0xE055))
+        } else {
+            keys.scan_idle_or_full()
+        };
         let adc_code = uv98_keys::stock_auxiliary_code(adc.raw);
-        let key_sample = keys.scan_idle_or_full();
         let mut raw = key_sample
             .as_ref()
             .ok()

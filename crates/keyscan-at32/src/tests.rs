@@ -260,6 +260,44 @@ fn idle_fast_path_retains_full_scan_matrix_and_ptt_instability_rejection() {
     }
 }
 
+#[test]
+fn one_ptt_transition_can_be_resampled_without_fabricating_a_release() {
+    let mut scan = scanner(0, 0, false);
+    scan.registers.ptt_values = [true, false, false].into_iter().collect();
+    let mut rechecks = 0;
+    let sample = scan.scan_with_ptt_recheck(|| rechecks += 1).unwrap();
+    assert!(sample.ptt_pressed());
+    assert_eq!(sample.matrix_state(), MatrixState::Released);
+    assert_eq!(scan.registers.selections, 8);
+    assert_eq!(rechecks, 1);
+    assert!(scan.registers.selected.is_none());
+}
+
+#[test]
+fn ptt_recheck_never_retries_twice_or_masks_a_matrix_error() {
+    let mut scan = scanner(0, 0, false);
+    scan.registers.ptt_values = [true, false, false, true, false, false]
+        .into_iter()
+        .collect();
+    let mut rechecks = 0;
+    assert_eq!(
+        scan.scan_with_ptt_recheck(|| rechecks += 1),
+        Err(Error::UnstablePtt)
+    );
+    assert_eq!(rechecks, 1);
+    assert!(scan.registers.selected.is_none());
+
+    let mut scan = scanner(0x2000, 0x4000, true);
+    assert_eq!(
+        scan.scan_with_ptt_recheck(|| panic!("matrix error is not a PTT transition")),
+        Err(Error::UnstableMatrix {
+            forward: 0x2000,
+            reverse: 0x4000
+        })
+    );
+    assert!(scan.registers.selected.is_none());
+}
+
 fn scanner(first: u16, second: u16, ptt: bool) -> Engine<Fake, Timer> {
     let log = Rc::new(RefCell::new(Vec::new()));
     Engine::new(

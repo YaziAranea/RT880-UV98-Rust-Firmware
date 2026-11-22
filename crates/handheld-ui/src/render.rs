@@ -402,6 +402,13 @@ fn home_frame_ink(active_slot: Slot, slot: Slot) -> u16 {
 pub struct HomeOutlineEdge(u8);
 
 impl HomeOutlineEdge {
+    pub const fn top(slot: Slot) -> Self {
+        Self(match slot {
+            Slot::A => 0,
+            Slot::B => 4,
+        })
+    }
+
     pub fn next(pending: u8) -> Option<Self> {
         (pending != 0).then(|| Self(pending.trailing_zeros() as u8))
     }
@@ -1741,12 +1748,12 @@ fn radio_name_page(row: u16, out: &mut Row<'_>, view: &View) {
 
 /// One user-visible build identity for the header and the About page.
 #[cfg(not(feature = "pa5-audio"))]
-pub const VERSION: &str = "0.1.8-r43";
+pub const VERSION: &str = "0.1.8-r43.1";
 #[cfg(feature = "pa5-audio")]
 pub const VERSION: &str = "R42-PA5";
 /// Header has a fixed 42 px slot; About shows the full string.
 #[cfg(not(feature = "pa5-audio"))]
-pub const VERSION_SHORT: &str = "R42";
+pub const VERSION_SHORT: &str = "R43";
 #[cfg(feature = "pa5-audio")]
 pub const VERSION_SHORT: &str = "PA5";
 

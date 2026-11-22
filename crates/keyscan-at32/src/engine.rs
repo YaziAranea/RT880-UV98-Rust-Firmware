@@ -92,6 +92,19 @@ impl<R: Registers, T: ScanTiming> Engine<R, T> {
         }
     }
 
+    pub(crate) fn scan_with_ptt_recheck(
+        &mut self,
+        before_recheck: impl FnOnce(),
+    ) -> Result<Scan, Error> {
+        match self.scan_idle_or_full() {
+            Err(Error::UnstablePtt) => {
+                before_recheck();
+                self.scan_idle_or_full()
+            }
+            result => result,
+        }
+    }
+
     pub(crate) fn guard_scan(&mut self) -> Result<GuardScan, Error> {
         // All-low open-drain columns let any closed matrix contact pull a row
         // low. No selected column ever drives another column high. This path

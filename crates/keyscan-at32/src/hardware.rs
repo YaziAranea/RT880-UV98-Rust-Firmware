@@ -116,6 +116,11 @@ impl<T: ScanTiming> KeyScanner<T> {
     pub fn scan_idle_or_full(&mut self) -> Result<Scan, Error> {
         self.engine.scan_idle_or_full()
     }
+    /// In idle RX, allow one fresh scan when PB6 changes during sampling.
+    /// The second scan must independently qualify every observed key.
+    pub fn scan_with_ptt_recheck(&mut self, before_recheck: impl FnOnce()) -> Result<Scan, Error> {
+        self.engine.scan_with_ptt_recheck(before_recheck)
+    }
     /// Rejection-only observation for an already-armed TX, with two existing
     /// settle phases. Never use this reduced observation to arm or identify a
     /// key. Columns are released before every return, including errors.
