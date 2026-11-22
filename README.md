@@ -10,13 +10,13 @@ Independent A/B operation, a colour spectrum display, shortwave tools and access
 
 **English** · [Deutsch](README.de.md) · [Русский](README.ru.md)
 
-[**R43.1 release**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r43.1) · [**Start here — backup and installation**](docs/GETTING-STARTED.en.md)
+[**R43.2 release**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r43.2) · [**Start here — backup and installation**](docs/GETTING-STARTED.en.md)
 
-[**CPS 0.8.0 for Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.1/UV98-CPS-0.8.0.zip) · R43.1 BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.1/UV98-r43.1-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.1/UV98-r43.1-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.1/UV98-r43.1-de.bin)
+[**CPS 0.8.0 for Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.2/UV98-CPS-0.8.0.zip) · R43.2 BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.2/UV98-r43.2-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.2/UV98-r43.2-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.2/UV98-r43.2-de.bin)
 
-> **Experimental firmware for the investigated AT32F423 board profile.** Verify board compatibility. Use CPS to prepare a personal R43.1 image from your radio's verified NOR backup before flashing. CPS binds the image to your factory calibration. [Backup and preparation guide](docs/GETTING-STARTED.en.md#4-check-compatibility-before-flashing)
+> **Experimental firmware for the investigated AT32F423 board profile.** Verify board compatibility. Use CPS to prepare a personal R43.2 image from your radio's verified NOR backup before flashing. CPS binds the image to your factory calibration. [Backup and preparation guide](docs/GETTING-STARTED.en.md#4-check-compatibility-before-flashing)
 
-R43.1 retries an isolated first-PTT transition, prioritizes the confirmed TX outline and includes the temporary scan skip, TX-frequency preview and post-PTT receive priority from R43. [Changes and device checks](R43.1-NOTES-RU.txt).
+R43.2 recognizes shorter A/B PTT presses and checks the same physical button again before TX setup. It retains the post-PTT receive priority, temporary scan skip and TX-frequency preview. [Changes and device checks](R43.2-NOTES-RU.txt).
 
 ## Windows CPS 0.8.0
 
@@ -92,7 +92,7 @@ The stock “800 MHz” mode starts at **840 MHz**. The preset uses 850.000 MHz.
 1. Keep the radio on its stock firmware and save its original `.880dmf` / `.98pdmf` file.
 2. Use our CPS to save **calibration**, **4 MiB NOR** and **settings/channel sections**. Each operation reads twice and compares the results.
 3. Keep the complete snapshot folders and a matching factory recovery file in two places. The public package does not include the manufacturer's firmware.
-4. Check board compatibility, then prepare your personal R43.1 image in CPS from the verified NOR snapshot. No Rust compiler is needed for this step.
+4. Check board compatibility, then prepare your personal R43.2 image in CPS from the verified NOR snapshot. No Rust compiler is needed for this step.
 
 The [file checklist and step-by-step guide](docs/GETTING-STARTED.en.md) names every CPS button and expected file. **The 4 MiB NOR backup is not an MCU firmware or bootloader dump.**
 

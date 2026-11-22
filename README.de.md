@@ -10,13 +10,13 @@ Unabhängige A/B-Einstellungen, ein farbiges Spektrum, Kurzwellenfunktionen und 
 
 [English](README.md) · **Deutsch** · [Русский](README.ru.md)
 
-[**R43.1-Version**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r43.1) · [**Hier beginnen — Sicherung und Installation**](docs/GETTING-STARTED.de.md)
+[**R43.2-Version**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r43.2) · [**Hier beginnen — Sicherung und Installation**](docs/GETTING-STARTED.de.md)
 
-[**CPS 0.8.0 für Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.1/UV98-CPS-0.8.0.zip) · R43.1-BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.1/UV98-r43.1-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.1/UV98-r43.1-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.1/UV98-r43.1-de.bin)
+[**CPS 0.8.0 für Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.2/UV98-CPS-0.8.0.zip) · R43.2-BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.2/UV98-r43.2-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.2/UV98-r43.2-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.2/UV98-r43.2-de.bin)
 
-> **Experimentelle Firmware für das untersuchte AT32F423-Platinenprofil.** Zuerst die Platinenkompatibilität prüfen. Vor dem Flashen mit CPS ein persönliches R43.1-Image aus der geprüften NOR-Sicherung des eigenen Geräts erstellen. CPS bindet das Image an die eigenen Werkskalibrierungen. [Sicherungs- und Vorbereitungsanleitung](docs/GETTING-STARTED.de.md#4-kompatibilität-vor-dem-flashen-prüfen)
+> **Experimentelle Firmware für das untersuchte AT32F423-Platinenprofil.** Zuerst die Platinenkompatibilität prüfen. Vor dem Flashen mit CPS ein persönliches R43.2-Image aus der geprüften NOR-Sicherung des eigenen Geräts erstellen. CPS bindet das Image an die eigenen Werkskalibrierungen. [Sicherungs- und Vorbereitungsanleitung](docs/GETTING-STARTED.de.md#4-kompatibilität-vor-dem-flashen-prüfen)
 
-R43.1 prüft eine einzelne instabile PTT-Flanke erneut und zeichnet den bestätigten TX-Rahmen zuerst. R43 bringt temporäres Überspringen beim Scan, eine TX-Frequenzvorschau und Empfangsvorrang nach PTT. [Änderungen und Gerätetest (Russisch)](R43.1-NOTES-RU.txt).
+R43.2 erkennt kürzere A/B-PTT-Tastendrücke und prüft vor dem TX-Start erneut, ob dieselbe Taste gehalten wird. Empfangsvorrang nach PTT, temporäres Überspringen beim Scan und TX-Frequenzvorschau bleiben erhalten. [Änderungen und Gerätetest (Russisch)](R43.2-NOTES-RU.txt).
 
 ## Windows-CPS 0.8.0
 
@@ -92,7 +92,7 @@ Der originale Modus „800 MHz“ beginnt bei **840 MHz**. Die Vorgabe wählt 85
 1. Die Originalfirmware beibehalten und die ursprüngliche `.880dmf`-/`.98pdmf`-Datei des eigenen Geräts sichern.
 2. Mit unserer CPS **Kalibrierung**, **4 MiB NOR** sowie **Einstellungs-/Kanalsektionen** lesen. Jeder Vorgang liest zweimal und vergleicht die Daten.
 3. Die vollständigen Sicherungsordner und eine passende originale Wiederherstellungsdatei an zwei Orten aufbewahren. Das öffentliche Paket enthält keine Herstellerfirmware.
-4. Die Platinenkompatibilität prüfen und anschließend in CPS ein persönliches R43.1-Image aus der geprüften NOR-Sicherung erstellen. Dafür wird kein Rust-Compiler benötigt.
+4. Die Platinenkompatibilität prüfen und anschließend in CPS ein persönliches R43.2-Image aus der geprüften NOR-Sicherung erstellen. Dafür wird kein Rust-Compiler benötigt.
 
 Die [Schritt-für-Schritt-Anleitung](docs/GETTING-STARTED.de.md) nennt die CPS-Schaltflächen, erwarteten Dateien, Prüfkriterien und den Rückweg. **Der 4-MiB-NOR-Dump enthält weder MCU-Firmware noch Bootloader.**
 
