@@ -1755,7 +1755,7 @@ fn radio_name_page(row: u16, out: &mut Row<'_>, view: &View) {
 
 /// One user-visible build identity for the header and the About page.
 #[cfg(not(feature = "pa5-audio"))]
-pub const VERSION: &str = "0.1.8-r43.2";
+pub const VERSION: &str = "0.1.8-r43.3";
 #[cfg(feature = "pa5-audio")]
 pub const VERSION: &str = "R42-PA5";
 /// Header has a fixed 42 px slot; About shows the full string.
@@ -4387,8 +4387,7 @@ const fn pack_home_digit_rows(
             let mut equal = true;
             column = 0;
             while column < HOME_DIGIT_ROW_BYTES {
-                if packed[candidate as usize][column]
-                    != source[row * HOME_DIGIT_ROW_BYTES + column]
+                if packed[candidate as usize][column] != source[row * HOME_DIGIT_ROW_BYTES + column]
                 {
                     equal = false;
                     break;
@@ -4438,8 +4437,8 @@ fn home_digits(row: u16, out: &mut Row<'_>, top: u16, value: &str, ink: u16, bas
             _ => (12, 0, WIDTH_DIGIT, 27),
         };
         let source_row = glyph * HOME_DIGIT_HEIGHT as usize + glyph_row;
-        let bitmap_row = &PACKED_HOME_DIGIT_ROWS.rows
-            [PACKED_HOME_DIGIT_ROWS.indices[source_row] as usize];
+        let bitmap_row =
+            &PACKED_HOME_DIGIT_ROWS.rows[PACKED_HOME_DIGIT_ROWS.indices[source_row] as usize];
         for column in 0..count {
             let bit = column + left;
             let alpha = bitmap_row[bit / 4] >> ((bit % 4) * 2) & 3;

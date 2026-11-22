@@ -173,7 +173,8 @@ def run_case(name, image, start, instructions, overrides, expect_return, expecte
              expected_codes=None, expected_divisor=69, serial_delay=0,
              serial_block_after=None, expected_partial_bytes=0, early_bootstrap=True,
              hick_ready=True, switch_ready=True, gpio_clocks_latch=True,
-             expected_rf_shutdown=None, gpio_stuck_high=None, expected_b_shutdown=None):
+             expected_rf_shutdown=None, gpio_stuck_high=None, expected_b_shutdown=None,
+             late_gpio_lock=None):
     if expected_rf_shutdown is None:
         expected_rf_shutdown = expect_return or terminal_low
     if expected_b_shutdown is None:
@@ -325,6 +326,11 @@ def run_case(name, image, start, instructions, overrides, expect_return, expecte
                         f"{name}: UART bytes before verified HICK8 baseline")
                 serial_bytes.append(value & 0xff)
                 serial_wait = serial_delay
+                # Inject a fault after the startup lock snapshots to exercise
+                # the later output checks independently of initial RF shutdown.
+                if late_gpio_lock is not None and len(serial_bytes) == len(SNAPSHOT_CODES) * 47:
+                    port, mask = late_gpio_lock
+                    uc.mem_write(port + 0x1c, struct.pack("<I", 0x10000 | mask))
             for port in GPIO:
                 if port <= address < port + 0x400:
                     mask = {0: 0x00c00000, 4: 0x800, 8: 0x00c00000,
@@ -500,8 +506,13 @@ def run_case(name, image, start, instructions, overrides, expect_return, expecte
     for frame in frames:
         if frame[0] == 0xe1000006:
             port, lock, required = frame[1:]
-            require(lock == registers[port + 0x1c] and lock & required,
-                    f"{name}: GPIO lock details not concrete")
+            if late_gpio_lock is not None:
+                expected_port, expected_mask = late_gpio_lock
+                require((port, lock, required) == (expected_port, 0x10000 | expected_mask, expected_mask),
+                        f"{name}: GPIO lock details differ")
+            else:
+                require(lock == registers[port + 0x1c] and lock & required,
+                        f"{name}: GPIO lock details not concrete")
     require(not any(0x40003000 <= address <= 0x40003010 or 0x40002C00 <= address <= 0x40002C0C
                     for address, _, _ in writes),
             f"{name}: ASM touched watchdog")
@@ -571,6 +582,15 @@ def check(path):
 
     results.append(run_case("observed_live_stock_boot_context", image, start, pre_decode,
                             LIVE_ENTRY, True, 4, control=4, expected_codes=NORMAL_CODES))
+    late_gpio_outputs = [
+        (GPIO[2], 0x8030), (GPIO[1], 0x0800), (GPIO[3], 0x0100), (GPIO[0], 0x0010),
+        (GPIO[0], 0x8100), (GPIO[1], 0x1000), (GPIO[2], 0x4080), (GPIO[1], 0x0407),
+    ]
+    for index, (port, mask) in enumerate(late_gpio_outputs):
+        codes = SNAPSHOT_CODES + ([2] if index >= 4 else []) + [0xe1000006]
+        results.append(run_case(f"startup_late_gpio_lock_{index}", image, start, pre_decode,
+                                {}, False, 4, expected_codes=codes, expected_rf_shutdown=True,
+                                late_gpio_lock=(port, mask)))
     results.append(run_case("watchdog_updating_observed_without_write", image, start, pre_decode,
                             {0x4000300C: 7, 0x40003004: 6, 0x40003008: 0xABC,
                              0x40003010: 0x789, 0x40002C00: 0xFF}, True, 4,

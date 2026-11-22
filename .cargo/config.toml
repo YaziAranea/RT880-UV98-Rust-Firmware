@@ -2,4 +2,9 @@
 stage0 = "build -p uv98-stage0 --release --target thumbv7em-none-eabi"
 
 [target.thumbv7em-none-eabi]
-rustflags = ["-C", "link-arg=-Tlink.x", "-C", "link-arg=--nmagic"]
+rustflags = [
+    "-C", "link-arg=-Tlink.x",
+    "-C", "link-arg=--nmagic",
+    # Share repeated Thumb instruction sequences while retaining the UI optimization levels.
+    "-C", "llvm-args=-enable-machine-outliner=always",
+]
