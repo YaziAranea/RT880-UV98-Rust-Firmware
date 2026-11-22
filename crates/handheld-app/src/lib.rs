@@ -881,6 +881,9 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         }
         Ok(())
     }
+    pub fn scan_cursor_held(&self) -> bool {
+        self.status.view.screen == Screen::Home && self.input.short_star_pending()
+    }
     pub fn reject_radio_request(
         &mut self,
         request: Request,

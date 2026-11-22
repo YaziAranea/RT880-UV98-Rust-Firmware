@@ -68,6 +68,7 @@ pub struct Scheduler {
     counter: u64,
     last_now: Option<u32>,
     since: u32,
+    vfo_point: usize,
     // Memory slot IDs or zero-based points in the current VFO grid.
     skipped: [u8; CHANNEL_COUNT / 8],
 }
@@ -85,6 +86,7 @@ impl Scheduler {
             counter: 0,
             last_now: None,
             since: 0,
+            vfo_point: 0,
             skipped: [0; CHANNEL_COUNT / 8],
         }
     }
@@ -133,13 +135,14 @@ impl Scheduler {
         if let Target::Vfo { low, high, step } = target {
             // The normal +/-500 kHz VFO window at the smallest step has
             // at most 401 points. Bound the grid by the shared skip bitmap.
-            if low == 0 || low > high || step == 0 || (high - low) / step >= CHANNEL_COUNT as u32 {
+            if low == 0 || low > high || (high - low) / CHANNEL_COUNT as u32 >= step {
                 return Err(self.fail(Error::InvalidRange));
             }
         }
         self.status.target = Some(target);
         self.status.frequency = None;
         self.status.error = None;
+        self.vfo_point = 0;
         self.skipped.fill(0);
         self.issue(now)
     }
@@ -148,24 +151,25 @@ impl Scheduler {
         let action = match self.status.target {
             Some(Target::Channels) => Action::NextChannel,
             Some(Target::Vfo { low, high, step }) => {
-                let points = (high - low) / step + 1;
-                let mut point = self
-                    .status
-                    .frequency
-                    .map_or(0, |current| ((current - low) / step + 1) % points);
-                let mut next = None;
-                for _ in 0..points {
-                    let index = point as usize;
-                    if self.skipped[index / 8] & (1 << (index % 8)) == 0 {
-                        next = Some(low + point * step);
-                        break;
+                let start = self.vfo_point;
+                let mut point = start;
+                let mut frequency = self.status.frequency.unwrap_or(high);
+                loop {
+                    if step <= high - frequency {
+                        frequency += step;
+                        point += 1;
+                    } else {
+                        frequency = low;
+                        point = 0;
                     }
-                    point = (point + 1) % points;
+                    if self.skipped[point / 8] & (1 << (point % 8)) == 0 {
+                        self.vfo_point = point;
+                        break Action::TuneFrequency(frequency);
+                    }
+                    if point == start {
+                        return Ok(self.cancel());
+                    }
                 }
-                let Some(next) = next else {
-                    return Ok(self.cancel());
-                };
-                Action::TuneFrequency(next)
             }
             None => return Err(self.fail(Error::InvalidRange)),
         };
@@ -190,10 +194,7 @@ impl Scheduler {
         }
         let index = match self.status.target {
             Some(Target::Channels) => channel.map(usize::from),
-            Some(Target::Vfo { low, step, .. }) => self
-                .status
-                .frequency
-                .map(|frequency| ((frequency - low) / step) as usize),
+            Some(Target::Vfo { .. }) => Some(self.vfo_point),
             None => None,
         };
         let Some(index) = index.filter(|&index| index < CHANNEL_COUNT) else {
@@ -231,6 +232,17 @@ impl Scheduler {
     /// `signal_or_audio_open` is a fresh accepted signal/audio observation, not a
     /// placeholder RSSI threshold. At most one tune is emitted per call.
     pub fn tick(&mut self, now: u32, signal_or_audio_open: bool) -> Result<Action, Error> {
+        self.tick_with_cursor_hold(now, signal_or_audio_open, false)
+    }
+
+    /// A pending short gesture can defer timed cursor moves. RF observations,
+    /// tune deadlines and explicit cancel/skip still take effect.
+    pub fn tick_with_cursor_hold(
+        &mut self,
+        now: u32,
+        signal_or_audio_open: bool,
+        cursor_held: bool,
+    ) -> Result<Action, Error> {
         if !self.active() {
             return Ok(Action::None);
         }
@@ -245,7 +257,7 @@ impl Scheduler {
                 if signal_or_audio_open {
                     self.status.phase = Phase::Paused;
                     self.since = now;
-                } else if now.wrapping_sub(self.since) >= DWELL_MS {
+                } else if !cursor_held && now.wrapping_sub(self.since) >= DWELL_MS {
                     return self.issue(now);
                 }
             }
@@ -259,7 +271,7 @@ impl Scheduler {
                 if signal_or_audio_open {
                     self.status.phase = Phase::Paused;
                     self.since = now;
-                } else if now.wrapping_sub(self.since) >= RESUME_MS {
+                } else if !cursor_held && now.wrapping_sub(self.since) >= RESUME_MS {
                     return self.issue(now);
                 }
             }

@@ -2859,7 +2859,11 @@ fn main() -> ! {
                     }
                 }
             }
-            match scanner.tick(now, last_signal.is_some_and(|s| s.audio_open)) {
+            match scanner.tick_with_cursor_hold(
+                now,
+                last_signal.is_some_and(|s| s.audio_open),
+                app.scan_cursor_held(),
+            ) {
                 Ok(scan::Action::None) => {}
                 Ok(action) => {
                     if checked(&mut log, scan_action(&mut app, &scanner, action), 0xE032) {

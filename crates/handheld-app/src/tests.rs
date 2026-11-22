@@ -583,6 +583,57 @@ fn scan_skip_keeps_zone_order_wraps_and_leaves_nor_intact() {
 }
 
 #[test]
+fn star_started_before_quiet_deadline_skips_the_same_scan_target_on_release() {
+    use uv98_radio_runtime::{scan, State as RadioState};
+
+    let mut app = app(Memory::new(), PRESERVED_CALIBRATION_SHA256);
+    app.start(0).unwrap();
+    let release = InputSample::Stable {
+        matrix: 0,
+        ptt_pressed: false,
+    };
+    let star = InputSample::Stable {
+        matrix: 0x0008,
+        ptt_pressed: false,
+    };
+    app.sample(0, release).unwrap();
+    app.sample(30, release).unwrap();
+    event(&mut app, InputEvent::Hold(Key::Digit3));
+    let mut scanner = scan::Scheduler::new();
+    scanner.start(scan::Target::Channels, 30).unwrap();
+    let ticket = scanner.status().ticket.unwrap();
+    assert!(scanner.tune_ack(ticket, 31, RadioState::Receiving).unwrap());
+    assert!(app.acknowledge_scan_started().unwrap());
+    scanner.tick(60, true).unwrap();
+    scanner.tick(80, false).unwrap();
+    app.set_scan_paused(scanner.paused()).unwrap();
+
+    let deadline = 80 + scan::RESUME_MS;
+    assert_eq!(app.sample(deadline - 2, star).unwrap().request, None);
+    assert!(app.scan_cursor_held()); // Press debounce spans the deadline.
+    assert_eq!(
+        scanner.tick_with_cursor_hold(deadline, false, app.scan_cursor_held()),
+        Ok(scan::Action::None)
+    );
+    app.sample(deadline + 28, star).unwrap();
+    app.sample(deadline + 30, release).unwrap();
+    assert!(app.scan_cursor_held()); // Release debounce still owns the target.
+    assert_eq!(
+        scanner.tick_with_cursor_hold(deadline + 59, false, app.scan_cursor_held()),
+        Ok(scan::Action::None)
+    );
+    assert_eq!(scanner.status().ticket, Some(ticket));
+    let skip = app.sample(deadline + 60, release).unwrap();
+    assert_eq!(skip.request, Some(Request::SkipScanTarget));
+    assert!(!app.scan_cursor_held());
+    assert_eq!(
+        scanner.skip_current(deadline + 60, app.status.view.channel),
+        Ok(scan::Action::NextChannel)
+    );
+    assert_eq!(scanner.skipped_channels()[0], 1);
+}
+
+#[test]
 fn a_b_switch_reload_zones_and_peer_frequency_without_mixing_contexts() {
     let mut memory = Memory::new();
     add_channel(&mut memory, 2, 43_350_000);

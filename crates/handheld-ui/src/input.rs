@@ -97,6 +97,13 @@ impl InputTracker {
         matches!(self.state, InputState::Ready)
     }
 
+    /// Includes press and release debounce. Hold or invalidation ends the
+    /// pending short gesture, even if the physical key remains down.
+    pub fn short_star_pending(&self) -> bool {
+        self.press
+            .is_some_and(|press| press.key == Key::Star && !press.held)
+    }
+
     /// At most one event per observation. Delayed polling never produces a
     /// burst of repeats. Clock errors leave the complete tracker unchanged.
     pub fn sample(
@@ -340,6 +347,28 @@ mod tests {
         assert_eq!(input.sample(3000, Sample::Key(Key::Menu)), Ok(None));
         input.sample(3010, Sample::Released).unwrap();
         assert_eq!(input.sample(3040, Sample::Released), Ok(None));
+    }
+
+    #[test]
+    fn pending_star_ends_on_hold_or_invalid_input() {
+        let mut input = ready();
+        let star = Sample::Key(Key::Star);
+        input.sample(100, star).unwrap();
+        assert!(input.short_star_pending());
+        input.sample(130, star).unwrap();
+        assert_eq!(
+            input.sample(730, star),
+            Ok(Some(InputEvent::Hold(Key::Star)))
+        );
+        assert!(!input.short_star_pending());
+        input.sample(740, Sample::Released).unwrap();
+        assert_eq!(input.sample(770, Sample::Released), Ok(None));
+        input.sample(800, star).unwrap();
+        assert!(input.short_star_pending());
+        assert_eq!(input.sample(801, Sample::Invalid), Ok(None));
+        assert!(!input.short_star_pending());
+        input.sample(1000, star).unwrap();
+        assert!(!input.short_star_pending());
     }
 
     #[test]
