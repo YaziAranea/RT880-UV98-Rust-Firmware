@@ -76,6 +76,10 @@ impl<R: Registers, T: ScanTiming> Engine<R, T> {
 
     pub(crate) fn scan_idle_or_full(&mut self) -> Result<Scan, Error> {
         let guard = self.guard_scan()?;
+        self.scan_after_guard(guard)
+    }
+
+    fn scan_after_guard(&mut self, guard: GuardScan) -> Result<Scan, Error> {
         if guard.matrix_clear() && !guard.ptt_pressed() {
             // All owned open-drain columns LOW and all settled rows HIGH
             // prove no matrix contact was observed. PB6 was also HIGH at
@@ -94,18 +98,27 @@ impl<R: Registers, T: ScanTiming> Engine<R, T> {
 
     pub(crate) fn scan_with_ptt_recheck(
         &mut self,
-        before_recheck: impl FnOnce(),
+        analog_still_idle: impl FnOnce() -> bool,
     ) -> Result<Scan, Error> {
-        match self.scan_idle_or_full() {
-            Err(Error::UnstablePtt) => {
-                before_recheck();
-                self.scan_idle_or_full()
+        match self.observe_guard() {
+            Ok(guard) => self.scan_after_guard(guard),
+            Err((error, true)) if analog_still_idle() => {
+                let sample = self.scan_idle_or_full()?;
+                if sample.ptt_pressed() && sample.matrix_raw() == 0 {
+                    Ok(sample)
+                } else {
+                    Err(error)
+                }
             }
-            result => result,
+            Err((error, _)) => Err(error),
         }
     }
 
     pub(crate) fn guard_scan(&mut self) -> Result<GuardScan, Error> {
+        self.observe_guard().map_err(|(error, _)| error)
+    }
+
+    fn observe_guard(&mut self) -> Result<GuardScan, (Error, bool)> {
         // All-low open-drain columns let any closed matrix contact pull a row
         // low. No selected column ever drives another column high. This path
         // intentionally cannot identify a key or qualify a new PTT edge.
@@ -122,10 +135,13 @@ impl<R: Registers, T: ScanTiming> Engine<R, T> {
         let idle_low = !self.registers.rows_high() & 15;
         let ptt_released = self.registers.ptt_high();
         if idle_low != 0 {
-            return Err(Error::RowsNotReleased { low_rows: idle_low });
+            return Err((Error::RowsNotReleased { low_rows: idle_low }, false));
         }
         if ptt_high != ptt_selected || ptt_high != ptt_released {
-            return Err(Error::UnstablePtt);
+            // Only an isolated new press qualifies for a fresh observation.
+            // A chord, release, or change back must propagate the error.
+            let isolated_press = low_rows == 0 && ptt_high && !ptt_selected && !ptt_released;
+            return Err((Error::UnstablePtt, isolated_press));
         }
         Ok(GuardScan {
             ptt_high,

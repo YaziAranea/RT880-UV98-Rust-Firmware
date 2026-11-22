@@ -986,8 +986,14 @@ fn main() -> ! {
         let loop_started = DWT::cycle_count();
         feed();
         let mut adc = checked(&mut log, side.sample(), 0xE055);
-        let key_sample = if radio.state() == RfState::Receiving && !reply_window.active() {
-            keys.scan_with_ptt_recheck(|| adc = checked(&mut log, side.sample(), 0xE055))
+        let key_sample = if radio.state() == RfState::Receiving
+            && !reply_window.active()
+            && ptt::side_idle(adc.raw)
+        {
+            keys.scan_with_ptt_recheck(|| {
+                adc = checked(&mut log, side.sample(), 0xE055);
+                ptt::side_idle(adc.raw)
+            })
         } else {
             keys.scan_idle_or_full()
         };

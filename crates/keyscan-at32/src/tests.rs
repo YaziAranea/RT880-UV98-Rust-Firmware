@@ -265,7 +265,12 @@ fn one_ptt_transition_can_be_resampled_without_fabricating_a_release() {
     let mut scan = scanner(0, 0, false);
     scan.registers.ptt_values = [true, false, false].into_iter().collect();
     let mut rechecks = 0;
-    let sample = scan.scan_with_ptt_recheck(|| rechecks += 1).unwrap();
+    let sample = scan
+        .scan_with_ptt_recheck(|| {
+            rechecks += 1;
+            true
+        })
+        .unwrap();
     assert!(sample.ptt_pressed());
     assert_eq!(sample.matrix_state(), MatrixState::Released);
     assert_eq!(scan.registers.selections, 8);
@@ -281,7 +286,10 @@ fn ptt_recheck_never_retries_twice_or_masks_a_matrix_error() {
         .collect();
     let mut rechecks = 0;
     assert_eq!(
-        scan.scan_with_ptt_recheck(|| rechecks += 1),
+        scan.scan_with_ptt_recheck(|| {
+            rechecks += 1;
+            true
+        }),
         Err(Error::UnstablePtt)
     );
     assert_eq!(rechecks, 1);
@@ -296,6 +304,31 @@ fn ptt_recheck_never_retries_twice_or_masks_a_matrix_error() {
         })
     );
     assert!(scan.registers.selected.is_none());
+}
+
+#[test]
+fn ptt_recheck_preserves_observed_chords_and_rejects_analog_activity() {
+    for (matrix, pb6) in [(1, [true, false, false]), (0, [false, true, true])] {
+        let mut scan = scanner(matrix, matrix, false);
+        scan.registers.ptt_values = pb6.into_iter().collect();
+        assert_eq!(
+            scan.scan_with_ptt_recheck(|| panic!("chord or release must not be retried")),
+            Err(Error::UnstablePtt)
+        );
+        assert_eq!(scan.registers.selections, 0);
+    }
+    let mut scan = scanner(0, 0, false);
+    scan.registers.ptt_values = [true, false, false].into_iter().collect();
+    assert_eq!(
+        scan.scan_with_ptt_recheck(|| false),
+        Err(Error::UnstablePtt)
+    );
+    assert_eq!(scan.registers.selections, 0);
+
+    let mut scan = scanner(0, 0, true);
+    scan.registers.ptt_values = [true, false, false].into_iter().collect();
+    assert_eq!(scan.scan_with_ptt_recheck(|| true), Err(Error::UnstablePtt));
+    assert_eq!(scan.registers.selections, 0);
 }
 
 fn scanner(first: u16, second: u16, ptt: bool) -> Engine<Fake, Timer> {
