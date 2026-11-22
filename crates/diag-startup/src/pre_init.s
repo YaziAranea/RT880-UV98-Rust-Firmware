@@ -470,31 +470,33 @@ __pre_init:
     bx lr
 
 .Ldiag_pid_fail:
-    diag_frame 0xe1000001
-    b.w .Ldiag_pre_init_fail
+    movs r0, #1
+    b .Ldiag_default_fail_frame
 .Ldiag_flash_fail:
-    diag_frame 0xe1000002
-    b.w .Ldiag_pre_init_fail
+    movs r0, #2
+    b .Ldiag_default_fail_frame
 .Ldiag_irq_fail:
-    diag_frame 0xe1000003
-    b.w .Ldiag_pre_init_fail
+    movs r0, #3
+    b .Ldiag_default_fail_frame
 .Ldiag_lext_fail:
-    diag_frame 0xe1000004
-    b.w .Ldiag_pre_init_fail
+    movs r0, #4
+    b .Ldiag_default_fail_frame
 .Ldiag_gpio_fail:
-    diag_frame 0xe1000005
-    b.w .Ldiag_pre_init_fail
+    movs r0, #5
+    b .Ldiag_default_fail_frame
 .Ldiag_series_fail:
-    diag_frame 0xe1000007
+    movs r0, #7
+    b .Ldiag_default_fail_frame
+.Ldiag_rf_off_fail:
+    movs r0, #10
+.Ldiag_default_fail_frame:
+    diag_frame 0xe1000000, code_kind=6
     b.w .Ldiag_pre_init_fail
 .Ldiag_context_fail:
     diag_frame 0xe1000008, 4, 0, 3, 0, 5, 0
     b.w .Ldiag_pre_init_fail
 .Ldiag_family_fail:
     diag_frame 0xe1000009, 1, 0xe0042020, 0, 0x1200, 0, 0xff00
-    b.w .Ldiag_pre_init_fail
-.Ldiag_rf_off_fail:
-    diag_frame 0xe100000a
     b.w .Ldiag_pre_init_fail
 
 /* No Rust handler, watchdog reload, stack access or recovery is attempted.

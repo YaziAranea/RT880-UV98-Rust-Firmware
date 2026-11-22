@@ -1,7 +1,7 @@
 /* Pre-RAM TX-only diagnostics. No stack, data RAM, BL or callee-saved registers.
  * r12: bit31 UART ready, bit30 checksum frozen, bits24..28 hex shift,
- * low24 ASCII sum (only low8 transmitted). LR preserved. One frame has fewer
- * than64 bytes, so even255 per byte cannot carry into the hex-shift field.
+ * bits16..19 shared failure code nibble, low16 ASCII sum (low8 transmitted).
+ * LR preserved. Even 255 per frame byte cannot carry out of the sum field.
  * UART byte helper's private tail-branch ABI: r0 byte, r3 Thumb continuation;
  * clobbers r1/r2/r12 only. Clock decode never writes a clock source/divider.
  */
@@ -27,7 +27,8 @@
     diag_send_r0
 .endm
 
-/* kind 0=constant, 1=MMIO word, 2=MMIO halfword, 3=IPSR, 4=CONTROL, 5=MSP.
+/* kind 0=constant, 1=MMIO word, 2=MMIO halfword, 3=IPSR, 4=CONTROL, 5=MSP,
+ * 6=early failure code with its low nibble saved in r12.
  * Stackless pre-init leaves CONTROL/MSP unchanged throughout each frame.
  * Identity registers
  * are immutable; fault registers are best-effort samples, not an atomic dump. */
@@ -44,6 +45,9 @@
             mrs r0, CONTROL
         .elseif \kind == 5
             mrs r0, MSP
+        .elseif \kind == 6
+            ubfx r0, r12, #16, #4
+            movt r0, #0xe100
         .else
             diag_load r0, \value
             .if \kind == 1
@@ -67,14 +71,18 @@
 .Lhex_done\@:
 .endm
 
-.macro diag_frame code, ak=1, av=0xe0042000, bk=1, bv=0xe0042020, ck=2, cv=0x1ffff7e0
+.macro diag_frame code, ak=1, av=0xe0042000, bk=1, bv=0xe0042020, ck=2, cv=0x1ffff7e0, code_kind=0
     tst r12, #0x80000000
     beq.w .Lframe_done\@
     and r12, r12, #0x80000000
+    .if \code_kind == 6
+        /* r0 holds the failure code's low nibble until the first UART byte. */
+        orr r12, r12, r0, lsl #16
+    .endif
     .irp char,85,86,57,56,68,49,32
         diag_byte \char
     .endr
-    diag_hex 0, \code
+    diag_hex \code_kind, \code
     diag_byte 32
     diag_hex \ak, \av
     diag_byte 32
