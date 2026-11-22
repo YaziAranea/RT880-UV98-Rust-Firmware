@@ -1,7 +1,7 @@
-#[path = "../../../firmware-diagnostic/src/signaling.rs"]
-mod signaling;
 #[path = "../../../firmware-diagnostic/src/reply.rs"]
 mod reply;
+#[path = "../../../firmware-diagnostic/src/signaling.rs"]
+mod signaling;
 
 use signaling::{mdc_config, Sample, TransmitTones};
 use std::{cell::RefCell, convert::Infallible, rc::Rc};

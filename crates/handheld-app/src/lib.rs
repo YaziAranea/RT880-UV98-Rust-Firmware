@@ -555,7 +555,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
     ) -> Result<bool, Error<N::Error, L::Error>> {
         let before = self.controller.view();
         let next = self.controller.continue_shortwave_scan(rssi, snr);
-        if self.controller.view() != before {
+        if !self.controller.view().same_view(&before) {
             self.redraw_ready()?;
         }
         Ok(next)
@@ -1598,7 +1598,11 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         }
         // Radio-only reports cannot change a channel/zone window. Avoid the
         // catalog walks on every RSSI observation, especially in channel lists.
-        if self.last_rendered != Some(self.status.view) {
+        if self
+            .last_rendered
+            .as_ref()
+            .is_none_or(|last| !last.same_view(&view))
+        {
             self.refresh_list()?;
             self.refresh_zones();
         }

@@ -10,9 +10,9 @@
 #[cfg(feature = "pa5-audio")]
 mod audio_capture;
 mod beacon;
+mod reply;
 #[path = "shortwave.rs"]
 mod shortwave_bus;
-mod reply;
 mod signaling;
 use at32f4xx_pac::at32f423::interrupt;
 

@@ -644,7 +644,7 @@ pub fn dirty_ranges(model: &Model<'_>, previous: Option<View>) -> Result<DirtyRa
         dirty.push(0, HEIGHT);
         return Ok(dirty);
     }
-    if old == new {
+    if old.same_view(&new) {
         return Ok(dirty);
     }
     // Account for shared chrome before any navigation early return. Its
@@ -873,7 +873,7 @@ pub fn dirty_ranges(model: &Model<'_>, previous: Option<View>) -> Result<DirtyRa
             }
         }
         Screen::Gps | Screen::Aprs => {
-            if old != new {
+            if !old.same_view(&new) {
                 dirty.push(48, 296);
             }
         }
@@ -1126,7 +1126,11 @@ pub fn radio_dirty_ranges(model: &Model<'_>, previous: RadioView) -> Result<Dirt
         dirty.push(banner_start, banner_end);
         match view.screen {
             Screen::Keys => dirty.push(211, 218),
-            Screen::Setting if setting_uses_radio(view.setting) => dirty.push(84, 91),
+            Screen::Setting
+                if setting_uses_radio(view.setting) || view.setting == Some(Setting::Shift) =>
+            {
+                dirty.push(84, 91);
+            }
             _ => {}
         }
         return Ok(dirty);
@@ -1135,7 +1139,7 @@ pub fn radio_dirty_ranges(model: &Model<'_>, previous: RadioView) -> Result<Dirt
         let changed = match view.setting {
             Some(Setting::Power) => previous.power != new.power,
             Some(Setting::Monitor) => previous.monitor != new.monitor,
-            Some(Setting::Modulation) => previous.modulation != new.modulation,
+            Some(Setting::Modulation | Setting::Shift) => previous.modulation != new.modulation,
             _ => false,
         };
         if changed {
@@ -1733,7 +1737,7 @@ fn radio_name_page(row: u16, out: &mut Row<'_>, view: &View) {
 
 /// One user-visible build identity for the header and the About page.
 #[cfg(not(feature = "pa5-audio"))]
-pub const VERSION: &str = "0.1.8-r42";
+pub const VERSION: &str = "0.1.8-r43";
 #[cfg(feature = "pa5-audio")]
 pub const VERSION: &str = "R42-PA5";
 /// Header has a fixed 42 px slot; About shows the full string.
@@ -3152,7 +3156,11 @@ fn setting(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
         let _ = write!(current, "\x1f110 {}", label);
         text(row, out, 16, 84, 1, current.as_str(), color::MUTED);
         if setting == Setting::Shift {
-            let tx = shift_tx_preview(&model.view);
+            let tx = if model.radio.modulation == Modulation::Fm {
+                shift_tx_preview(&model.view)
+            } else {
+                None
+            };
             let ink = if tx.is_some() {
                 color::TEXT
             } else {
@@ -6482,11 +6490,14 @@ mod tests {
             let plus = render(plus);
             let mut absent = plus;
             absent.view.vfo_10hz = 0;
+            let mut am = plus;
+            am.radio.modulation = Modulation::Am;
             for (model, label, ink) in [
                 (simplex, "TX 433.51250", color::TEXT),
                 (minus, "TX 432.91250", color::TEXT),
                 (plus, "TX 434.11250", color::TEXT),
                 (absent, "TX ---.-----", color::MUTED),
+                (am, "TX ---.-----", color::MUTED),
             ] {
                 for y in 84..91 {
                     let mut actual = [0; WIDTH];
@@ -6511,6 +6522,7 @@ mod tests {
             assert_eq!(compare_incremental(minus, plus), WIDTH * 51);
             assert_eq!(compare_incremental(plus, absent), WIDTH * 7);
             assert_eq!(compare_incremental(absent, plus), WIDTH * 7);
+            assert_eq!(compare_incremental(plus, am), WIDTH * 7);
         }
     }
 

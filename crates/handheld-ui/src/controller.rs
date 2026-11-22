@@ -791,6 +791,12 @@ pub struct View {
 }
 
 impl View {
+    /// Keep one copy of this large comparison at the MCU rendering boundaries.
+    #[cfg_attr(target_arch = "arm", inline(never))]
+    pub fn same_view(&self, other: &Self) -> bool {
+        self == other
+    }
+
     pub const fn language(&self) -> Language {
         #[cfg(any(test, feature = "locale-all"))]
         {
