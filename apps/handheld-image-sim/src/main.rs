@@ -1305,6 +1305,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         monitor: false,
         power: Some(0),
         modulation: Modulation::Fm,
+        vfo_am_override: false,
         route: Some(RadioRoute::Uhf),
         tx_trial: false,
     };
