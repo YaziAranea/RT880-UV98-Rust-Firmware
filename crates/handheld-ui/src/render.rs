@@ -133,6 +133,8 @@ pub struct RadioView {
     /// Confirmed power selection: 0 low, 1 medium, 2 high; not measured watts.
     pub power: Option<u8>,
     pub modulation: Modulation,
+    /// Explicit AM on the selected slot, independent of automatic airband RX.
+    pub vfo_am_override: bool,
     pub route: Option<RadioRoute>,
     /// Build-profile warning only. This never means TX is active or eligible.
     pub tx_trial: bool,
@@ -151,6 +153,7 @@ impl RadioView {
         monitor: false,
         power: None,
         modulation: Modulation::Fm,
+        vfo_am_override: false,
         route: None,
         tx_trial: false,
     };
@@ -1139,7 +1142,8 @@ pub fn radio_dirty_ranges(model: &Model<'_>, previous: RadioView) -> Result<Dirt
         let changed = match view.setting {
             Some(Setting::Power) => previous.power != new.power,
             Some(Setting::Monitor) => previous.monitor != new.monitor,
-            Some(Setting::Modulation | Setting::Shift) => previous.modulation != new.modulation,
+            Some(Setting::Modulation) => previous.modulation != new.modulation,
+            Some(Setting::Shift) => previous.vfo_am_override != new.vfo_am_override,
             _ => false,
         };
         if changed {
@@ -3156,10 +3160,10 @@ fn setting(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
         let _ = write!(current, "\x1f110 {}", label);
         text(row, out, 16, 84, 1, current.as_str(), color::MUTED);
         if setting == Setting::Shift {
-            let tx = if model.radio.modulation == Modulation::Fm {
-                shift_tx_preview(&model.view)
-            } else {
+            let tx = if model.radio.vfo_am_override {
                 None
+            } else {
+                shift_tx_preview(&model.view)
             };
             let ink = if tx.is_some() {
                 color::TEXT
@@ -6492,12 +6496,16 @@ mod tests {
             absent.view.vfo_10hz = 0;
             let mut am = plus;
             am.radio.modulation = Modulation::Am;
+            am.radio.vfo_am_override = true;
+            let mut auto_am = plus;
+            auto_am.radio.modulation = Modulation::Am;
             for (model, label, ink) in [
                 (simplex, "TX 433.51250", color::TEXT),
                 (minus, "TX 432.91250", color::TEXT),
                 (plus, "TX 434.11250", color::TEXT),
                 (absent, "TX ---.-----", color::MUTED),
                 (am, "TX ---.-----", color::MUTED),
+                (auto_am, "TX 434.11250", color::TEXT),
             ] {
                 for y in 84..91 {
                     let mut actual = [0; WIDTH];
@@ -6522,7 +6530,7 @@ mod tests {
             assert_eq!(compare_incremental(minus, plus), WIDTH * 51);
             assert_eq!(compare_incremental(plus, absent), WIDTH * 7);
             assert_eq!(compare_incremental(absent, plus), WIDTH * 7);
-            assert_eq!(compare_incremental(plus, am), WIDTH * 7);
+            assert_eq!(compare_radio_incremental(auto_am, am), WIDTH * 7);
         }
     }
 

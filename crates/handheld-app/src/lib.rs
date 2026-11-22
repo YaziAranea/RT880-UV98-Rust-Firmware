@@ -1887,6 +1887,7 @@ fn radio_controls_equal(a: RadioView, b: RadioView) -> bool {
         && a.tx_trial == b.tx_trial
         && a.power == b.power
         && a.modulation == b.modulation
+        && a.vfo_am_override == b.vfo_am_override
         && a.route == b.route
         && a.monitor == b.monitor
 }

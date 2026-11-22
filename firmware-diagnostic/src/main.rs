@@ -2894,6 +2894,8 @@ fn main() -> ! {
             None
         };
         let mut report = RadioView::OFF;
+        report.vfo_am_override =
+            settings[usize::from(view.active_slot == Slot::B)].modulation == Some(Modulation::Am);
         report.tx_slot = if radio.state() == RfState::Transmitting {
             tx_slot
         } else {
