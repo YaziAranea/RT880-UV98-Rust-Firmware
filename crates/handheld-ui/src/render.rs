@@ -13,10 +13,10 @@ use uv98_spectrum::compact::{Plot, BINS as SPECTRUM_BINS};
 #[cfg(test)]
 use crate::controller::MENU_ITEMS;
 use crate::controller::{
-    binding_digit, menu_entries, CrossbandProbe, EntryKind, LightMode, MdcDraft, MenuEntry,
-    MenuGroup, MenuItem, Mode, Notice, ScanState, Screen, Setting, ShortcutAction, SideAction,
-    Slot, View, LIGHT_MODES, SHORTCUT_ACTIONS, SIDE_ACTIONS, SPECTRUM_INTERVALS, STEP_10HZ,
-    TX_CTCSS,
+    binding_digit, menu_entries, vfo_tx_frequency_for, CrossbandProbe, EntryKind, LightMode,
+    MdcDraft, MenuEntry, MenuGroup, MenuItem, Mode, Notice, ScanState, Screen, Setting,
+    ShortcutAction, SideAction, Slot, View, LIGHT_MODES, SHORTCUT_ACTIONS, SIDE_ACTIONS,
+    SPECTRUM_INTERVALS, STEP_10HZ, TX_CTCSS,
 };
 use crate::meter::{receive_segments, transmit_segments, SEGMENTS as METER_SEGMENTS};
 
@@ -69,6 +69,7 @@ const ITEM_PAINT_HEIGHT: u16 = 30;
 const SETTING_Y: u16 = 112;
 const SETTING_ROW_HEIGHT: u16 = 44;
 const SETTING_PAINT_HEIGHT: u16 = 36;
+const SHIFT_TX_X: usize = 152;
 
 pub mod color {
     pub const BACKGROUND: u16 = 0x0842;
@@ -1034,6 +1035,9 @@ pub fn dirty_ranges(model: &Model<'_>, previous: Option<View>) -> Result<DirtyRa
                 || old.scan != new.scan
                 || old.display_light != new.display_light
                 || old.key_light != new.key_light
+                || new.setting == Some(Setting::Shift)
+                    && (old.shift_index != new.shift_index
+                        || shift_tx_preview(&old) != shift_tx_preview(&new))
             {
                 dirty.push(84, 91);
             }
@@ -3100,6 +3104,21 @@ fn ctcss_label(index: usize) -> Text {
     text
 }
 
+fn shift_tx_preview(view: &View) -> Option<u32> {
+    if view.mode != Mode::Vfo || view.cb_for_slot(view.active_slot).is_some() {
+        return None;
+    }
+    let base = view.vfo_10hz;
+    let shifted = vfo_tx_frequency_for(base, view.setting_index, None)?;
+    for frequency in [base, shifted] {
+        uv98_band_plan::operating_range(frequency)?;
+        if uv98_band_plan::aviation_band(frequency) {
+            return None;
+        }
+    }
+    Some(if view.reverse { base } else { shifted })
+}
+
 fn setting(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     let Some(setting) = model.view.setting else {
         return;
@@ -3129,6 +3148,24 @@ fn setting(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
         };
         let _ = write!(current, "\x1f110 {}", label);
         text(row, out, 16, 84, 1, current.as_str(), color::MUTED);
+        if setting == Setting::Shift {
+            let tx = shift_tx_preview(&model.view);
+            let ink = if tx.is_some() {
+                color::TEXT
+            } else {
+                color::MUTED
+            };
+            raw_text(row, out, SHIFT_TX_X, 84, 1, "TX", ink);
+            raw_text(
+                row,
+                out,
+                SHIFT_TX_X + 18,
+                84,
+                1,
+                frequency(tx.unwrap_or(0)).as_str(),
+                ink,
+            );
+        }
     }
     let (start, pitch, height) = setting_geometry(setting);
     let first = if setting.choice_count() > LIST_ROWS as u8 {
@@ -6371,6 +6408,126 @@ mod tests {
         let mut absent = model(Screen::Setting);
         absent.view.setting = None;
         assert_eq!(dirty_ranges(&absent, None), Err(Error::InvalidView));
+    }
+
+    #[test]
+    fn shift_editor_previews_the_active_b_draft_before_commit() {
+        use crate::controller::Controller;
+        use crate::input::InputEvent;
+
+        let bitmap = [0; 128];
+        let mut controller = Controller::new(&bitmap, 43_350_000);
+        controller.select_slot(Slot::B);
+        let mut press = |key| {
+            controller.handle(InputEvent::Short(key), &bitmap);
+            controller.view()
+        };
+        press(Key::Up);
+        press(Key::Menu);
+        press(Key::Down);
+        press(Key::Down);
+        press(Key::Menu);
+        for _ in 0..5 {
+            press(Key::Down);
+        }
+        let simplex = press(Key::Menu);
+        let minus = press(Key::Down);
+        let plus = press(Key::Down);
+        for view in [simplex, minus, plus] {
+            assert_eq!(view.screen, Screen::Setting);
+            assert_eq!(view.setting, Some(Setting::Shift));
+            assert_eq!(view.active_slot, Slot::B);
+            assert_eq!(view.vfo_10hz, 43_351_250);
+            assert_eq!(view.shift_index, 0, "draft must not commit");
+        }
+        let committed = press(Key::Menu);
+        assert_eq!(committed.shift_index, 2);
+        assert_eq!(
+            vfo_tx_frequency_for(committed.vfo_10hz, 2, None),
+            Some(43_411_250)
+        );
+        assert_eq!(controller.context(Slot::A).vfo_10hz, 43_350_000);
+        assert_eq!(controller.context(Slot::A).shift_index, 0);
+
+        for language in [Language::Russian, Language::English, Language::German] {
+            let render = |view: View| {
+                let mut m = model(Screen::Setting);
+                m.view = view;
+                m.view.language = language;
+                m
+            };
+            let simplex = render(simplex);
+            let minus = render(minus);
+            let plus = render(plus);
+            let mut absent = plus;
+            absent.view.vfo_10hz = 0;
+            for (model, label, ink) in [
+                (simplex, "TX 433.51250", color::TEXT),
+                (minus, "TX 432.91250", color::TEXT),
+                (plus, "TX 434.11250", color::TEXT),
+                (absent, "TX ---.-----", color::MUTED),
+            ] {
+                for y in 84..91 {
+                    let mut actual = [0; WIDTH];
+                    render_row(y, &mut actual, &model).unwrap();
+                    let mut expected = [color::BACKGROUND; WIDTH];
+                    raw_text(
+                        y,
+                        &mut Row {
+                            pixels: &mut expected,
+                            language,
+                        },
+                        SHIFT_TX_X,
+                        84,
+                        1,
+                        label,
+                        ink,
+                    );
+                    assert_eq!(actual[SHIFT_TX_X - 1..], expected[SHIFT_TX_X - 1..]);
+                }
+            }
+            assert_eq!(compare_incremental(simplex, minus), WIDTH * 51);
+            assert_eq!(compare_incremental(minus, plus), WIDTH * 51);
+            assert_eq!(compare_incremental(plus, absent), WIDTH * 7);
+            assert_eq!(compare_incremental(absent, plus), WIDTH * 7);
+        }
+    }
+
+    #[test]
+    fn shift_preview_applies_existing_frequency_bounds_and_reverse() {
+        let mut view = model(Screen::Setting).view;
+        view.mode = Mode::Vfo;
+        for (base, draft, reverse, expected) in [
+            (0, 0, false, None),
+            (1, 1, true, None), // Checked offset underflows.
+            (1_800_000, 0, false, Some(1_800_000)),
+            (1_799_999, 2, false, None), // Invalid RX even with valid TX.
+            (1_860_000, 1, false, Some(1_800_000)),
+            (1_859_999, 1, true, None), // Reverse would make RX invalid.
+            (11_739_999, 2, false, Some(11_799_999)),
+            (11_740_000, 2, false, None), // Shifted TX enters airband.
+            (11_800_000, 1, false, None), // Airband RX blocks ordinary FM TX.
+            (13_700_000, 0, false, Some(13_700_000)),
+            (13_699_999, 0, false, None),
+            (66_000_000, 0, false, Some(66_000_000)),
+            (65_940_001, 2, false, None), // TX falls between RF bands.
+            (83_999_999, 0, false, None),
+            (84_000_000, 0, false, Some(84_000_000)),
+            (99_939_999, 2, false, Some(99_999_999)),
+            (99_940_000, 2, false, None),
+            (43_351_251, 2, false, Some(43_411_251)), // Retain full precision.
+            (43_351_251, 2, true, Some(43_351_251)),
+            (43_351_251, 7, false, None),
+        ] {
+            view.vfo_10hz = base;
+            view.setting_index = draft;
+            view.reverse = reverse;
+            assert_eq!(
+                shift_tx_preview(&view),
+                expected,
+                "{base} {draft} {reverse}"
+            );
+        }
     }
 
     #[test]

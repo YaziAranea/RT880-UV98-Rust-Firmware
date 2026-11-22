@@ -11,6 +11,7 @@ locale-de = []
 locale-all = []
 
 [dependencies]
+uv98-band-plan = { path = "../band-plan" }
 uv98-spectrum = { path = "../spectrum" }
 uv98-keys = { path = "../keys" }
 uv98-display = { path = "../display" }

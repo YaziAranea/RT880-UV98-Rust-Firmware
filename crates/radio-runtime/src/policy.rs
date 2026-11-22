@@ -1,6 +1,7 @@
 //! Read-only channel policy. Unsupported records fail explicitly; no saved
 //! frequencies, tones, calibration or operation permissions are normalized.
 use crate::{scan, Audio};
+pub use uv98_band_plan::{aviation_band, operating_range as range};
 use uv98_codeplug::channels::{Bandwidth, Channel, OperationMode};
 use uv98_handheld_ui::controller::{Mode, View, STEP_10HZ, TX_CTCSS};
 use uv98_rf_sequence::{Modulation, RxRequest, TxRequest, Width};
@@ -255,18 +256,6 @@ pub fn profile(
     })
 }
 
-pub const fn aviation_band(f: u32) -> bool {
-    f >= 11_800_000 && f < 13_700_000
-}
-
-/// Coverage of the traced route selector, not a sensitivity specification.
-pub const fn range(f: u32) -> Option<(u32, u32)> {
-    match f {
-        1_800_000..=66_000_000 => Some((1_800_000, 66_000_000)),
-        84_000_000..=99_999_999 => Some((84_000_000, 99_999_999)),
-        _ => None,
-    }
-}
 pub fn scan_target(view: View) -> Result<scan::Target, Error> {
     if view.cb_for_slot(view.active_slot).is_some() {
         // A general +/-500 kHz VFO sweep is not the irregular CB channel grid.

@@ -10,6 +10,20 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+/// Civil aviation frequencies, where the ordinary FM TX path is unavailable.
+pub const fn aviation_band(f: u32) -> bool {
+    f >= 11_800_000 && f < 13_700_000
+}
+
+/// Firmware's operating bounds within traced routing coverage, in 10 Hz units.
+pub const fn operating_range(f: u32) -> Option<(u32, u32)> {
+    match f {
+        1_800_000..=66_000_000 => Some((1_800_000, 66_000_000)),
+        84_000_000..=99_999_999 => Some((84_000_000, 99_999_999)),
+        _ => None,
+    }
+}
+
 /// Call context of stock frequency selector 0x08012A30.
 /// This is a chip/context argument, not modulation or a TX authorization.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

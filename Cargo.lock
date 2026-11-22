@@ -2955,6 +2955,7 @@ dependencies = [
 name = "uv98-handheld-ui"
 version = "0.1.0"
 dependencies = [
+ "uv98-band-plan",
  "uv98-codeplug",
  "uv98-display",
  "uv98-keys",
