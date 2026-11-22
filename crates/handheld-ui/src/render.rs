@@ -61,6 +61,13 @@ const HOME_HEADER_END: u16 = 28;
 const HOME_NAME_Y: u16 = 30;
 const HOME_FREQUENCY_Y: u16 = 54;
 const HOME_DIGIT_HEIGHT: u16 = 48;
+const HOME_DIGIT_ROW_BYTES: usize = 7;
+const HOME_DIGIT_COUNT: usize = 13;
+const HOME_DIGIT_ROWS: usize = HOME_DIGIT_COUNT * HOME_DIGIT_HEIGHT as usize;
+const HOME_DIGIT_UNIQUE_ROWS: usize = 235;
+const HOME_DIGIT_PACKED_ROWS: usize = 256;
+const HOME_DIGIT_SOURCE: &[u8; HOME_DIGIT_ROW_BYTES * HOME_DIGIT_ROWS] =
+    include_bytes!("../fonts/chakra-frequency-2bpp.bin");
 pub const HOME_METER_Y: u16 = 112;
 const HOME_META_Y: u16 = 130;
 const LIST_Y: u16 = 54;
@@ -4338,13 +4345,80 @@ fn frequency(value: u32) -> FrequencyText {
     result
 }
 
+struct PackedHomeDigitRows {
+    rows: [[u8; HOME_DIGIT_ROW_BYTES]; HOME_DIGIT_PACKED_ROWS],
+    indices: [u8; HOME_DIGIT_ROWS],
+}
+
+const fn pack_home_digit_rows(
+    source: &[u8; HOME_DIGIT_ROW_BYTES * HOME_DIGIT_ROWS],
+) -> PackedHomeDigitRows {
+    let mut packed = [[0; HOME_DIGIT_ROW_BYTES]; HOME_DIGIT_PACKED_ROWS];
+    let mut indices = [0; HOME_DIGIT_ROWS];
+    let mut slots = [u8::MAX; HOME_DIGIT_PACKED_ROWS];
+    let mut unique = 0;
+    let mut row = 0;
+    while row < HOME_DIGIT_ROWS {
+        let mut hash = 0usize;
+        let mut column = 0;
+        while column < HOME_DIGIT_ROW_BYTES {
+            hash = (hash.wrapping_mul(31) + source[row * HOME_DIGIT_ROW_BYTES + column] as usize)
+                & (HOME_DIGIT_PACKED_ROWS - 1);
+            column += 1;
+        }
+
+        loop {
+            let candidate = slots[hash];
+            if candidate == u8::MAX {
+                if unique >= HOME_DIGIT_UNIQUE_ROWS {
+                    panic!("home digit font has more unique rows than expected");
+                }
+                column = 0;
+                while column < HOME_DIGIT_ROW_BYTES {
+                    packed[unique][column] = source[row * HOME_DIGIT_ROW_BYTES + column];
+                    column += 1;
+                }
+                slots[hash] = unique as u8;
+                indices[row] = unique as u8;
+                unique += 1;
+                break;
+            }
+
+            let mut equal = true;
+            column = 0;
+            while column < HOME_DIGIT_ROW_BYTES {
+                if packed[candidate as usize][column]
+                    != source[row * HOME_DIGIT_ROW_BYTES + column]
+                {
+                    equal = false;
+                    break;
+                }
+                column += 1;
+            }
+            if equal {
+                indices[row] = candidate;
+                break;
+            }
+            hash = (hash + 1) & (HOME_DIGIT_PACKED_ROWS - 1);
+        }
+        row += 1;
+    }
+
+    if unique != HOME_DIGIT_UNIQUE_ROWS {
+        panic!("home digit font unique row count changed");
+    }
+    PackedHomeDigitRows {
+        rows: packed,
+        indices,
+    }
+}
+
+const PACKED_HOME_DIGIT_ROWS: PackedHomeDigitRows = pack_home_digit_rows(HOME_DIGIT_SOURCE);
+
 #[inline(never)]
 fn home_digits(row: u16, out: &mut Row<'_>, top: u16, value: &str, ink: u16, base: u16) {
     // Chakra Petch SemiBold, SIL OFL 1.1. Four pixels per byte.
     const WIDTH_DIGIT: usize = 26;
-    const ROW_BYTES: usize = 7;
-    const GLYPH_BYTES: usize = ROW_BYTES * HOME_DIGIT_HEIGHT as usize;
-    const BITMAP: &[u8; GLYPH_BYTES * 13] = include_bytes!("../fonts/chakra-frequency-2bpp.bin");
     let blend = |opacity: u16| {
         let component = |shift: u32, mask: u16| {
             (((ink >> shift) & mask) * opacity + ((base >> shift) & mask) * (3 - opacity) + 1) / 3
@@ -4363,10 +4437,12 @@ fn home_digits(row: u16, out: &mut Row<'_>, top: u16, value: &str, ink: u16, bas
             b'-' => (11, 0, WIDTH_DIGIT, 27),
             _ => (12, 0, WIDTH_DIGIT, 27),
         };
-        let start = glyph * GLYPH_BYTES + glyph_row * ROW_BYTES;
+        let source_row = glyph * HOME_DIGIT_HEIGHT as usize + glyph_row;
+        let bitmap_row = &PACKED_HOME_DIGIT_ROWS.rows
+            [PACKED_HOME_DIGIT_ROWS.indices[source_row] as usize];
         for column in 0..count {
             let bit = column + left;
-            let alpha = BITMAP[start + bit / 4] >> ((bit % 4) * 2) & 3;
+            let alpha = bitmap_row[bit / 4] >> ((bit % 4) * 2) & 3;
             if alpha != 0 {
                 out[x + column] = palette[usize::from(alpha)];
             }
@@ -4522,6 +4598,16 @@ mod tests {
     use super::*;
     use crate::controller::Entry;
     use std::{cell::RefCell, rc::Rc, vec, vec::Vec};
+
+    #[test]
+    fn packed_home_digit_rows_reconstruct_every_source_byte() {
+        for (offset, &expected) in HOME_DIGIT_SOURCE.iter().enumerate() {
+            let row = offset / HOME_DIGIT_ROW_BYTES;
+            let column = offset % HOME_DIGIT_ROW_BYTES;
+            let packed_row = PACKED_HOME_DIGIT_ROWS.indices[row] as usize;
+            assert_eq!(PACKED_HOME_DIGIT_ROWS.rows[packed_row][column], expected);
+        }
+    }
 
     #[test]
     fn menu_cache_matches_label_pixels_and_reuses_glyphs_across_windows() {
