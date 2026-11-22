@@ -2,3 +2,6 @@
 * -text
 *.png binary
 *.bin binary
+/artifacts export-ignore
+/research/band-switch/relay-schematic-detail.png export-ignore
+/research/band-switch/mcu-pin-labels-detail.png export-ignore

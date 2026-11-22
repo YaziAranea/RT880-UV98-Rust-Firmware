@@ -15,7 +15,7 @@ R42 adds SYSTEM / TX → MIC GAIN: 0–31, MENU saves and EXIT cancels. 0 is min
 3. Use the stock CPS for your model to read the radio and save its original `.880dmf` or `.98pdmf` file. Keep an existing original such as `999.880dmf` unchanged.
 4. Close the stock CPS, Radio Tuning Software and other programs using the cable. Before the first read in our CPS, power the radio off for 3 seconds, then start it normally again.
 5. Create a folder such as `Documents/UV98-backup-2026-11-16`. Suggested subfolders: `01-original`, `02-calibration`, `03-nor`, `04-settings`, `05-recovery`. Put the original CPS file in `01-original`.
-6. Extract [CPS 0.8.0 for Windows](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r42/UV98-CPS-0.8.0.zip). Run `UV98-CPS.exe`, choose **English** in **Язык / Language / Sprache**, then open **Backups**. Select the actual cable COM port using **Refresh list → Available ports**. Old port numbers in screenshots and logs may differ.
+6. Extract [CPS 0.8.0 for Windows](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.1/UV98-CPS-0.8.0.zip). Run `UV98-CPS.exe`, choose **English** in **Язык / Language / Sprache**, then open **Backups**. Select the actual cable COM port using **Refresh list → Available ports**. Old port numbers in screenshots and logs may differ.
 
 The toolbar language selector is always visible. All eight tabs and existing status messages switch immediately and unsaved edits stay in place. CPS remembers the selection in your Windows user profile. File dialog titles and filters follow CPS. Standard dialog buttons follow Windows.
 
@@ -79,11 +79,11 @@ Place the file named `RT-880_Upgrade_V1_16_250915.bin` in a `recovery` folder be
 
 ## 4. Check compatibility before flashing
 
-R42 targets the investigated AT32F423 board profile. Verify the board revision before flashing. Backup-based preparation binds the image to your calibration.
+R43.1 targets the investigated AT32F423 board profile. Verify the board revision before flashing. Backup-based preparation binds the image to your calibration.
 
 For a confirmed compatible board, prepare a personal BIN. **No Rust compiler is needed.**
 
-1. Download the original R42 BIN in the desired language. [RU](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r42/UV98-r42-ru.bin) · [EN](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r42/UV98-r42-en.bin) · [DE](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r42/UV98-r42-de.bin) In CPS open **Firmware → Select BIN…** and choose that file. A release catalog is optional for a compatible original application BIN with a calibration profile.
+1. Download the original R43.1 BIN in the desired language. [RU](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.1/UV98-r43.1-ru.bin) · [EN](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.1/UV98-r43.1-en.bin) · [DE](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.1/UV98-r43.1-de.bin) In CPS open **Firmware → Select BIN…** and choose that file. A release catalog is optional for a compatible original application BIN with a calibration profile.
 2. Click **Prepare an image for my radio…**.
 3. Select **`manifest.json` from the full 4 MiB NOR snapshot** created by “Read settings storage (4 MiB)”. Select the manifest, not `storage-address-space.bin` itself. A calibration-only snapshot is not sufficient.
 4. Choose a parent folder for new images, for example `Documents/UV98-personal`. CPS creates a new `UV98-personal-…` directory inside it.
@@ -94,7 +94,7 @@ CPS checks the two-read status, file sizes and SHA256 values, and verifies that 
 
 The catalog records the personal BIN's SHA256 and schema 2 personalization provenance, including the source and snapshot hashes. CPS structural checks establish file layout and integrity. Verify the release source, publisher and board revision independently.
 
-If preparation is rejected, check that you selected your own complete two-read NOR snapshot and the original R42 BIN. Keep the original manifest and snapshot files together.
+If preparation is rejected, check that you selected your own complete two-read NOR snapshot and the original R43.1 BIN. Keep the original manifest and snapshot files together.
 
 Proceed only after successful preparation, confirmation of board compatibility, and saving verified backups and the correct factory BIN in two places.
 
@@ -107,11 +107,11 @@ Proceed only after successful preparation, confirmation of board compatibility, 
 5. Wait for explicit completion. Do not switch off the radio, unplug the cable or close CPS during writing.
 6. After completion, switch off for 3 seconds and start **without PTT**. Check the display, keys and reception. Keep the operation log.
 
-**Firmware language.** Flash the BIN for your chosen language. Each R42 BIN has one interface language. Set the CPS language separately in its toolbar.
+**Firmware language.** Flash the BIN for your chosen language. Each R43.1 BIN has one interface language. Set the CPS language separately in its toolbar.
 
 With the default bindings, the upper PTT requests A and the lower PTT requests B. A green border marks the receiving slot. The red TX border takes priority. A large red **L**, yellow **M** or green **H** shows the configured power of the transmitting slot, including B while A is selected. Each slot's power starts at LOW and changes are held in RAM. The battery icon shows up to four approximate level bars and the voltage in 0.1 V steps (`--.-V` when unavailable). [Lower PTT hardware evidence](../research/r37/ptt.md)
 
-Loader acknowledgements confirm file transfer. Check boot and reception on the radio. R42 prioritizes receiver setup after PTT release. Check whether the start of a short repeater response is audible, and verify the RX/TX outlines and DTMF window on the device.
+Loader acknowledgements confirm file transfer. Check boot and reception on the radio. R43.1 prioritizes receiver setup after PTT release. Check whether the start of a short repeater response is audible, and verify the RX/TX outlines and DTMF window on the device.
 
 ### CB grid
 
