@@ -459,15 +459,20 @@ fn spectrum_window(
 
 fn scan_action<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
     app: &mut App<N, L, D>,
+    scanner: &scan::Scheduler,
     action: scan::Action,
 ) -> Result<bool, uv98_handheld_app::Error<N::Error, L::Error>> {
     match action {
         scan::Action::NextChannel => {
-            if let Some(index) = app.next_catalog_index(app.status().view.channel, true) {
+            if let Some(index) = app.next_scan_channel(scanner.skipped_channels()) {
                 app.select_scan_channel(index)?;
                 Ok(true)
             } else {
-                app.reject_radio_request(Request::StartScan)?;
+                if app.status().view.scan == ScanState::Requested {
+                    app.reject_radio_request(Request::StartScan)?;
+                } else {
+                    app.acknowledge_scan_stopped()?;
+                }
                 Ok(false)
             }
         }
@@ -1847,6 +1852,8 @@ fn main() -> ! {
                     action = scanner.cancel();
                     checked(&mut log, app.acknowledge_scan_stopped(), 0xE032);
                 }
+                // Apply after the raw PTT and cancellation checks below.
+                Request::SkipScanTarget => {}
             }
         }
         if scanner.active()
@@ -1860,9 +1867,14 @@ fn main() -> ! {
             action = scanner.cancel();
             checked(&mut log, app.cancel_scan(), 0xE032);
             checked(&mut log, app.acknowledge_scan_stopped(), 0xE032);
+        } else if update.request == Some(Request::SkipScanTarget) && scanner.paused() {
+            let now = require(time.sample(DWT::cycle_count()), 0xE016);
+            action = scanner
+                .skip_current(now, app.status().view.channel)
+                .unwrap_or(scan::Action::Stop);
         }
         if action != scan::Action::None {
-            forced_retune = checked(&mut log, scan_action(&mut app, action), 0xE032);
+            forced_retune = checked(&mut log, scan_action(&mut app, &scanner, action), 0xE032);
             if !forced_retune && action != scan::Action::Stop {
                 scanner.cancel();
             }
@@ -2850,7 +2862,7 @@ fn main() -> ! {
             match scanner.tick(now, last_signal.is_some_and(|s| s.audio_open)) {
                 Ok(scan::Action::None) => {}
                 Ok(action) => {
-                    if checked(&mut log, scan_action(&mut app, action), 0xE032) {
+                    if checked(&mut log, scan_action(&mut app, &scanner, action), 0xE032) {
                         checked(&mut log, radio.stop(), 0xE057);
                         current = None;
                         last_signal = None;
@@ -2869,6 +2881,7 @@ fn main() -> ! {
                     );
                 }
             }
+            checked(&mut log, app.set_scan_paused(scanner.paused()), 0xE032);
         }
         checked(&mut log, radio.synchronize_indicators(), 0xE05C);
         let active_tx = if radio.tx_active_or_starting() {

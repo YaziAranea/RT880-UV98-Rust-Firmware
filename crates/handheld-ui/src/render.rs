@@ -1393,7 +1393,9 @@ fn battery(row: u16, out: &mut Row<'_>, millivolts: Option<u16>) {
 fn home_header(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     rect(row, out, 0, 0, WIDTH, 27, color::PANEL);
     match model.radio.state {
-        RadioState::Starting | RadioState::Receiving if model.view.dual_watch => {
+        RadioState::Starting | RadioState::Receiving
+            if model.view.dual_watch && model.view.scan != ScanState::Paused =>
+        {
             text(row, out, 12, 6, 1, "DUAL WATCH", color::ACCENT);
         }
         RadioState::Receiving if !model.view.locked => home_status(row, out, model),
@@ -2831,6 +2833,7 @@ fn home_status(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
         let label = match model.view.scan {
             ScanState::Requested => "\x1f119",
             ScanState::Running => "\x1f118",
+            ScanState::Paused => "\x1f175",
             ScanState::Stopping => "\x1f11A",
             ScanState::Stopped => "",
         };
@@ -3077,7 +3080,7 @@ fn current_setting_label(model: &Model<'_>, setting: Setting) -> &'static str {
             return match model.view.scan {
                 ScanState::Stopped => "\x1f0D2",
                 ScanState::Requested => "\x1f07B",
-                ScanState::Running => "\x1f11B",
+                ScanState::Running | ScanState::Paused => "\x1f11B",
                 ScanState::Stopping => "\x1f0D1",
             }
         }
@@ -5555,6 +5558,24 @@ mod tests {
         }
         for &action in &SHORTCUT_ACTIONS {
             assert!(text_width(shortcut_label(action), 2) <= WIDTH - 48);
+        }
+    }
+
+    #[test]
+    fn scan_skip_hint_changes_only_the_receiving_home_header() {
+        for language in [Language::Russian, Language::English, Language::German] {
+            assert!(localized_width("\x1f175", 1, language) <= 170);
+            for dual_watch in [false, true] {
+                let mut running = model(Screen::Home);
+                running.view.language = language;
+                running.view.dual_watch = dual_watch;
+                running.radio.state = RadioState::Receiving;
+                running.view.scan = ScanState::Running;
+                let mut paused = running;
+                paused.view.scan = ScanState::Paused;
+                assert_eq!(compare_incremental(running, paused), WIDTH * 27);
+                assert_eq!(compare_incremental(paused, running), WIDTH * 27);
+            }
         }
     }
 

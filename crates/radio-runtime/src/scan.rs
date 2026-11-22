@@ -2,6 +2,8 @@
 //! runtime state; channel catalog selection and RF policy remain outside here.
 //! Cancel stops this session. Only a new explicit start can begin another one.
 
+use uv98_handheld_ui::controller::CHANNEL_COUNT;
+
 pub const DWELL_MS: u32 = 150;
 pub const RESUME_MS: u32 = 500;
 pub const TUNE_TIMEOUT_MS: u32 = super::CONFIG_TIMEOUT_MS + super::RECEIVE_SETTLE_MS + 500;
@@ -66,6 +68,8 @@ pub struct Scheduler {
     counter: u64,
     last_now: Option<u32>,
     since: u32,
+    // Memory slot IDs or zero-based points in the current VFO grid.
+    skipped: [u8; CHANNEL_COUNT / 8],
 }
 
 impl Scheduler {
@@ -81,6 +85,7 @@ impl Scheduler {
             counter: 0,
             last_now: None,
             since: 0,
+            skipped: [0; CHANNEL_COUNT / 8],
         }
     }
     pub const fn status(&self) -> Status {
@@ -91,6 +96,14 @@ impl Scheduler {
             self.status.phase,
             Phase::AwaitingTune | Phase::Dwelling | Phase::Paused | Phase::Quiet
         )
+    }
+    pub const fn paused(&self) -> bool {
+        matches!(self.status.phase, Phase::Paused | Phase::Quiet)
+    }
+
+    /// Only used for a session scanning the memory catalog.
+    pub const fn skipped_channels(&self) -> &[u8; CHANNEL_COUNT / 8] {
+        &self.skipped
     }
 
     fn fail(&mut self, error: Error) -> Error {
@@ -118,17 +131,44 @@ impl Scheduler {
             return Err(self.fail(Error::Busy));
         }
         if let Target::Vfo { low, high, step } = target {
-            if low == 0 || low > high || step == 0 {
+            // The normal +/-500 kHz VFO window at the smallest step has
+            // at most 401 points. Bound the grid by the shared skip bitmap.
+            if low == 0 || low > high || step == 0 || (high - low) / step >= CHANNEL_COUNT as u32 {
                 return Err(self.fail(Error::InvalidRange));
             }
         }
         self.status.target = Some(target);
         self.status.frequency = None;
         self.status.error = None;
+        self.skipped.fill(0);
         self.issue(now)
     }
 
     fn issue(&mut self, now: u32) -> Result<Action, Error> {
+        let action = match self.status.target {
+            Some(Target::Channels) => Action::NextChannel,
+            Some(Target::Vfo { low, high, step }) => {
+                let points = (high - low) / step + 1;
+                let mut point = self
+                    .status
+                    .frequency
+                    .map_or(0, |current| ((current - low) / step + 1) % points);
+                let mut next = None;
+                for _ in 0..points {
+                    let index = point as usize;
+                    if self.skipped[index / 8] & (1 << (index % 8)) == 0 {
+                        next = Some(low + point * step);
+                        break;
+                    }
+                    point = (point + 1) % points;
+                }
+                let Some(next) = next else {
+                    return Ok(self.cancel());
+                };
+                Action::TuneFrequency(next)
+            }
+            None => return Err(self.fail(Error::InvalidRange)),
+        };
         let Some(counter) = self.counter.checked_add(1) else {
             return Err(self.fail(Error::TicketExhausted));
         };
@@ -136,18 +176,32 @@ impl Scheduler {
         self.status.ticket = Some(Ticket(counter));
         self.status.phase = Phase::AwaitingTune;
         self.since = now;
-        match self.status.target {
-            Some(Target::Channels) => Ok(Action::NextChannel),
-            Some(Target::Vfo { low, high, step }) => {
-                let next = match self.status.frequency {
-                    Some(current) if step <= high - current => current + step,
-                    _ => low,
-                };
-                self.status.frequency = Some(next);
-                Ok(Action::TuneFrequency(next))
-            }
-            None => Err(self.fail(Error::InvalidRange)),
+        if let Action::TuneFrequency(next) = action {
+            self.status.frequency = Some(next);
         }
+        Ok(action)
+    }
+
+    /// Exclude the signal's current point or selected memory slot and advance
+    /// immediately, including during the quiet delay after the signal closes.
+    pub fn skip_current(&mut self, now: u32, channel: Option<u16>) -> Result<Action, Error> {
+        if !self.paused() {
+            return Ok(Action::None);
+        }
+        let index = match self.status.target {
+            Some(Target::Channels) => channel.map(usize::from),
+            Some(Target::Vfo { low, step, .. }) => self
+                .status
+                .frequency
+                .map(|frequency| ((frequency - low) / step) as usize),
+            None => None,
+        };
+        let Some(index) = index.filter(|&index| index < CHANNEL_COUNT) else {
+            return Ok(Action::None);
+        };
+        self.advance(now)?;
+        self.skipped[index / 8] |= 1 << (index % 8);
+        self.issue(now)
     }
 
     /// Acknowledge only the current request and actual runtime Receiving state.
@@ -281,6 +335,64 @@ mod tests {
     }
 
     #[test]
+    fn memory_skip_advances_only_from_signal_pause_and_expires_on_restart() {
+        let mut scan = Scheduler::new();
+        scan.start(Target::Channels, 0).unwrap();
+        let ticket = scan.status().ticket;
+        assert_eq!(scan.skip_current(1, Some(1023)), Ok(Action::None));
+        assert_eq!(scan.status().ticket, ticket);
+        ack(&mut scan, 2);
+        assert_eq!(scan.skip_current(3, Some(1023)), Ok(Action::None));
+        scan.tick(4, true).unwrap();
+        assert!(scan.paused());
+        assert_eq!(scan.skip_current(5, None), Ok(Action::None));
+        assert_eq!(scan.skip_current(5, Some(1024)), Ok(Action::None));
+        assert_eq!(scan.skip_current(5, Some(1023)), Ok(Action::NextChannel));
+        assert!(!scan.paused());
+        assert_ne!(scan.status().ticket, ticket);
+        assert_eq!(scan.skipped_channels()[127], 0x80);
+        assert_eq!(scan.tick(6, true), Ok(Action::None));
+
+        scan.cancel();
+        assert_eq!(scan.skip_current(7, Some(0)), Ok(Action::None));
+        scan.start(Target::Channels, 8).unwrap();
+        assert_eq!(scan.skipped_channels(), &[0; 128]);
+    }
+
+    #[test]
+    fn vfo_skip_advances_during_quiet_wraps_and_stops_when_exhausted() {
+        let mut scan = Scheduler::new();
+        let target = Target::Vfo {
+            low: 10,
+            high: 23,
+            step: 6,
+        };
+        assert_eq!(scan.start(target, 0), Ok(Action::TuneFrequency(10)));
+        ack(&mut scan, 1);
+        scan.tick(2, true).unwrap();
+        scan.tick(3, false).unwrap();
+        assert!(scan.paused());
+        assert_eq!(scan.skip_current(4, None), Ok(Action::TuneFrequency(16)));
+        ack(&mut scan, 5);
+        assert_eq!(
+            scan.tick(5 + DWELL_MS, false),
+            Ok(Action::TuneFrequency(22))
+        );
+        ack(&mut scan, 156);
+        assert_eq!(scan.tick(306, false), Ok(Action::TuneFrequency(16)));
+        ack(&mut scan, 307);
+        scan.tick(308, true).unwrap();
+        assert_eq!(scan.skip_current(309, None), Ok(Action::TuneFrequency(22)));
+        ack(&mut scan, 310);
+        scan.tick(311, true).unwrap();
+        assert_eq!(scan.skip_current(312, None), Ok(Action::Stop));
+        assert_eq!(scan.status().frequency, Some(22));
+        assert!(!scan.active());
+        assert_eq!(scan.tick(313, true), Ok(Action::None));
+        assert_eq!(scan.start(target, 314), Ok(Action::TuneFrequency(10)));
+    }
+
+    #[test]
     fn vfo_bounds_nondivisible_span_and_no_catchup() {
         let mut scan = Scheduler::new();
         let low = u32::MAX - 10;
@@ -381,6 +493,11 @@ mod tests {
                 low: 1,
                 high: 2,
                 step: 0,
+            },
+            Target::Vfo {
+                low: 1,
+                high: CHANNEL_COUNT as u32 + 1,
+                step: 1,
             },
         ] {
             let mut scan = Scheduler::new();

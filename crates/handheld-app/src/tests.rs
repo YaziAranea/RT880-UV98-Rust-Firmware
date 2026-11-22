@@ -523,6 +523,66 @@ fn zone_refresh_failure_hides_all_storage_views_and_cannot_leave_stale_selection
 }
 
 #[test]
+fn scan_skip_keeps_zone_order_wraps_and_leaves_nor_intact() {
+    use uv98_radio_runtime::{scan, State as RadioState};
+
+    let mut memory = Memory::new();
+    add_channel(&mut memory, 2, 43_350_000);
+    add_channel(&mut memory, 20, 43_400_000);
+    add_zone(&mut memory, 0, b"Local", &[20, 0, 2]);
+    let original = memory.bytes.clone();
+    let mut app = app(memory, PRESERVED_CALIBRATION_SHA256);
+    app.start(0).unwrap();
+    menu(&mut app, controller::MenuItem::Zones);
+    event(&mut app, InputEvent::Short(Key::Down));
+    event(&mut app, InputEvent::Short(Key::Menu));
+    assert_eq!(app.status.view.channel, Some(20));
+
+    let start = event(&mut app, InputEvent::Hold(Key::Digit3));
+    assert_eq!(start.request, Some(Request::StartScan));
+    let mut scanner = scan::Scheduler::new();
+    assert_eq!(
+        scanner.start(scan::Target::Channels, 0),
+        Ok(scan::Action::NextChannel)
+    );
+    let mut now = 1;
+    for (selected, next) in [(0, Some(2)), (2, Some(20)), (20, None)] {
+        assert_eq!(
+            app.next_scan_channel(scanner.skipped_channels()),
+            Some(selected)
+        );
+        app.select_scan_channel(selected).unwrap();
+        let ticket = scanner.status().ticket.unwrap();
+        assert_eq!(
+            scanner.tune_ack(ticket, now, RadioState::Receiving),
+            Ok(true)
+        );
+        app.acknowledge_scan_started().unwrap();
+        scanner.tick(now + 1, true).unwrap();
+        app.set_scan_paused(scanner.paused()).unwrap();
+        let skip = event(&mut app, InputEvent::Short(Key::Star));
+        assert_eq!(skip.request, Some(Request::SkipScanTarget));
+        assert!(!skip.ptt_tx_requested);
+        assert_eq!(
+            scanner.skip_current(now + 2, app.status.view.channel),
+            Ok(scan::Action::NextChannel)
+        );
+        assert_eq!(app.next_scan_channel(scanner.skipped_channels()), next);
+        app.set_scan_paused(scanner.paused()).unwrap();
+        now += 3;
+    }
+    scanner.cancel();
+    app.acknowledge_scan_stopped().unwrap();
+    assert_eq!(app.status.view.channel, Some(20));
+    assert_eq!(app.next_catalog_index(Some(20), true), Some(0));
+    scanner.start(scan::Target::Channels, now).unwrap();
+    assert_eq!(app.next_scan_channel(scanner.skipped_channels()), Some(0));
+    let (memory, _) = app.into_parts();
+    assert_eq!(memory.bytes, original);
+    assert!(memory.commands.iter().all(|command| *command == 3));
+}
+
+#[test]
 fn a_b_switch_reload_zones_and_peer_frequency_without_mixing_contexts() {
     let mut memory = Memory::new();
     add_channel(&mut memory, 2, 43_350_000);
@@ -575,8 +635,19 @@ fn pending_render_does_not_block_input_and_scan_ptt_requires_new_edge() {
     assert!(app.render_pending());
     assert_eq!(app.render_step(4).unwrap().rows, 4);
     assert!(app.acknowledge_scan_started().unwrap());
+    app.set_scan_paused(true).unwrap();
     app.sample(800, release).unwrap();
     assert_eq!(app.sample(830, release).unwrap().request, None);
+    let star = InputSample::Stable {
+        matrix: 0x0008,
+        ptt_pressed: false,
+    };
+    app.sample(835, star).unwrap();
+    assert_eq!(app.sample(865, star).unwrap().request, None);
+    app.sample(867, release).unwrap();
+    let skip = app.sample(897, release).unwrap();
+    assert_eq!(skip.request, Some(Request::SkipScanTarget));
+    assert!(!skip.ptt_tx_requested);
     let lower = InputSample::WithAux {
         matrix: 0,
         ptt_pressed: false,

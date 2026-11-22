@@ -771,6 +771,16 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         self.controller
             .ordered_channel(&self.bitmap, current, forward)
     }
+    /// Apply RAM-only exclusions for one scan without changing the catalog or
+    /// its zone order. The ordinary bounded channel traversal can wrap once.
+    pub fn next_scan_channel(&self, skipped: &[u8; 128]) -> Option<u16> {
+        if self.status.state != State::Ready {
+            return None;
+        }
+        let eligible = core::array::from_fn(|index| self.bitmap[index] & !skipped[index]);
+        self.controller
+            .ordered_channel(&eligible, self.status.view.channel, true)
+    }
     pub fn set_radio_view(&mut self, radio: RadioView) -> Result<(), Error<N::Error, L::Error>> {
         if self.status.state != State::Ready {
             return Err(Error::State);
@@ -861,6 +871,15 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         }
         self.controller.acknowledge_scan_stopped();
         self.redraw_ready()
+    }
+    pub fn set_scan_paused(&mut self, paused: bool) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.state != State::Ready {
+            return Err(Error::State);
+        }
+        if self.controller.set_scan_paused(paused) {
+            self.redraw_ready()?;
+        }
+        Ok(())
     }
     pub fn reject_radio_request(
         &mut self,

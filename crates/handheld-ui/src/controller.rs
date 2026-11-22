@@ -443,7 +443,14 @@ pub enum ScanState {
     Stopped,
     Requested,
     Running,
+    Paused,
     Stopping,
+}
+
+impl ScanState {
+    fn accepts_cursor(self) -> bool {
+        matches!(self, Self::Requested | Self::Running | Self::Paused)
+    }
 }
 
 /// An outer runtime must explicitly accept, execute and report these requests.
@@ -455,6 +462,7 @@ pub enum Request {
     ToggleMonitor,
     StartScan,
     StopScan,
+    SkipScanTarget,
     CycleModulation,
     SetPower(u8),
     SetMonitor(bool),
@@ -1147,10 +1155,7 @@ impl Controller {
             }
             Setting::Reverse => u8::from(self.view.reverse),
             Setting::ActiveSlot => u8::from(self.view.active_slot == Slot::B),
-            Setting::Scan => u8::from(matches!(
-                self.view.scan,
-                ScanState::Requested | ScanState::Running
-            )),
+            Setting::Scan => u8::from(self.view.scan.accepts_cursor()),
             Setting::DisplayLight => LIGHT_MODES
                 .iter()
                 .position(|mode| *mode == self.view.display_light)
@@ -1263,9 +1268,7 @@ impl Controller {
             }
             Setting::ActiveSlot => self.switch_slot(if selected == 0 { Slot::A } else { Slot::B }),
             Setting::Scan => {
-                if selected == 0
-                    && matches!(self.view.scan, ScanState::Requested | ScanState::Running)
-                {
+                if selected == 0 && self.view.scan.accepts_cursor() {
                     self.request_scan_stop();
                 } else if selected != 0 && self.view.scan == ScanState::Stopped {
                     self.toggle_scan(bitmap);
@@ -1477,7 +1480,7 @@ impl Controller {
         let before = self.view;
         self.ptt_tx_requested = false;
         if self.view.mode == Mode::Channel
-            && matches!(self.view.scan, ScanState::Requested | ScanState::Running)
+            && self.view.scan.accepts_cursor()
             && channel_active(bitmap, index)
             && (self.view.zone.is_none() || self.channel_order().contains(&index))
         {
@@ -1495,7 +1498,7 @@ impl Controller {
         self.ptt_tx_requested = false;
         if self.view.mode == Mode::Vfo
             && self.selected_cb().is_none()
-            && matches!(self.view.scan, ScanState::Requested | ScanState::Running)
+            && self.view.scan.accepts_cursor()
             && valid_frequency(frequency_10hz)
         {
             self.view.vfo_10hz = frequency_10hz;
@@ -1677,6 +1680,16 @@ impl Controller {
 
     pub fn acknowledge_scan_stopped(&mut self) {
         self.view.scan = ScanState::Stopped;
+    }
+
+    /// Reflect an acknowledged RF pause without reviving a cancelled scan.
+    pub fn set_scan_paused(&mut self, paused: bool) -> bool {
+        self.view.scan = match (self.view.scan, paused) {
+            (ScanState::Running, true) => ScanState::Paused,
+            (ScanState::Paused, false) => ScanState::Running,
+            _ => return false,
+        };
+        true
     }
 
     /// A failed stop does not falsely claim that an active scan has stopped.
@@ -2291,6 +2304,11 @@ impl Controller {
             InputEvent::Short(Key::Down) => self.navigate(true, bitmap),
             InputEvent::Short(Key::Menu) => self.confirm(bitmap),
             InputEvent::Short(Key::Exit) => self.back(),
+            InputEvent::Short(Key::Star)
+                if self.view.screen == Screen::Home && self.view.scan == ScanState::Paused =>
+            {
+                self.queue_request(Request::SkipScanTarget);
+            }
             InputEvent::Short(Key::Star) if self.view.screen != Screen::Keys => {
                 self.view.entry = None;
                 self.toggle_mode(bitmap);
@@ -4451,10 +4469,12 @@ mod tests {
         let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
         ui.handle(InputEvent::Hold(Key::Digit3), &bitmap);
         ui.acknowledge_scan_started();
+        assert!(ui.set_scan_paused(true));
         let change = ui.handle(InputEvent::Ptt(true), &bitmap);
         assert_eq!(change.request, Some(Request::StopScan));
         assert!(!change.ptt_tx_requested);
         assert_eq!(ui.view.ptt_slot, None);
+        assert!(!ui.set_scan_paused(true));
         ui.acknowledge_scan_stopped();
         assert!(!ui.handle(InputEvent::Ptt(true), &bitmap).ptt_tx_requested);
         ui.handle(InputEvent::Ptt(false), &bitmap);
@@ -4465,6 +4485,31 @@ mod tests {
         assert!(!ui.handle(InputEvent::Ptt(true), &bitmap).ptt_tx_requested);
         ui.handle(InputEvent::Ptt(false), &bitmap);
         assert_eq!(ui.view.ptt_slot, None);
+    }
+
+    #[test]
+    fn short_star_requests_scan_skip_only_on_paused_home_screen() {
+        let bitmap = catalog(&[0, 2]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        ui.handle(InputEvent::Hold(Key::Digit3), &bitmap);
+        assert!(!ui.set_scan_paused(true));
+        assert!(ui.acknowledge_scan_started());
+        assert!(ui.set_scan_paused(true));
+        let a = ui.context(Slot::A);
+        let b = ui.context(Slot::B);
+        let change = press(&mut ui, Key::Star, &bitmap);
+        assert_eq!(change.request, Some(Request::SkipScanTarget));
+        assert!(!change.ptt_tx_requested);
+        assert!(!change.slot_changed);
+        assert_eq!(ui.view.scan, ScanState::Paused);
+        assert_eq!(ui.context(Slot::A), a);
+        assert_eq!(ui.context(Slot::B), b);
+        assert!(ui.set_scan_paused(false));
+        assert_eq!(
+            press(&mut ui, Key::Star, &bitmap).request,
+            Some(Request::StopScan)
+        );
+        assert_ne!(ui.view.mode, a.mode);
     }
 
     #[test]
