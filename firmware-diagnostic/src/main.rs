@@ -146,6 +146,8 @@ fn status(code: u32) {
     unsafe { core::ptr::write_volatile(core::ptr::addr_of_mut!(UV98_DIAG_STATUS), code) };
 }
 
+#[cold]
+#[inline(never)]
 fn stop(code: u32) -> ! {
     status(code);
     // SAFETY: all live owners are abandoned; this path never resumes them.
@@ -178,22 +180,35 @@ fn event(log: &mut impl Events, code: u32, details: [u32; 3]) {
 fn checked<T, E: Debug>(log: &mut impl Events, result: Result<T, E>, fault: u32) -> T {
     match result {
         Ok(value) => value,
-        Err(_error) => {
-            // SAFETY: terminal takeover; owned peripherals never resume.
-            let _ = unsafe { startup::terminal_radio_off_requests() };
+        Err(_error) => checked_fault(
+            log,
+            fault,
             #[cfg(feature = "verbose-faults")]
-            {
-                let text = ErrorText::format(&_error);
-                event(log, fault, text.metadata());
-                for frame in text.frames() {
-                    log.record(frame);
-                }
-            }
-            #[cfg(not(feature = "verbose-faults"))]
-            event(log, fault, [0; 3]);
-            unsafe { startup::terminal_fail_stop() }
+            &_error,
+        ),
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn checked_fault(
+    log: &mut impl Events,
+    fault: u32,
+    #[cfg(feature = "verbose-faults")] error: &impl Debug,
+) -> ! {
+    // SAFETY: terminal takeover; owned peripherals never resume.
+    let _ = unsafe { startup::terminal_radio_off_requests() };
+    #[cfg(feature = "verbose-faults")]
+    {
+        let text = ErrorText::format(error);
+        event(log, fault, text.metadata());
+        for frame in text.frames() {
+            log.record(frame);
         }
     }
+    #[cfg(not(feature = "verbose-faults"))]
+    event(log, fault, [0; 3]);
+    unsafe { startup::terminal_fail_stop() }
 }
 
 fn require<T, E>(result: Result<T, E>, fault: u32) -> T {
