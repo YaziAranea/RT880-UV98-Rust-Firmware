@@ -103,7 +103,11 @@ impl<R: Registers, T: ScanTiming> Engine<R, T> {
         match self.observe_guard() {
             Ok(guard) => self.scan_after_guard(guard),
             Err((error, true)) if analog_still_idle() => {
-                let sample = self.scan_idle_or_full()?;
+                let guard = self.guard_scan()?;
+                if !guard.ptt_pressed() || !guard.matrix_clear() {
+                    return Err(error);
+                }
+                let sample = self.scan()?;
                 if sample.ptt_pressed() && sample.matrix_raw() == 0 {
                     Ok(sample)
                 } else {

@@ -18,6 +18,7 @@ struct Fake {
     selected: Option<usize>,
     selections: usize,
     idle_rows: u8,
+    guard_rows: VecDeque<u8>,
     ptt: bool,
     ptt_values: VecDeque<bool>,
     events: Rc<RefCell<Vec<Event>>>,
@@ -51,7 +52,9 @@ impl Registers for Fake {
     fn rows_high(&mut self) -> u8 {
         let rows = if self.selected == Some(4) {
             let matrix = self.matrices[0];
-            (!(matrix | (matrix >> 4) | (matrix >> 8) | (matrix >> 12)) & 15) as u8
+            self.guard_rows
+                .pop_front()
+                .unwrap_or((!(matrix | (matrix >> 4) | (matrix >> 8) | (matrix >> 12)) & 15) as u8)
         } else if let Some(col) = self.selected {
             (!(self.matrices[(self.selections - 1) / 4] >> (4 * col)) & 15) as u8
         } else {
@@ -329,6 +332,15 @@ fn ptt_recheck_preserves_observed_chords_and_rejects_analog_activity() {
     scan.registers.ptt_values = [true, false, false].into_iter().collect();
     assert_eq!(scan.scan_with_ptt_recheck(|| true), Err(Error::UnstablePtt));
     assert_eq!(scan.registers.selections, 0);
+
+    // A matrix contact seen on the second guard cannot be erased by a
+    // later clear full scan. The accepted gesture must be isolated.
+    let mut scan = scanner(0, 0, false);
+    scan.registers.ptt_values = [true, false, false].into_iter().collect();
+    scan.registers.guard_rows = [15, 14].into_iter().collect();
+    assert_eq!(scan.scan_with_ptt_recheck(|| true), Err(Error::UnstablePtt));
+    assert_eq!(scan.registers.selections, 0);
+    assert!(scan.registers.selected.is_none());
 }
 
 fn scanner(first: u16, second: u16, ptt: bool) -> Engine<Fake, Timer> {
@@ -339,6 +351,7 @@ fn scanner(first: u16, second: u16, ptt: bool) -> Engine<Fake, Timer> {
             selected: None,
             selections: 0,
             idle_rows: 15,
+            guard_rows: VecDeque::new(),
             ptt,
             ptt_values: VecDeque::new(),
             events: log.clone(),
