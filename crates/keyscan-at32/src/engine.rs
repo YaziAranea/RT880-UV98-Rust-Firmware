@@ -144,7 +144,7 @@ impl<R: Registers, T: ScanTiming> Engine<R, T> {
         if ptt_high != ptt_selected || ptt_high != ptt_released {
             // Only an isolated new press qualifies for a fresh observation.
             // A chord, release, or change back must propagate the error.
-            let isolated_press = low_rows == 0 && ptt_high && !ptt_selected && !ptt_released;
+            let isolated_press = low_rows == 0 && ptt_high && !ptt_released;
             return Err((Error::UnstablePtt, isolated_press));
         }
         Ok(GuardScan {

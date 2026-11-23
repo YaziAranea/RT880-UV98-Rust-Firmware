@@ -1210,12 +1210,12 @@ fn dtmf_memory_page(row: u16, out: &mut Row<'_>, view: &View) {
 
 /// One user-visible build identity for the header and the About page.
 #[cfg(not(feature = "pa5-audio"))]
-pub const VERSION: &str = "0.1.8-r53";
+pub const VERSION: &str = "0.1.8-r54";
 #[cfg(feature = "pa5-audio")]
 pub const VERSION: &str = "R42-PA5";
 /// Header has a fixed 42 px slot; About shows the full string.
 #[cfg(not(feature = "pa5-audio"))]
-pub const VERSION_SHORT: &str = "R53";
+pub const VERSION_SHORT: &str = "R54";
 #[cfg(feature = "pa5-audio")]
 pub const VERSION_SHORT: &str = "PA5";
 
@@ -3351,6 +3351,7 @@ mod tests {
             aprs_auto_available: false,
             aprs_auto_armed: false,
             aprs_rx_available: false,
+            aprs_rx_stats: Default::default(),
             aprs_rx_packet: crate::controller::AprsPacket::EMPTY,
             aprs_rx_count: 0,
             aprs_rx_index: 0,
@@ -3361,6 +3362,7 @@ mod tests {
             shortwave_scope_points: 8,
             shortwave_filter: 1,
             shortwave_soft_mute: false,
+            shortwave_high_pass: false,
             screen,
             mode: Mode::Channel,
             channel: Some(0),

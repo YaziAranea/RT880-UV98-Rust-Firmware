@@ -209,6 +209,7 @@ mod tests {
         let mut processing = Processing {
             filter: crate::shortwave::AmFilter::Wide6k,
             soft_mute: false,
+            high_pass: false,
         };
         sweep.set_processing(processing);
         let window = Some(Window::around(tune, 8));

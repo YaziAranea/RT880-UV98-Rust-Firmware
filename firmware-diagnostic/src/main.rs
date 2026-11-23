@@ -248,6 +248,11 @@ fn service_aprs_rx<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
     if let Some(packet) = receiver.service(beacon.idle_modem(), now, open, frequency) {
         app.push_aprs_packet(packet.source(), packet.information())?;
     }
+    if open {
+        if let Some(stats) = receiver.stats_due(now) {
+            app.set_aprs_rx_stats(stats)?;
+        }
+    }
     if was_listening != receiver.listening() {
         app.set_aprs_rx_available(receiver.listening())?;
     }
@@ -1018,10 +1023,7 @@ fn main() -> ! {
         let loop_started = DWT::cycle_count();
         feed();
         let mut adc = checked(&mut log, side.sample(), 0xE055);
-        let key_sample = if radio.state() == RfState::Receiving
-            && !reply_window.active()
-            && ptt::side_idle(adc.raw)
-        {
+        let key_sample = if radio.rx_active_or_starting() && ptt::side_idle(adc.raw) {
             keys.scan_with_ptt_recheck(|| {
                 adc = checked(&mut log, side.sample(), 0xE055);
                 ptt::side_idle(adc.raw)
@@ -2451,6 +2453,7 @@ fn main() -> ! {
                 _ => shortwave::AmFilter::Wide6k,
             },
             soft_mute: tuner_view.shortwave_soft_mute,
+            high_pass: tuner_view.shortwave_high_pass,
         };
         tuner_sweep.set_processing(tuner_processing);
         let scope_window = uv98_radio_runtime::shortwave_scope::Window::around(

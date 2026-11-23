@@ -31,9 +31,10 @@ pub enum AmFilter {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Processing {
     pub filter: AmFilter,
-    /// Enables the tuner's 100 Hz high-pass line-noise filter and at most
-    /// 8 dB of SNR-controlled soft mute. This is not broadband NR or an NB.
+    /// Up to 8 dB of SNR-controlled soft mute.
     pub soft_mute: bool,
+    /// The tuner's 100 Hz high-pass line-noise filter.
+    pub high_pass: bool,
 }
 
 impl Processing {
@@ -43,7 +44,7 @@ impl Processing {
             AmFilter::Voice3k => 2,
             AmFilter::Narrow1k => 4,
         };
-        bandwidth | if self.soft_mute { 0x0100 } else { 0 }
+        bandwidth | if self.high_pass { 0x0100 } else { 0 }
     }
 
     fn attenuation_property(self) -> u16 {
@@ -565,6 +566,17 @@ mod tests {
     }
 
     #[test]
+    fn high_pass_bit_and_soft_mute_attenuation_are_independent() {
+        for high_pass in [false, true] {
+            for soft_mute in [false, true] {
+                let settings = Processing { filter: AmFilter::Voice3k, high_pass, soft_mute };
+                assert_eq!(settings.filter_property(), if high_pass { 0x102 } else { 2 });
+                assert_eq!(settings.attenuation_property(), if soft_mute { 8 } else { 0 });
+            }
+        }
+    }
+
+    #[test]
     fn am_processing_is_bounded_and_bypassed_for_ssb() {
         let tuning = am(6070);
         let mut session = Session::new(0);
@@ -574,6 +586,7 @@ mod tests {
             Processing {
                 filter: AmFilter::Voice3k,
                 soft_mute: true,
+                high_pass: true,
             },
             false,
         );
@@ -602,6 +615,7 @@ mod tests {
             Processing {
                 filter: AmFilter::Narrow1k,
                 soft_mute: true,
+                high_pass: true,
             },
             false,
         );
@@ -639,6 +653,7 @@ mod tests {
             Processing {
                 filter: AmFilter::Narrow1k,
                 soft_mute: true,
+                high_pass: true,
             },
             true,
         );
@@ -685,6 +700,7 @@ mod tests {
             Processing {
                 filter: AmFilter::Wide6k,
                 soft_mute: false,
+                high_pass: false,
             },
             true,
         );
@@ -696,6 +712,7 @@ mod tests {
             Processing {
                 filter: AmFilter::Narrow1k,
                 soft_mute: false,
+                high_pass: false,
             },
             true,
         );
@@ -726,6 +743,7 @@ mod tests {
                 Processing {
                     filter: AmFilter::Narrow1k,
                     soft_mute: false,
+                    high_pass: false,
                 },
                 true,
             );
@@ -877,6 +895,7 @@ mod tests {
                 Processing {
                     filter: AmFilter::Narrow1k,
                     soft_mute: false,
+                    high_pass: false,
                 },
                 true,
             );

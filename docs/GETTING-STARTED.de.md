@@ -126,7 +126,7 @@ Ein AM-Empfänger kann das versetzte FM-Signal an der Flanke seines Filters demo
 
 ### Kurzwellen-AM
 
-Mit langem Druck auf `1` zwischen den Filtern mit 6, 3 und 1 kHz wechseln. Mit langem Druck auf `2` Soft Mute umschalten. Beim normalen Hören bleibt dabei die aktuelle Si4732-Frequenz erhalten.
+Mit langem Druck auf `1` zwischen den Filtern mit 6, 3 und 1 kHz wechseln. Mit langem Druck auf `2` Soft Mute umschalten. Ab R54 schaltet langes Drücken von `3` in AM den 100-Hz-Hochpass unabhängig davon. Beim normalen Hören bleibt dabei die aktuelle Si4732-Frequenz erhalten.
 
 ### DTMF-Empfang
 

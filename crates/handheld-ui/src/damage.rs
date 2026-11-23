@@ -345,6 +345,9 @@ fn controller_damage(model: &Model<'_>, previous: Option<&View>) -> DirtyRanges 
             }
         }
         Screen::AprsRx => {
+            if old.aprs_rx_stats != new.aprs_rx_stats {
+                dirty.push(270, 289);
+            }
             if old.aprs_rx_available != new.aprs_rx_available {
                 dirty.push(69, 83);
             }
@@ -415,6 +418,7 @@ fn controller_damage(model: &Model<'_>, previous: Option<&View>) -> DirtyRanges 
             }
             if old.shortwave_filter != new.shortwave_filter
                 || old.shortwave_soft_mute != new.shortwave_soft_mute
+                || old.shortwave_high_pass != new.shortwave_high_pass
             {
                 dirty.push(234, 296);
             }

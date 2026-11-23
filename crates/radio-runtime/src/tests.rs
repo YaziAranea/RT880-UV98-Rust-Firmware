@@ -229,8 +229,11 @@ fn rx_tone_search_arms_the_detector_with_tx_off_and_restores_the_rx_tone() {
         tone_search::Observation::Tone(0x2013)
     );
     radio.stop().unwrap();
+    assert!(!radio.rx_active_or_starting());
     radio.receive(&cal(), request, now).unwrap();
+    assert!(radio.rx_active_or_starting());
     pump(&mut radio, &mut now, false);
+    assert!(radio.rx_active_or_starting());
     assert_eq!(radio.io.words[0x51], 0x9041);
     assert_eq!(radio.io.words[0x07], (0x455 * 413 / 200) as u16);
     assert!(matches!(

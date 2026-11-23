@@ -271,7 +271,7 @@ pub struct App<N, L, D> {
     spectrum: Option<SpectrumSnapshot>,
     waterfall: render::Waterfall,
     shortwave_scope: render::ShortwaveScope,
-    shortwave_scope_selection: Option<(controller::ShortwaveMode, u16, i16, u8, bool, u8)>,
+    shortwave_scope_selection: Option<(controller::ShortwaveMode, u16, i16, u8, bool, bool, u8)>,
     last_spectrum: Option<SpectrumSnapshot>,
     /// Physical lower side-key input identification, independent of its
     /// editable assignment. False until the board traces a real source.
@@ -567,6 +567,20 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         Ok(())
     }
 
+    pub fn set_aprs_rx_stats(
+        &mut self,
+        stats: uv98_handheld_ui::controller::AprsRxStats,
+    ) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.view.aprs_rx_stats != stats {
+            self.controller.set_aprs_rx_stats(stats);
+            self.status.view = self.controller.view();
+            if self.status.view.screen == Screen::AprsRx {
+                self.redraw_ready()?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn set_aprs_rx_available(
         &mut self,
         available: bool,
@@ -616,6 +630,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             view.shortwave_bfo,
             view.shortwave_filter,
             view.shortwave_soft_mute,
+            view.shortwave_high_pass,
             points,
         );
         let reset = self.shortwave_scope.first_hz != first_hz
@@ -1788,6 +1803,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             view.shortwave_bfo,
             view.shortwave_filter,
             view.shortwave_soft_mute,
+            view.shortwave_high_pass,
             view.shortwave_scope_points,
         );
         if self

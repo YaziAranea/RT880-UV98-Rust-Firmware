@@ -882,6 +882,15 @@ pub enum MdcDraft {
     UnitId(Editor<4>),
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AprsRxStats {
+    pub bytes: u32,
+    pub packets: u16,
+    pub checksum_errors: u16,
+    pub poll_gaps: u16,
+    pub overruns: u16,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct View {
     #[cfg(any(test, feature = "locale-all", feature = "renderer-tests"))]
@@ -907,6 +916,7 @@ pub struct View {
     /// Explicit operator opt-in, scoped to the APRS beacon page.
     pub aprs_auto_armed: bool,
     pub aprs_rx_available: bool,
+    pub aprs_rx_stats: AprsRxStats,
     pub aprs_rx_packet: AprsPacket,
     pub aprs_rx_count: u8,
     pub aprs_rx_index: u8,
@@ -917,6 +927,7 @@ pub struct View {
     pub shortwave_scope_points: u8,
     pub shortwave_filter: u8,
     pub shortwave_soft_mute: bool,
+    pub shortwave_high_pass: bool,
     pub shortwave_khz: u32,
     pub shortwave_fraction_hz: u16,
     pub shortwave_step: u8,
@@ -1183,6 +1194,7 @@ impl Controller {
                 aprs_auto_available: false,
                 aprs_auto_armed: false,
                 aprs_rx_available: false,
+                aprs_rx_stats: AprsRxStats::default(),
                 aprs_rx_packet: AprsPacket::EMPTY,
                 aprs_rx_count: 0,
                 aprs_rx_index: 0,
@@ -1193,6 +1205,7 @@ impl Controller {
                 shortwave_scope_points: 8,
                 shortwave_filter: 1,
                 shortwave_soft_mute: false,
+                shortwave_high_pass: false,
                 screen: Screen::Home,
                 mode: if channel.is_some() {
                     Mode::Channel
@@ -2324,6 +2337,10 @@ impl Controller {
         self.view.aprs_auto_available = available;
     }
 
+    pub fn set_aprs_rx_stats(&mut self, stats: AprsRxStats) {
+        self.view.aprs_rx_stats = stats;
+    }
+
     pub fn set_aprs_rx_available(&mut self, available: bool) {
         self.view.aprs_rx_available = available;
     }
@@ -2472,6 +2489,12 @@ impl Controller {
                     && self.view.shortwave_mode == ShortwaveMode::Am =>
             {
                 self.view.shortwave_soft_mute = !self.view.shortwave_soft_mute;
+            }
+            InputEvent::Hold(Key::Digit3)
+                if self.view.shortwave_entry.is_none()
+                    && self.view.shortwave_mode == ShortwaveMode::Am =>
+            {
+                self.view.shortwave_high_pass = !self.view.shortwave_high_pass;
             }
             InputEvent::Short(Key::Exit) if self.view.shortwave_entry.is_some() => {
                 self.view.shortwave_entry = None;
@@ -4050,6 +4073,21 @@ mod tests {
             ui.handle(InputEvent::Short(Key::Aux17), &bitmap).request,
             None
         );
+    }
+
+    #[test]
+    fn shortwave_am_soft_mute_and_high_pass_are_independent() {
+        let bitmap = [0; 128];
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        ui.view.screen = Screen::Shortwave;
+        ui.view.shortwave_mode = ShortwaveMode::Am;
+        for (key, soft_mute, high_pass) in [
+            (Key::Digit3, false, true), (Key::Digit2, true, true),
+            (Key::Digit3, true, false), (Key::Digit2, false, false),
+        ] {
+            ui.handle(InputEvent::Hold(key), &bitmap);
+            assert_eq!((ui.view.shortwave_soft_mute, ui.view.shortwave_high_pass), (soft_mute, high_pass));
+        }
     }
 
     #[test]

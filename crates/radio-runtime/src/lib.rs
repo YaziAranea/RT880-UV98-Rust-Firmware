@@ -265,6 +265,11 @@ impl<I: Io> Runtime<I> {
             status01: self.read(0x01)?,
         })
     }
+    /// A new upper PTT can be rechecked while the voice receiver is tuning.
+    pub fn rx_active_or_starting(&self) -> bool {
+        self.state == State::Receiving
+            || (self.state == State::Configuring && self.target == Target::Receive)
+    }
     pub fn tx_active_or_starting(&self) -> bool {
         self.state == State::Transmitting
             || (self.state == State::Configuring && self.target == Target::Transmit)

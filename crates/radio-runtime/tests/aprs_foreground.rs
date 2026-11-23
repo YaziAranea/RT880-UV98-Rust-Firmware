@@ -108,6 +108,7 @@ fn modem_to_packet_recovers_from_overrun_retune_and_screen_exit() {
     let bytes = wire.as_bytes();
     let split = bytes.len() - 10;
     let mut station = Station::new();
+    assert!(station.rx.stats_due(1).is_none());
     assert!(!station.rx.needs_audio());
     station.step(true, Some(FREQ));
     assert!(station.rx.needs_audio());
@@ -130,7 +131,25 @@ fn modem_to_packet_recovers_from_overrun_retune_and_screen_exit() {
     assert!(!station.rx.needs_audio());
     station.listen(FREQ);
     assert!(station.feed(FREQ, &bytes[split..]).is_empty());
+    let mut damaged = config.position(0, 0).unwrap();
+    damaged.bytes[16] ^= 1; // Keep the original FCS, encode a clean HDLC envelope.
+    assert!(station
+        .feed(FREQ, Wire::encode(&damaged).unwrap().as_bytes())
+        .is_empty());
     let packets = station.feed(FREQ, bytes);
+    let stats = station.rx.stats_due(2000).unwrap();
+    assert!(station.rx.stats_due(2999).is_none());
+    assert_eq!(station.rx.stats_due(3000), Some(stats));
+    assert!(stats.bytes >= 3 * bytes.len() as u32);
+    assert_eq!(
+        (
+            stats.packets,
+            stats.checksum_errors,
+            stats.poll_gaps,
+            stats.overruns
+        ),
+        (2, 1, 1, 1)
+    );
     assert_eq!(
         packets,
         vec![(

@@ -126,7 +126,7 @@ An AM receiver may detect the offset FM signal on the slope of its filter. Recep
 
 ### Shortwave AM
 
-Hold `1` to cycle the 6, 3 and 1 kHz filters. Hold `2` to toggle soft mute. In ordinary listening these changes keep the current Si4732 frequency.
+Hold `1` to cycle the 6, 3 and 1 kHz filters. Hold `2` to toggle soft mute. In R54 AM, hold `3` to toggle the 100 Hz high-pass filter independently. In ordinary listening these changes keep the current Si4732 frequency.
 
 ### Incoming DTMF
 

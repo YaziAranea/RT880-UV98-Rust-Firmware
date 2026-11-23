@@ -1,10 +1,10 @@
 {
-  "release": "R52",
+  "release": "R53",
   "profile": "channel-tx",
   "minimum_remaining_flash_bytes": 4096,
   "remaining_flash_bytes": {
-    "ru": 7612,
-    "en": 8180,
-    "de": 8056
+    "ru": 11152,
+    "en": 11720,
+    "de": 11592
   }
 }

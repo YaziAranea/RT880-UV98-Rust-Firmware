@@ -237,12 +237,9 @@ pub(super) fn shortwave_processing_label(row: u16, out: &mut Row<'_>, view: View
         let filter = ["6", "3", "1"][usize::from(view.shortwave_filter.min(2))];
         let _ = write!(
             label,
-            "\x1f009 {filter} \x1f08F {}",
-            if view.shortwave_soft_mute {
-                "ON"
-            } else {
-                "OFF"
-            }
+            "\x1f009 {filter} \x1f08F {}  HPF {}",
+            if view.shortwave_soft_mute { "ON" } else { "OFF" },
+            if view.shortwave_high_pass { "ON" } else { "OFF" }
         );
     } else {
         let _ = label.write_str("\x1f137");
@@ -483,6 +480,18 @@ fn aprs_rx_page(row: u16, out: &mut Row<'_>, view: &View) {
     };
     centered(row, out, 69, 2, label, ink);
 
+    if (270..277).contains(&row) || (282..289).contains(&row) {
+        let mut line = Text::new();
+        let s = view.aprs_rx_stats;
+        let y = if row < 277 {
+            let _ = write!(line, "B {}  OK {}", s.bytes, s.packets);
+            270
+        } else {
+            let _ = write!(line, "CRC {} GAP {} OV {}", s.checksum_errors, s.poll_gaps, s.overruns);
+            282
+        };
+        centered(row, out, y, 1, line.as_str(), color::MUTED);
+    }
     if view.aprs_rx_count == 0 {
         centered(row, out, 162, 2, "\x1f186", color::MUTED);
         return;

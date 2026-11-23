@@ -282,6 +282,18 @@ fn one_ptt_transition_can_be_resampled_without_fabricating_a_release() {
 }
 
 #[test]
+fn upper_press_at_final_guard_read_still_requires_a_clean_second_scan() {
+    let mut scan = scanner(0, 0, false);
+    scan.registers.ptt_values = [true, true, false].into_iter().collect();
+    assert!(scan.scan_with_ptt_recheck(|| true).unwrap().ptt_pressed());
+    assert_eq!(scan.registers.selections, 8);
+
+    let mut bounced = scanner(0, 0, true);
+    bounced.registers.ptt_values = [true, false, true].into_iter().collect();
+    assert_eq!(bounced.scan_with_ptt_recheck(|| panic!("bounce")), Err(Error::UnstablePtt));
+}
+
+#[test]
 fn ptt_recheck_never_retries_twice_or_masks_a_matrix_error() {
     let mut scan = scanner(0, 0, false);
     scan.registers.ptt_values = [true, false, false, true, false, false]

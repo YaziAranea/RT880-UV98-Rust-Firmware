@@ -1,4 +1,5 @@
-use uv98_signaling::aprs::{received_packet, Decoder, ReceivedPacket};
+use uv98_handheld_ui::controller::AprsRxStats;
+use uv98_signaling::aprs::{received_packet, Decoder, Error as FrameError, ReceivedPacket};
 use uv98_signaling::cmx868::{Bus, Error, Modem, Progress};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -14,6 +15,8 @@ pub struct Receiver {
     phase: Phase,
     frequency: Option<u32>,
     last_poll_ms: u32,
+    last_report_ms: u32,
+    stats: AprsRxStats,
     decoder: Decoder,
 }
 
@@ -24,8 +27,25 @@ impl Receiver {
             phase: Phase::Idle,
             frequency: None,
             last_poll_ms: 0,
+            last_report_ms: 0,
+            stats: AprsRxStats {
+                bytes: 0,
+                packets: 0,
+                checksum_errors: 0,
+                poll_gaps: 0,
+                overruns: 0,
+            },
             decoder: Decoder::new(),
         }
+    }
+
+    /// Publish a snapshot at most once a second while the packet page is visible.
+    pub fn stats_due(&mut self, now: u32) -> Option<AprsRxStats> {
+        if now.wrapping_sub(self.last_report_ms) < 1000 {
+            return None;
+        }
+        self.last_report_ms = now;
+        Some(self.stats)
     }
 
     pub fn listening(&self) -> bool {
@@ -71,6 +91,7 @@ impl Receiver {
         // acknowledge a replacement byte after E6 was sampled; discard the
         // partial frame even if that status snapshot did not show overrun.
         if self.listening() && now.wrapping_sub(self.last_poll_ms) >= 7 {
+            self.stats.poll_gaps = self.stats.poll_gaps.saturating_add(1);
             self.decoder.reset();
         }
         self.last_poll_ms = now;
@@ -86,10 +107,25 @@ impl Receiver {
             },
             Phase::Listening => match modem.receive() {
                 Ok(Some(byte)) => {
-                    return self.decoder.push_byte(byte)?.ok().and_then(received_packet)
+                    self.stats.bytes = self.stats.bytes.saturating_add(1);
+                    match self.decoder.push_byte(byte)? {
+                        Ok(frame) => {
+                            let packet = received_packet(frame)?;
+                            self.stats.packets = self.stats.packets.saturating_add(1);
+                            return Some(packet);
+                        }
+                        Err(FrameError::Checksum) => {
+                            self.stats.checksum_errors =
+                                self.stats.checksum_errors.saturating_add(1);
+                        }
+                        Err(_) => {}
+                    }
                 }
                 Ok(None) => {}
-                Err(Error::Overflow) => self.decoder.reset(),
+                Err(Error::Overflow) => {
+                    self.stats.overruns = self.stats.overruns.saturating_add(1);
+                    self.decoder.reset();
+                }
                 Err(_) => self.fail(modem),
             },
             Phase::Failed => {}
