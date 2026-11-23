@@ -8,19 +8,21 @@ Die quelloffene Rust-Firmware für Radtel RT-880 (RT880) und iRadio UV-98 Plus (
 
 [English](README.md) · **Deutsch** · [Русский](README.ru.md)
 
-[**R53-Version**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r53) · [**Hier beginnen — Sicherung und Installation**](docs/GETTING-STARTED.de.md)
+[**Version R54**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r54) · [**Hier beginnen — Sicherung und Installation**](docs/GETTING-STARTED.de.md)
 
-[**CPS 0.8.0 für Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r53/UV98-CPS-0.8.0.zip) · R53-BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r53/UV98-r53-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r53/UV98-r53-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r53/UV98-r53-de.bin)
+[**R54-Komplettpaket (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/R54-RT880-UV98.zip) · [**CPS 0.8.1 für Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/UV98-CPS-0.8.1.zip)
 
-> **Experimentelle Firmware für das untersuchte AT32F423-Platinenprofil.** Zuerst die Platinenkompatibilität prüfen. Vor dem Flashen mit CPS ein persönliches R53-Image aus der geprüften NOR-Sicherung des eigenen Geräts erstellen. CPS bindet das Image an die eigenen Werkskalibrierungen. [Sicherungs- und Vorbereitungsanleitung](docs/GETTING-STARTED.de.md#4-kompatibilität-vor-dem-flashen-prüfen)
+R54-BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/UV98-r54-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/UV98-r54-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/UV98-r54-de.bin) · [PA5-Empfangsdiagnose (ZIP, Russisch)](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/R54-PA5-RX-only.zip)
 
-R53 gliedert Scan und Menü in eigene Module. Gegenüber R52 werden in RU und EN je 3.540 Byte Flash frei, in DE 3.536 Byte. [Änderungen, Downloads und Offline-Prüfung](RELEASE-NOTES-R53.md).
+> **Experimentelle Firmware für das untersuchte AT32F423-Platinenprofil.** Zuerst die Platinenkompatibilität prüfen. Vor dem Flashen mit CPS ein persönliches R54-Image aus der geprüften NOR-Sicherung des eigenen Geräts erstellen. CPS bindet das Image an die eigenen Werkskalibrierungen. [Sicherungs- und Vorbereitungsanleitung](docs/GETTING-STARTED.de.md#4-kompatibilität-vor-dem-flashen-prüfen)
 
-## Windows-CPS 0.8.0
+R54 korrigiert den Suchlauf per Seitentaste, berücksichtigt den Suchlaufausschluss aus der CPS und prüft beim Wiederherstellen des Empfangs einen sauberen Druck der oberen PTT erneut. Hinzu kommen APRS-Empfangszähler sowie getrennte Einstellungen für Soft Mute und den 100-Hz-Filter bei Kurzwellen-AM. [Versionshinweise](RELEASE-NOTES-R54.md) · [Prüfbericht und Prüfplan (Russisch)](AUDIT-R54.ru.md)
+
+## Windows-CPS 0.8.1
 
 Wählen Sie in der Symbolleiste unter **Язык / Language / Sprache** zwischen **Русский**, **English** und **Deutsch**. Alle acht Reiter und bereits angezeigte Statusmeldungen wechseln sofort die Sprache. Ungespeicherte Änderungen bleiben erhalten. CPS speichert die Sprachwahl im Windows-Benutzerprofil. Titel und Filter der Dateidialoge folgen der CPS-Sprache. Die Standardschaltflächen folgen der Windows-Sprache.
 
-Unter **Firmware → BIN auswählen…** lässt sich eine kompatible Anwendungs-BIN mit Kalibrierprofil direkt öffnen. CPS prüft Struktur und Dateiintegrität. Herkunft der Version und Platinenrevision separat prüfen. Die Personalisierung speichert die persönliche BIN, eine Kopie der Quell-BIN und einen Katalog mit Herkunftsdaten. [CPS-Quellcode in R41](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/tree/r41/apps/cps)
+ZIP entpacken und `libunwind.dll` neben `UV98-CPS.exe` belassen. Unter **Firmware → BIN auswählen…** lässt sich eine kompatible Anwendungs-BIN mit Kalibrierprofil direkt öffnen. CPS prüft Struktur und Dateiintegrität. Herkunft der Version und Platinenrevision separat prüfen. Die Personalisierung speichert die persönliche BIN, eine Kopie der Quell-BIN und einen Katalog mit Herkunftsdaten. [CPS-Quellcode](apps/cps/)
 
 ![Kanaleditor der CPS 0.7.0 auf Deutsch](docs/images/cps-0.7.0/de-channels.png)
 
@@ -90,13 +92,13 @@ Der originale Modus „800 MHz“ beginnt bei **840 MHz**. Die Vorgabe wählt 85
 1. Die Originalfirmware beibehalten und die ursprüngliche `.880dmf`-/`.98pdmf`-Datei des eigenen Geräts sichern.
 2. Mit unserer CPS **Kalibrierung**, **4 MiB NOR** sowie **Einstellungs-/Kanalsektionen** lesen. Jeder Vorgang liest zweimal und vergleicht die Daten.
 3. Die vollständigen Sicherungsordner und eine passende originale Wiederherstellungsdatei an zwei Orten aufbewahren. Das öffentliche Paket enthält keine Herstellerfirmware.
-4. Die Platinenkompatibilität prüfen und anschließend in CPS ein persönliches R53-Image aus der geprüften NOR-Sicherung erstellen. Dafür wird kein Rust-Compiler benötigt.
+4. Die Platinenkompatibilität prüfen und anschließend in CPS ein persönliches R54-Image aus der geprüften NOR-Sicherung erstellen. Dafür wird kein Rust-Compiler benötigt.
 
 Die [Schritt-für-Schritt-Anleitung](docs/GETTING-STARTED.de.md) nennt die CPS-Schaltflächen, erwarteten Dateien, Prüfkriterien und den Rückweg. **Der 4-MiB-NOR-Dump enthält weder MCU-Firmware noch Bootloader.**
 
 ## Aktuelle Grenzen
 
-An einem RT-880 wurden der Start von R53 RU, beide PTT-Tasten und der hörbare Relaisnachlauf bestätigt. Gerätetests für Zonenscan und APRS stehen aus.
+Beim Test von R53 RU an einem Funkgerät wurden der Start, beide PTT-Tasten und der hörbare Relaisnachlauf bestätigt. R54 hat die Softwareprüfungen bestanden. Prüfungen am Messplatz und im Funkbetrieb stehen für R54 aus. [Versionshistorie R53](RELEASE-NOTES-R53.md) · [Prüfergebnisse R54 (Russisch)](AUDIT-R54.ru.md)
 
 - Dual Watch hört A/B abwechselnd ab. Gleichzeitige Audiowiedergabe beider BK4819-Empfänger ist nicht implementiert.
 - Der KW-Wasserfall stimmt den einzigen Si4732 nacheinander ab und unterbricht dabei die Audiowiedergabe. Er ist keine FFT.
