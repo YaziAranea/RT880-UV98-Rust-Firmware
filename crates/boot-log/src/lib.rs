@@ -27,9 +27,13 @@ pub const FRAME_POLL_BUDGET: u32 = 65_536;
 #[cfg(feature = "pa5-audio")]
 pub struct AudioExportBudget(u16);
 #[cfg(feature = "pa5-audio")]
+pub const PA5_CONTEXT: u32 = 0xA610_0000;
+#[cfg(feature = "pa5-audio")]
+const PA5_EXPORT_FRAMES: u16 = 347;
+#[cfg(feature = "pa5-audio")]
 impl Default for AudioExportBudget {
     fn default() -> Self {
-        Self(346)
+        Self(PA5_EXPORT_FRAMES)
     }
 }
 
@@ -533,8 +537,10 @@ impl<I: RegisterIo> Logger<I> {
         budget: &mut AudioExportBudget,
     ) -> Result<(), Error> {
         if budget.0 == 0
-            || !(matches!(frame.code, 0xA510_0000..=0xA510_0002 | 0xA51F_0000)
-                || (0xA520_0000..0xA520_0156).contains(&frame.code))
+            || !(matches!(
+                frame.code,
+                0xA510_0000..=0xA510_0002 | 0xA51F_0000 | PA5_CONTEXT
+            ) || (0xA520_0000..0xA520_0156).contains(&frame.code))
         {
             return Err(Error::FrameBudget);
         }
@@ -754,7 +760,10 @@ mod tests {
             logger.emit_audio(Frame::new(0xE001, [0; 3]), &mut budget),
             Err(Error::FrameBudget)
         );
-        for _ in 0..346 {
+        logger
+            .emit_audio(Frame::new(PA5_CONTEXT, [0; 3]), &mut budget)
+            .unwrap();
+        for _ in 1..PA5_EXPORT_FRAMES {
             logger
                 .emit_audio(Frame::new(0xA510_0000, [0; 3]), &mut budget)
                 .unwrap();

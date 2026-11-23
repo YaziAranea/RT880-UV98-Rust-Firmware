@@ -2,7 +2,8 @@ param(
     [string]$Port = '',
     [string]$Decode = '',
     [string]$Output = '',
-    [ValidateRange(5, 90)][int]$Seconds = 30
+    [ValidateRange(5, 90)][int]$Seconds = 30,
+    [ValidateRange(10.0, 3900.0)][double]$ToneHz = 0
 )
 $ErrorActionPreference = 'Stop'
 if ([bool]$Port -eq [bool]$Decode) { throw 'Specify exactly one: -Port COMn to listen, or -Decode rx.bin for offline conversion.' }
@@ -34,7 +35,7 @@ if ($Decode) {
     $buffer = New-Object byte[] 1024
     try {
         $serial.Open()
-        Write-Host "LISTENING $Port at 115200. On radio: capture with 5, then press # to export. No serial commands are sent."
+        Write-Host "LISTENING $Port at 115200. R54 PA5: 5 for open RX or 0 for quiet control, then # to export. No serial commands are sent."
         $timer = [Diagnostics.Stopwatch]::StartNew()
         while ($timer.Elapsed.TotalSeconds -lt $Seconds) {
             try { $count = $serial.Read($buffer, 0, $buffer.Length) } catch [TimeoutException] { continue }
@@ -48,7 +49,16 @@ if ($Decode) {
         [IO.File]::WriteAllBytes((Join-Path $destination 'rx.bin'), $captureBytes)
     }
 }
-$reports = [DecodePa5]::Decode($captureBytes, $destination)
+$session = [DecodePa5]::Decode($captureBytes, $destination, $ToneHz)
+if ($session.Issues.Length) {
+    ConvertTo-Json -InputObject @($session.Issues) -Depth 4 |
+        Set-Content -LiteralPath (Join-Path $destination 'issues.json') -Encoding UTF8
+    foreach ($issue in $session.Issues) {
+        Write-Warning ('Sequence {0}: {1}' -f $issue.Sequence, $issue.Reason)
+    }
+}
+$reports = $session.Blocks
+if (-not $reports.Length) { throw 'No valid PA5 block. See issues.json.' }
 $reports | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $destination 'report.json') -Encoding UTF8
 $reports | Format-List
-Write-Host "Saved raw ADC, WAV and report: $destination"
+Write-Host "Saved $($reports.Length) validated PA5 block(s) and report: $destination"

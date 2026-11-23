@@ -53,7 +53,7 @@ pub use utility::ShortwaveScope;
 #[path = "audio_capture.rs"]
 mod audio_capture;
 #[cfg(feature = "pa5-audio")]
-pub use audio_capture::{render_audio_rows, AudioCaptureView};
+pub use audio_capture::{render_audio_rows, AudioCaptureStatus, AudioCaptureView};
 use utility::{shortwave_processing_label, shortwave_scope_page, utility_page};
 
 pub const WIDTH: usize = 240;
@@ -1212,7 +1212,7 @@ fn dtmf_memory_page(row: u16, out: &mut Row<'_>, view: &View) {
 #[cfg(not(feature = "pa5-audio"))]
 pub const VERSION: &str = "0.1.8-r54";
 #[cfg(feature = "pa5-audio")]
-pub const VERSION: &str = "R42-PA5";
+pub const VERSION: &str = "R54-PA5";
 /// Header has a fixed 42 px slot; About shows the full string.
 #[cfg(not(feature = "pa5-audio"))]
 pub const VERSION_SHORT: &str = "R54";

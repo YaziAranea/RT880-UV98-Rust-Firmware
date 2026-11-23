@@ -152,7 +152,7 @@ Bei aktiver Option sendet das Funkgerät den Namen nach PTT im Roger-Format der 
 
 ### Separater PA5-Audiotest
 
-Die RX-only-Diagnosefirmware zeichnet während des Empfangs einen kurzen Block von PA5-ADC-Abtastwerten zur Auswertung am PC auf. [PA5-Testanleitung (Russisch)](../research/r42/PA5-TEST-RU.txt)
+Die RX-only-Diagnosefirmware zeichnet während des Empfangs einen kurzen Block von PA5-ADC-Abtastwerten zur Auswertung am PC auf. [PA5-Testanleitung (Russisch)](../research/r54/PA5-TEST-RU.txt)
 
 ## 6. Bei Bedarf zur Originalfirmware zurückkehren
 

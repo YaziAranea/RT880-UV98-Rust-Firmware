@@ -1639,7 +1639,13 @@ fn main() -> ! {
             feed();
             let captured = checked(
                 &mut log,
-                audio_capture.key(update.pressed, allowed, &mut side),
+                audio_capture.key(
+                    update.pressed,
+                    allowed,
+                    &mut side,
+                    current,
+                    radio.audio_open(),
+                ),
                 0xE05E,
             );
             feed();
@@ -2820,6 +2826,10 @@ fn main() -> ! {
                     0xE05A,
                 ));
                 signal_at = now;
+                #[cfg(feature = "pa5-audio")]
+                if view.screen == Screen::About && !packet_rx.needs_audio() && !css_receive {
+                    audio_capture.observe_after(p, radio.audio_open());
+                }
                 if css_receive && css_view.is_some_and(|search| search.result_raw.is_none()) {
                     let carrier = last_signal.is_some_and(|s| s.status_0c & 2 != 0);
                     if !carrier {

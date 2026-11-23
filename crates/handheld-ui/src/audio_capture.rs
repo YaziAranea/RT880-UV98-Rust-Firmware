@@ -2,6 +2,16 @@
 use super::*;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AudioCaptureStatus {
+    #[default]
+    Ready,
+    Captured,
+    TimingRejected,
+    RxClosed,
+    QuietOpen,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AudioCaptureView {
     pub sequence: u32,
     pub samples: u16,
@@ -11,8 +21,8 @@ pub struct AudioCaptureView {
     pub low_clips: u16,
     pub high_clips: u16,
     pub late_cycles: u32,
-    /// 0 idle, 1 captured, 2 timing rejected, 3 acquisition failed.
-    pub status: u8,
+    pub status: AudioCaptureStatus,
+    pub quiet: bool,
     /// 0 not exported, 1 sending, 2 sent, 3 UART failed.
     pub export: u8,
 }
@@ -33,6 +43,8 @@ pub fn render_audio_rows<B: DisplayBus, D: Delay>(
     display
         .begin_window(0, start, WIDTH as u16, end - start)
         .map_err(RenderError::Display)?;
+    let mut version = Text::new();
+    let _ = write!(version, "{} / ADC IN5 / DAC2 OFF", VERSION);
     let mut pixels = [0; WIDTH];
     for y in start..end {
         let out = &mut Row {
@@ -41,8 +53,8 @@ pub fn render_audio_rows<B: DisplayBus, D: Delay>(
         };
         out.fill(color::BACKGROUND);
         centered(y, out, 12, 2, "PA5 AUDIO / RX ONLY", color::ACCENT);
-        centered(y, out, 44, 1, "8000 Hz / 2048 / 256 ms", color::TEXT);
-        centered(y, out, 64, 1, "ADC IN5 / DAC2 OFF", color::MUTED);
+        centered(y, out, 44, 1, version.as_str(), color::MUTED);
+        centered(y, out, 64, 1, "8000 Hz / 2048 / 256 ms", color::TEXT);
         let mut value = Text::new();
         let _ = write!(value, "#{}  N={}", view.sequence, view.samples);
         text(y, out, 12, 94, 2, value.as_str(), color::TEXT);
@@ -63,21 +75,24 @@ pub fn render_audio_rows<B: DisplayBus, D: Delay>(
         let mut value = Text::new();
         let _ = write!(value, "LATE {} cycles", view.late_cycles);
         text(y, out, 12, 187, 1, value.as_str(), color::TEXT);
+        use AudioCaptureStatus::*;
         centered(
             y,
             out,
             213,
             1,
             match view.status {
-                0 => "READY",
-                1 => "CAPTURED / CHECK WAV",
-                2 => "TIMING ERROR / RETRY",
-                _ => "ADC ERROR / RESTART",
+                Ready => "READY",
+                Captured if view.quiet => "QUIET CONTROL CAPTURED",
+                Captured => "OPEN RX CAPTURED",
+                TimingRejected => "TIMING ERROR / RETRY",
+                RxClosed => "RX AUDIO CLOSED / USE MONITOR",
+                QuietOpen => "AUDIO OPEN / CLOSE SQL FOR QUIET",
             },
-            if view.status > 1 {
-                color::BAD
-            } else {
+            if matches!(view.status, Ready | Captured) {
                 color::ACCENT
+            } else {
+                color::BAD
             },
         );
         centered(
@@ -86,14 +101,22 @@ pub fn render_audio_rows<B: DisplayBus, D: Delay>(
             235,
             1,
             match view.export {
-                0 => "USB: PRESS # TO EXPORT",
-                1 => "USB: SENDING",
-                2 => "USB: SENT",
-                _ => "USB: FAILED / RESTART",
+                0 if view.status == Captured => "UART: PRESS # TO EXPORT",
+                0 => "UART: NO BLOCK",
+                1 => "UART: SENDING",
+                2 => "UART: SENT / CHECK PC",
+                _ => "UART: FAILED / RETRY #",
             },
             color::MUTED,
         );
-        centered(y, out, 269, 1, "5: CAPTURE   #: USB", color::ACCENT);
+        centered(
+            y,
+            out,
+            269,
+            1,
+            "5: OPEN RX   0: QUIET   #: UART",
+            color::ACCENT,
+        );
         centered(y, out, 290, 1, "EXIT: BACK / NO AUTO TX", color::TEXT);
         display
             .write_pixels(&pixels)
