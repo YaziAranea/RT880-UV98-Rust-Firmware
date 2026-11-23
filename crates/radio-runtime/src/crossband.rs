@@ -125,6 +125,16 @@ impl Session {
         self.state == State::Disarmed
     }
 
+    /// Requalify the proposed start after chip B setup and before enabling RF.
+    /// Any operator input or uncertain scan at this boundary disarms the session.
+    pub fn confirm_start(&mut self, now: u32, carrier: Carrier, input_clear: bool) -> bool {
+        if !input_clear {
+            self.state = State::Disarmed;
+            return false;
+        }
+        matches!(self.state, State::Active(_)) && self.tick(now, Some(carrier)) != Action::Stop
+    }
+
     /// A dwell starts with the first fresh sample after tuning. The caller
     /// must clear the previous slot's sample when retuning.
     pub fn tick(&mut self, now: u32, carrier: Option<Carrier>) -> Action {
@@ -274,6 +284,29 @@ mod tests {
         assert_eq!(s.tick(380, None), Action::Stop);
         assert!(s.disarmed());
         assert_eq!(s.tick(385, open), Action::None);
+    }
+
+    #[test]
+    fn pending_relay_start_needs_fresh_carrier_and_clear_input() {
+        let a = profile(14_550_000, 14_550_000);
+        let b = profile(43_350_000, 43_350_000);
+        for (input_clear, carrier, commit, disarmed) in [
+            (false, Carrier::Open, false, true),
+            (true, Carrier::Closed, false, false),
+            (true, Carrier::PendingTone, false, false),
+            (true, Carrier::Open, true, false),
+        ] {
+            let mut session = Session::arm(a, b, Slot::A).unwrap();
+            assert!(!session.confirm_start(0, Carrier::Open, true));
+            assert_eq!(session.tick(1, Some(Carrier::Closed)), Action::None);
+            assert_eq!(session.tick(2, Some(Carrier::Open)), Action::Start(b.transmit.unwrap()));
+            assert_eq!(session.confirm_start(12, carrier, input_clear), commit);
+            assert_eq!(session.disarmed(), disarmed);
+            if disarmed {
+                assert_eq!(session.tick(20, Some(Carrier::Closed)), Action::None);
+                assert_eq!(session.tick(21, Some(Carrier::Open)), Action::None);
+            }
+        }
     }
 
     #[test]

@@ -419,6 +419,21 @@ fn malformed_size_vectors_and_unlisted_image_refused() {
 }
 
 #[test]
+fn unverified_factory_candidate_names_the_supported_rollback_without_accepting_it() {
+    let fixture = Fixture::new();
+    let candidate = fixture.dir.join(STOCK_FILENAME);
+    validate_structure(&fixture.image.bytes).unwrap();
+    fs::write(&candidate, &fixture.image.bytes).unwrap();
+    let error = match prepare_selected(&candidate, None) {
+        Ok(_) => panic!("an unverified image cannot become stock by name"),
+        Err(error) => error,
+    };
+    assert!(error
+        .as_str(Language::English)
+        .contains("verified stock 1.16 BIN"));
+}
+
+#[test]
 fn standalone_import_checks_vectors_and_one_complete_calibration_profile() {
     let fixture = Fixture::new();
     let path = fixture.dir.join("future.bin");

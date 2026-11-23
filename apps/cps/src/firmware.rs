@@ -18,6 +18,7 @@ const APPLICATION_BASE: u32 = 0x0800_2800;
 const APPLICATION_END: u32 = 0x0804_0000;
 const TIMEOUT: Duration = Duration::from_secs(5);
 const PROFILE: &str = "iradio-uv98-app-v1";
+const STOCK_FILENAME: &str = "RT-880_Upgrade_V1_16_250915.bin";
 const STOCK_SHA256: &str = "eaef215cc7084dcd94281bbffb7ab6e2dd1e79ce135f01c90e3dbc691dd16bfc";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -250,7 +251,8 @@ pub fn export_stock(destination: &Path) -> Result<(), LocalizedText> {
                 "CPS-Verzeichnis fehlt"
             )
         })?
-        .join("recovery/RT-880_Upgrade_V1_16_250915.bin");
+        .join("recovery")
+        .join(STOCK_FILENAME);
     if !source.is_file() {
         return Err(msg!(
             "Заводской BIN не входит в публичный комплект. Поместите свой RT-880_Upgrade_V1_16_250915.bin в папку recovery рядом с CPS; файл будет проверен по SHA256. Это файл восстановления, не чтение MCU рации.",
@@ -310,7 +312,17 @@ fn prepare_selected(path: &Path, catalog: Option<&Path>) -> Result<PreparedImage
     }
     // A marker and Cortex-M vectors only establish the supported layout.
     // They cannot authenticate the author or prove hardware compatibility.
-    profile::digest_offset(&image.bytes)?;
+    profile::digest_offset(&image.bytes).map_err(|error| {
+        LocalizedText::from_fn(|lang| {
+            trf!(
+                lang,
+                "{} Для отката через этот CPS используйте совместимый заводской BIN 1.16 с проверенным SHA256.",
+                "{} For rollback through this CPS, use the compatible verified stock 1.16 BIN.",
+                "{} Für die Wiederherstellung mit diesem CPS ist die kompatible geprüfte Werks-BIN 1.16 erforderlich.",
+                error.as_str(lang)
+            )
+        })
+    })?;
     Ok(image)
 }
 

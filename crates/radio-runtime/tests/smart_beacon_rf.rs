@@ -189,7 +189,7 @@ impl Station {
     }
 
     fn request(&mut self, automatic: bool) {
-        self.beacon.refresh(true, self.now);
+        self.beacon.refresh(true, true, self.now);
         assert!(self.beacon.request(
             &self.calibration,
             self.profile,
@@ -286,7 +286,7 @@ fn auto_beacon_qualifies_fresh_carrier_samples_sends_one_frame_and_restores_rx()
     // fresh fix alone neither rekeys nor bypasses the next quiet window.
     h.receive();
     h.step(2_000, true, Some(0), (false, false));
-    h.beacon.refresh(true, h.now);
+    h.beacon.refresh(true, true, h.now);
     assert_eq!(h.beacon.status(), AprsStatus::Ready);
     assert_eq!(h.radio.state(), State::Receiving);
     assert_eq!(h.modem.borrow().wire, wire.as_bytes());
@@ -311,6 +311,33 @@ fn automatic_requires_simplex_receive_and_transmit_with_carrier_sensing() {
         }
         assert!(!beacon::auto_channel(&p));
     }
+}
+
+#[test]
+fn manual_beacon_explains_disabled_squelch_before_touching_modem_or_rf() {
+    let mut h = Station::new();
+    h.profile.audio.squelch = 0;
+    h.profile.receive.as_mut().unwrap().level = 0;
+    h.receive();
+    let idle_modem_power = h.modem.borrow().power;
+    assert!(!h.radio.carrier_present().unwrap());
+    h.beacon.refresh(true, false, h.now);
+    assert_eq!(h.beacon.status(), AprsStatus::SquelchRequired);
+    assert!(!h.beacon.request(&h.calibration, h.profile, Some(FIX), h.now, false));
+    assert_eq!(h.beacon.status(), AprsStatus::SquelchRequired);
+    assert!(!h.beacon.active());
+    assert!(!h.beacon.take_finished());
+    h.wait_in_rx(600);
+    assert_eq!(h.modem.borrow().power, idle_modem_power);
+    assert!(!h.modem.borrow().audio);
+
+    h.profile.audio.squelch = 3;
+    h.profile.receive.as_mut().unwrap().level = 3;
+    h.receive();
+    h.beacon.refresh(true, true, h.now);
+    assert_eq!(h.beacon.status(), AprsStatus::Ready);
+    h.request(false);
+    h.wait_for_audio();
 }
 
 #[test]

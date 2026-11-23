@@ -1227,7 +1227,11 @@ fn main() -> ! {
             current = None;
             last_signal = None;
         }
-        beacon.refresh(gps.fix(now).is_some(), now);
+        beacon.refresh(
+            gps.fix(now).is_some(),
+            guarded_profile.is_none_or(|profile| profile.audio.squelch != 0),
+            now,
+        );
         checked(&mut log, app.set_aprs_status(beacon.status()), 0xE032);
         let tx_held = if beacon.active() {
             beacon_held
@@ -3056,7 +3060,15 @@ fn main() -> ! {
                             last_signal = Some(fresh);
                             signal_at = rechecked_at;
                             let carrier = relay_carrier(fresh);
-                            if session.tick(rechecked_at, Some(carrier)) == crossband::Action::Stop
+                            // B setup can span an input transition. Recheck both
+                            // side sources and the matrix before opening any gate.
+                            let sides_clear =
+                                side.sample().is_ok_and(|sample| ptt::side_idle(sample.raw));
+                            let keys_clear = keys.guard_scan().is_ok_and(|sample| {
+                                sample.matrix_clear() && !sample.ptt_pressed()
+                            });
+                            let commit_at = sample_time(&mut time);
+                            if !session.confirm_start(commit_at, carrier, sides_clear && keys_clear)
                             {
                                 stop_relay(&mut radio, &mut secondary);
                             } else {

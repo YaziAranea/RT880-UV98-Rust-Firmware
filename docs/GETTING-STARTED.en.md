@@ -156,7 +156,7 @@ The RX-only PA5 image records a short block of PA5 ADC samples during reception 
 
 ## 6. Return to stock if needed
 
-Close other programs. Enter the stock loader with the upper PTT again and select the **correct factory BIN** in our CPS. Write it using the same procedure and start normally after completion.
+Rollback through this CPS requires the compatible **stock 1.16 BIN with the SHA256 listed above**. For a different stock version or hardware revision, verify the manufacturer's procedure and matching image in advance. If your radio is compatible with the verified 1.16 image, close other programs, enter the loader with the upper PTT, select that BIN and write it using the same procedure. Start the radio normally after completion.
 
 On the investigated device, writing the MCU application does not overwrite the external channels and calibration. **Reinstalling stock does not repair an already damaged NOR.** Our CPS does not yet write a raw 4 MiB dump or calibration block back to the radio. Damage to those areas needs a separate recovery plan using your saved files; never select them as an MCU firmware image.
 

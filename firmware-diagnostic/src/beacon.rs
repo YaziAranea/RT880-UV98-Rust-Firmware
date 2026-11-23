@@ -109,9 +109,9 @@ impl<B: Bus> Beacon<B> {
     }
 
     /// Keep terminal result visible briefly, then permit another explicit send.
-    /// The caller supplies a fresh GPS fix decision; stale fixes never create
-    /// readiness, and this method never starts a transmission.
-    pub fn refresh(&mut self, has_fix: bool, now: u32) {
+    /// The caller supplies the fresh GPS fix and channel-squelch decisions.
+    /// This method never starts a transmission.
+    pub fn refresh(&mut self, has_fix: bool, squelch_enabled: bool, now: u32) {
         if self.active() {
             return;
         }
@@ -121,9 +121,12 @@ impl<B: Bus> Beacon<B> {
             self.status = AprsStatus::Unsupported;
         } else if !has_fix {
             self.status = AprsStatus::NoFix;
-        } else if self
-            .finished_at
-            .is_none_or(|at| now.wrapping_sub(at) >= RESULT_DISPLAY_MS)
+        } else if !squelch_enabled {
+            self.status = AprsStatus::SquelchRequired;
+        } else if self.status == AprsStatus::SquelchRequired
+            || self
+                .finished_at
+                .is_none_or(|at| now.wrapping_sub(at) >= RESULT_DISPLAY_MS)
         {
             self.finished_at = None;
             self.status = AprsStatus::Ready;
@@ -153,6 +156,10 @@ impl<B: Bus> Beacon<B> {
             self.status = AprsStatus::NoFix;
             return false;
         };
+        if profile.audio.squelch == 0 {
+            self.status = AprsStatus::SquelchRequired;
+            return false;
+        }
         let valid = profile.audio.modulation == Modulation::Fm
             && profile.receive.is_some()
             && profile

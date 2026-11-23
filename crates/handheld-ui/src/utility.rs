@@ -415,6 +415,7 @@ pub(super) fn utility_page(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
                 AprsStatus::Sending => ("\x1f0DE", "\x1f0D4"),
                 AprsStatus::Sent => ("\x1f0DB", "\x1f077"),
                 AprsStatus::Failed => ("\x1f0D8", "\x1f02B"),
+                AprsStatus::SquelchRequired => ("\x1f18C", "\x1f18D"),
             };
             let mut identity = Text::new();
             for &c in &view.aprs_callsign {

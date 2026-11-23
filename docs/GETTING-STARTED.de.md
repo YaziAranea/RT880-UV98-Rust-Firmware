@@ -156,7 +156,7 @@ Die RX-only-Diagnosefirmware zeichnet während des Empfangs einen kurzen Block v
 
 ## 6. Bei Bedarf zur Originalfirmware zurückkehren
 
-Andere Programme schließen. Den originalen Bootloader erneut mit der oberen PTT starten und in unserer CPS die **passende Werks-BIN** wählen. Mit demselben Ablauf schreiben und nach Abschluss normal einschalten.
+Für die Wiederherstellung mit diesem CPS ist die kompatible **Werks-BIN 1.16 mit der oben angegebenen SHA256** erforderlich. Bei einer anderen Werksversion oder Hardwarerevision vorab das Verfahren des Herstellers und die passende Datei prüfen. Ist das Funkgerät mit der geprüften Version 1.16 kompatibel, andere Programme schließen, den Bootloader mit der oberen PTT starten, diese BIN wählen und wie zuvor schreiben. Nach Abschluss das Gerät normal einschalten.
 
 Beim untersuchten Gerät überschreibt das Schreiben der MCU-Anwendung nicht die externen Kanäle und Kalibrierungen. **Eine Neuinstallation der Originalfirmware repariert keinen bereits beschädigten NOR-Speicher.** Unsere CPS schreibt derzeit weder einen rohen 4-MiB-Dump noch einen Kalibrierungsblock zurück ins Funkgerät. Dafür ist ein gesonderter Wiederherstellungsplan mit den eigenen gesicherten Dateien erforderlich; diese niemals als MCU-Firmwaredatei auswählen.
 

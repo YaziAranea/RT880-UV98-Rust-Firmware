@@ -814,6 +814,7 @@ pub enum AprsStatus {
     Sending,
     Sent,
     Failed,
+    SquelchRequired,
 }
 
 impl AprsStatus {
@@ -2341,7 +2342,10 @@ impl Controller {
 
     pub fn set_aprs_status(&mut self, status: AprsStatus) {
         self.view.aprs_status = status;
-        if matches!(status, AprsStatus::Unconfigured | AprsStatus::Unsupported) {
+        if matches!(
+            status,
+            AprsStatus::Unconfigured | AprsStatus::Unsupported | AprsStatus::SquelchRequired
+        ) {
             self.disarm_aprs_auto();
         }
     }
@@ -4439,6 +4443,11 @@ mod tests {
         choose_menu(&mut ui, MenuItem::Aprs, &bitmap);
         assert!(!ui.view.aprs_auto_available);
         assert!(!ui.view.aprs_auto_armed);
+        press(&mut ui, Key::Star, &bitmap);
+        assert!(!ui.view.aprs_auto_armed);
+
+        ui.set_aprs_status(AprsStatus::SquelchRequired);
+        assert_eq!(press(&mut ui, Key::Menu, &bitmap).request, None);
         press(&mut ui, Key::Star, &bitmap);
         assert!(!ui.view.aprs_auto_armed);
 
