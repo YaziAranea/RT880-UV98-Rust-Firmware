@@ -3,13 +3,25 @@
 
 use uv98_display::{Delay, DisplayBus};
 use uv98_handheld_app::App;
-use uv98_handheld_ui::controller::{Request, ScanState};
+use uv98_handheld_ui::controller::{Request, ScanState, SideAction};
 use uv98_nor_read::Bus;
-use uv98_radio_runtime::{policy, scan, State as RadioState};
+use uv98_radio_runtime::{policy, ptt, scan, State as RadioState};
 
 pub use scan::Action;
 
 type UiError<N, L> = uv98_handheld_app::Error<<N as Bus>::Error, <L as DisplayBus>::Error>;
+
+/// The sole clean side input bound to Scan is the scan command itself. A
+/// physical PTT, chord or another side input still cancels before any tune.
+pub fn cancels_scan(input: ptt::Input, adc: u16, bindings: [SideAction; 2]) -> bool {
+    if input.clean
+        && (input.upper ^ input.lower)
+        && bindings[usize::from(input.lower)] == SideAction::Scan
+    {
+        return false;
+    }
+    input.upper || input.lower || !ptt::side_idle(adc)
+}
 
 pub struct Scanner {
     scheduler: scan::Scheduler,
@@ -80,18 +92,18 @@ impl Scanner {
         app.reject_radio_request(Request::StartScan)
     }
 
-    /// Cancel on raw PTT before honoring skip. Sample the scan clock only if a
+    /// Cancel on raw side input before honoring skip. Sample the scan clock only if a
     /// paused session actually reaches the skip path.
     pub fn finish_input<N: Bus, L: DisplayBus, D: Delay>(
         &mut self,
         app: &mut App<N, L, D>,
         mut action: Action,
-        ptt_down: bool,
+        cancel_input: bool,
         skip: bool,
         sample_time: impl FnOnce() -> u32,
     ) -> Result<bool, UiError<N, L>> {
         if self.active()
-            && (ptt_down
+            && (cancel_input
                 || matches!(
                     app.status().view.scan,
                     ScanState::Stopped | ScanState::Stopping
@@ -167,6 +179,7 @@ impl Scanner {
                     )
                 } else {
                     app.next_scan_channel(skipped)
+                        .filter(|&channel| Some(channel) != app.status().view.channel)
                 };
                 if let Some(index) = target {
                     app.select_scan_channel(index)?;

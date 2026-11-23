@@ -1135,6 +1135,8 @@ pub struct Controller {
     zones: [u8; 32],
     channel_order: [u16; 200],
     channel_order_len: u8,
+    // Scan restrictions stay separate from the manually selectable catalog.
+    scan_excluded: [u8; 128],
     /// One volatile scan priority per stored zone ID, shared by A and B.
     zone_priorities: [u16; ZONE_COUNT],
     radio_power: Option<u8>,
@@ -1293,6 +1295,7 @@ impl Controller {
             zones: [0; 32],
             channel_order: [0; 200],
             channel_order_len: 0,
+            scan_excluded: [0; 128],
             zone_priorities: [NO_ZONE_PRIORITY; ZONE_COUNT],
             radio_power: None,
             name_last_digit_at: None,
@@ -1828,7 +1831,15 @@ impl Controller {
         None
     }
 
-    /// Current named-zone scan priority, if it is still an active member.
+    pub fn set_scan_exclusions(&mut self, excluded: [u8; 128]) {
+        self.scan_excluded = excluded;
+    }
+
+    pub fn scan_exclusions(&self) -> &[u8; 128] {
+        &self.scan_excluded
+    }
+
+    /// Current named-zone scan priority, if it is still eligible for scan.
     /// A and B share the designation for a zone with the same stored ID.
     pub fn scan_zone_priority(&self, bitmap: &[u8; 128]) -> Option<u16> {
         if self.view.mode != Mode::Channel || self.selected_cb().is_some() {
@@ -1841,6 +1852,7 @@ impl Controller {
         let channel = self.zone_priorities[zone as usize];
         (channel != NO_ZONE_PRIORITY
             && channel_active(bitmap, channel)
+            && !channel_active(&self.scan_excluded, channel)
             && self.channel_order().contains(&channel))
         .then_some(channel)
     }
@@ -1858,6 +1870,7 @@ impl Controller {
                 && self.selected_cb().is_none()
                 && self.zone_exists(zone)
                 && channel_active(bitmap, channel)
+                && !channel_active(&self.scan_excluded, channel)
                 && self.channel_order().contains(&channel)
         }) else {
             self.view.notice = Notice::ScanPriorityUnavailable;

@@ -2068,7 +2068,7 @@ fn main() -> ! {
             scanner.finish_input(
                 &mut app,
                 action,
-                upper || !ptt::side_idle(adc.raw),
+                scan_flow::cancels_scan(raw_ptt, adc.raw, view.side_bindings),
                 update.request == Some(Request::SkipScanTarget),
                 || sample_time(&mut time),
             ),

@@ -4,7 +4,7 @@
 
 use sha2::{Digest, Sha256};
 use uv98_codeplug::{
-    channels::{Channel, Tone, CHANNEL_COUNT, CHANNEL_LEN},
+    channels::{Channel, OperationMode, Tone, CHANNEL_COUNT, CHANNEL_LEN},
     zones::{Zone, MEMBER_COUNT, RECORD_LEN, ZONE_COUNT},
 };
 pub use uv98_diag_app::{StartStage, PRESERVED_CALIBRATION_SHA256};
@@ -903,7 +903,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         self.controller
             .ordered_channel(&self.bitmap, current, forward)
     }
-    /// Apply RAM-only exclusions for one scan without changing the catalog or
+    /// Apply codeplug and session exclusions without changing the catalog or
     /// its zone order. The ordinary bounded channel traversal can wrap once.
     pub fn next_scan_channel(&self, skipped: &[u8; 128]) -> Option<u16> {
         self.next_scan_channel_after(self.status.view.channel, skipped, None)
@@ -919,7 +919,9 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         if self.status.state != State::Ready {
             return None;
         }
-        let mut eligible = core::array::from_fn(|index| self.bitmap[index] & !skipped[index]);
+        let excluded = self.controller.scan_exclusions();
+        let mut eligible =
+            core::array::from_fn(|index| self.bitmap[index] & !(excluded[index] | skipped[index]));
         if let Some(priority) = priority {
             if let Some(byte) = eligible.get_mut(usize::from(priority) / 8) {
                 *byte &= !(1 << (priority % 8));
@@ -1136,7 +1138,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
     pub fn start(&mut self, slot: usize) -> Result<(), Error<N::Error, L::Error>> {
         self.start_observed(slot, |_| {})
     }
-    /// Catalog is a 128-byte active bitmap, never a full mutable codeplug copy.
+    /// Catalog and scan eligibility use bitmaps, never a mutable codeplug copy.
     /// Any failed read is terminal; partial catalogs and stale channels are hidden.
     pub fn start_observed(
         &mut self,
@@ -1164,6 +1166,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         self.status.calibration_matches_backup = Some(digest == self.expected_sha256);
         observe(StartStage::ChannelBegin);
         let mut raw = [0; CHANNEL_LEN];
+        let mut scan_excluded = [0; 128];
         for index in 0..CHANNEL_COUNT {
             uv98_nor_read::read(
                 &mut self.nor,
@@ -1171,12 +1174,23 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
                 &mut raw,
             )
             .map_err(Error::Catalog)?;
-            if Channel::parse(&raw).expect("fixed record").is_active() {
-                self.bitmap[index / 8] |= 1 << (index % 8);
+            let channel = Channel::parse(&raw).expect("fixed record");
+            if channel.is_active() {
+                let bit = 1 << (index % 8);
+                self.bitmap[index / 8] |= bit;
+                if !channel.scan_add()
+                    || !matches!(
+                        channel.operation_mode(),
+                        Some(OperationMode::ReceiveTransmit | OperationMode::ReceiveOnly)
+                    )
+                {
+                    scan_excluded[index / 8] |= bit;
+                }
             }
         }
         self.all_bitmap = self.bitmap;
         self.controller = Controller::new(&self.bitmap, 14_550_000);
+        self.controller.set_scan_exclusions(scan_excluded);
         self.read_config()?;
         self.read_zone_catalog()?;
         self.controller.set_zone_catalog(&self.zone_bitmap);
