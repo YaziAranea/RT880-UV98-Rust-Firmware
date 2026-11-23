@@ -1,14 +1,12 @@
 ![UV98 Rust firmware — English, Deutsch, Русский](docs/images/project-banner.svg)
 
-# Radtel RT-880 / iRadio UV-98 Plus — Rust Firmware
+# Custom firmware for Radtel RT-880 and iRadio UV-98 Plus
+
+This open-source Rust firmware gives the Radtel RT-880 (RT880) and iRadio UV-98 Plus (UV98 Plus) independent A/B operation, priority channel scanning, a colour spectrum display and shortwave receiver tools. The Windows CPS backs up the radio and prepares a firmware image with its factory calibration.
 
 > **PRE-ALPHA — experimental firmware and CPS.** This project is at a very early stage, before alpha. Features may fail; installation can leave the radio unusable. Install and use entirely at your own risk. The software is provided as is, without warranty; the authors disclaim liability for damage or loss under the terms of the license. Read the license and backup/recovery instructions before deciding to install.
 
-**Open-source Rust firmware and Windows CPS for Radtel RT-880 (RT880) / iRadio UV-98 Plus radio platform.**
-
-Independent A/B operation, a colour spectrum display, shortwave tools and access to the source.
-
-**English** · [Deutsch](README.de.md) · [Русский](README.ru.md)
+**English** · [Deutsch](README.de.md) · [Прошивка и установка на русском](README.ru.md)
 
 [**R53 release**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r53) · [**Start here — backup and installation**](docs/GETTING-STARTED.en.md)
 

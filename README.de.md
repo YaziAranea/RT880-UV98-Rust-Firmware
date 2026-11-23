@@ -1,12 +1,10 @@
 ![UV98 Rust-Firmware — Deutsch, English, Русский](docs/images/project-banner.svg)
 
-# UV98 Rust
+# Alternative Firmware für Radtel RT-880 und iRadio UV-98 Plus
+
+Die quelloffene Rust-Firmware für Radtel RT-880 (RT880) und iRadio UV-98 Plus (UV98 Plus) bietet unabhängige A/B-Einstellungen, einen Kanalsuchlauf mit Prioritätskanal, eine farbige Spektrumanzeige und Werkzeuge für den Kurzwellenempfang. Mit der Windows-CPS lassen sich die Funkgerätdaten sichern und ein Firmware-Abbild mit der werkseitigen Kalibrierung erstellen.
 
 > **PRE-ALPHA — experimentelle Firmware und CPS.** Das Projekt befindet sich in einem sehr frühen Stadium, noch vor einer Alpha-Version. Funktionen können ausfallen; die Installation kann das Funkgerät unbrauchbar machen. Installation und Nutzung erfolgen vollständig auf eigenes Risiko. Die Software wird im vorliegenden Zustand ohne Gewährleistung bereitgestellt; die Autoren übernehmen nach Maßgabe der Lizenz keine Haftung für Schäden oder Verluste. Vor einer Installation die Lizenz sowie die Anleitungen zur Sicherung und Wiederherstellung lesen.
-
-**Rust-Firmware und Windows-CPS für die Funkgeräteplattform iRadio UV-98 Plus / RT-880.**
-
-Unabhängige A/B-Einstellungen, ein farbiges Spektrum, Kurzwellenfunktionen und verfügbarer Quellcode.
 
 [English](README.md) · **Deutsch** · [Русский](README.ru.md)
 
