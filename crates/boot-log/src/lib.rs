@@ -147,6 +147,10 @@ impl ClockSnapshot {
     /// Nominal APB2 frequency for HICK or HICK-sourced PLL. No clock register
     /// is changed. External crystal frequency is deliberately not guessed.
     pub fn apb2_hz(self) -> Result<u32, ClockError> {
+        self.uart_clock().map(|(hz, _)| hz)
+    }
+
+    fn uart_clock(self) -> Result<(u32, u16), ClockError> {
         let requested = self.cfg & 3;
         let active = (self.cfg >> 2) & 3;
         if requested != active {
@@ -176,18 +180,20 @@ impl ClockSnapshot {
                 let ns = (self.pllcfg >> 6) & 0x1ff;
                 let fr = (self.pllcfg >> 16) & 7;
                 // Vendor limits: NS31..500, MS1..15, FR1/2/4/8/16/32.
+                // The 500..=1000 MHz VCO range is 62.5..=125 times the 8 MHz input.
                 if self.pllcfg & (1 << 22) != 0
                     || ms == 0
                     || !(31..=500).contains(&ns)
                     || fr > 5
                     || self.misc1 & (1 << 12) == 0
                     || ms > 4
-                    || u64::from(ns) * 8_000_000 < u64::from(ms) * 500_000_000
-                    || u64::from(ns) * 8_000_000 > u64::from(ms) * 1_000_000_000
+                    || ns * 2 < ms * 125
+                    || ns > ms * 125
                 {
                     return Err(ClockError::PllConfiguration);
                 }
-                ((8_000_000u64 * u64::from(ns)) / (u64::from(ms) * (1 << fr) * 2)) as u32
+                // NS <= 500 keeps the numerator in u32.
+                (8_000_000 * ns) / (ms * (2 << fr))
             }
             _ => return Err(ClockError::UnsupportedSource),
         };
@@ -199,8 +205,7 @@ impl ClockSnapshot {
         let ahb_shift = [0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 6, 7, 8, 9][ahb_code];
         let apb2_shift = [0, 0, 0, 0, 1, 2, 3, 4][apb2_code];
         let hz = system >> (ahb_shift + apb2_shift);
-        baud_divisor(hz)?;
-        Ok(hz)
+        Ok((hz, baud_divisor(hz)?))
     }
 }
 
@@ -215,7 +220,9 @@ pub fn baud_divisor(pclk2_hz: u32) -> Result<u16, ClockError> {
         return Err(ClockError::FrequencyRange);
     }
     let error = pclk2_hz.abs_diff(div * BAUD);
-    if u64::from(error) * 100 > u64::from(div) * u64::from(BAUD) * 2 {
+    // Rounding bounds the error to BAUD / 2. The baud target is
+    // within BAUD / 2 of the 150 MHz input limit.
+    if error * 100 > div * BAUD * 2 {
         return Err(ClockError::BaudError);
     }
     Ok(div as u16)
@@ -413,37 +420,37 @@ impl<I: RegisterIo> Logger<I> {
     }
 
     pub fn configure_for_current_clock(&mut self) -> Result<u32, Error> {
-        if self.muted {
-            return Err(Error::Muted);
-        }
-        self.family()?;
-        let snapshot = self.stable_clock()?;
-        let hz = snapshot.apb2_hz()?;
-        self.configure(snapshot, hz)?;
-        Ok(hz)
+        self.configure_for_clock(None)
     }
 
     /// Reconfigure after a known clock transition. Failure never resets the
     /// frame budget, and a timed-out logger cannot be revived by reconfigure.
     pub fn configure_at_pclk2(&mut self, pclk2_hz: u32) -> Result<(), Error> {
+        self.configure_for_clock(Some(pclk2_hz)).map(|_| ())
+    }
+
+    #[inline(never)]
+    fn configure_for_clock(&mut self, expected_hz: Option<u32>) -> Result<u32, Error> {
         if self.muted {
             return Err(Error::Muted);
         }
         self.family()?;
         let snapshot = self.stable_clock()?;
-        let observed = snapshot.apb2_hz()?;
-        if observed != pclk2_hz {
-            return Err(Error::ClockMismatch {
-                observed,
-                expected: pclk2_hz,
-            });
+        let (hz, divisor) = snapshot.uart_clock()?;
+        if let Some(expected) = expected_hz {
+            if hz != expected {
+                return Err(Error::ClockMismatch {
+                    observed: hz,
+                    expected,
+                });
+            }
         }
-        self.configure(snapshot, pclk2_hz)
+        self.configure(snapshot, divisor)?;
+        Ok(hz)
     }
 
-    fn configure(&mut self, snapshot: ClockSnapshot, hz: u32) -> Result<(), Error> {
+    fn configure(&mut self, snapshot: ClockSnapshot, divisor: u16) -> Result<(), Error> {
         use register::*;
-        let divisor = baud_divisor(hz)?;
         // Only GPIOA's gate is enabled to inspect its lock. A locked TX pin
         // causes no GPIO configuration or UART writes.
         self.modify(CRM_AHBEN1, 0, GPIOA_GATE);

@@ -39,6 +39,23 @@ pub struct Profile {
     pub power: u8,
 }
 
+impl Profile {
+    /// A discovered CTCSS/DCS gate applies only to the FM receive half.
+    #[cfg_attr(target_arch = "arm", inline(never))]
+    pub fn with_rx_tone_override(mut self, tone: Option<u16>) -> Self {
+        if let (Some(rx), Some(raw)) = (&mut self.receive, tone) {
+            if rx.modulation == Modulation::Fm {
+                rx.tone = raw;
+                // Search recognizes standard DCS, independent of a memory
+                // record's alternate codec setting on the TX half.
+                rx.tone_mode = 0;
+                self.audio.tone_required = true;
+            }
+        }
+        self
+    }
+}
+
 /// Monitor, displayed power and the inactive TX side do not retune a live
 /// receiver. Actual receive parameters (including AM/FM) still require tuning.
 pub fn receive_changed(previous: Option<Profile>, next: Option<Profile>) -> bool {

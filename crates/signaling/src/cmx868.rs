@@ -1,7 +1,15 @@
-//! Stock PB4==0 C-BUS modem. Bell2021200bps synchronous NRZI bytes are supplied
-//! by aprs::Wire. Poll service must run faster than one byte/6.67ms during TX;
-//! any buffer underflow cancels the frame. No GPIO bit-banged 1200Hz main loop.
+//! Stock PB4==0 C-BUS modem. Bell 202 carries synchronous NRZI bytes at 1200
+//! bps. Service the one-byte register in less than 6.67 ms during RX and TX.
 use crate::aprs::{Wire, WIRE_CAPACITY};
+
+const RX_MODE: u8 = 0xe2;
+const RX_DATA: u8 = 0xe5;
+const STATUS: u8 = 0xe6;
+// CML D/868/9 and D/868A/3 §1.5.10.4: Bell 202 1200 bps, stock level
+// index 0, synchronous 8-bit USART.
+const RX_BELL_202: u16 = 0x303e;
+const RX_READY: u16 = 0x0040;
+const RX_OVERFLOW: u16 = 0x0020;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -11,6 +19,7 @@ pub enum Error {
     Empty,
     Timeout,
     Underflow,
+    Overflow,
     Bus,
 }
 pub trait Bus {
@@ -22,6 +31,15 @@ pub trait Bus {
     /// Stock08021800 routes C-BUS TX through PB7 LOW and restores PB7 HIGH.
     fn tx_audio(&mut self, enabled: bool);
 }
+
+fn shutdown(bus: &mut impl Bus) -> Result<(), Error> {
+    bus.tx_audio(false);
+    let tx = bus.write16(0xe1, 0);
+    let rx = bus.write16(RX_MODE, 0);
+    let power = bus.write16(0xe0, 0x1000);
+    tx.and(rx).and(power)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Progress {
     Off,
@@ -47,6 +65,7 @@ enum Phase {
 pub struct Modem<B: Bus> {
     bus: B,
     phase: Phase,
+    receive_gain: Option<u8>,
     at: u32,
     started: u32,
     wire: [u8; WIRE_CAPACITY],
@@ -58,6 +77,7 @@ impl<B: Bus> Modem<B> {
         Self {
             bus,
             phase: Phase::Off,
+            receive_gain: None,
             at: 0,
             started: 0,
             wire: [0; WIRE_CAPACITY],
@@ -66,18 +86,30 @@ impl<B: Bus> Modem<B> {
         }
     }
     pub fn begin(&mut self, now: u32) -> Result<(), Error> {
-        if matches!(self.phase, Phase::Priming | Phase::Sending | Phase::Drain) {
+        if self.receive_gain.is_some() || self.sending() {
             return Err(Error::Busy);
         }
+        self.begin_inner(now);
+        Ok(())
+    }
+    /// Reserve the modem for reception until off() or a bus fault.
+    pub fn begin_rx(&mut self, now: u32, gain: u8) -> Result<(), Error> {
+        if !matches!(self.phase, Phase::Off | Phase::Fault) {
+            return Err(Error::Busy);
+        }
+        self.receive_gain = Some(if gain <= 7 { gain } else { 0 });
+        self.begin_inner(now);
+        Ok(())
+    }
+    fn begin_inner(&mut self, now: u32) {
         self.bus.tx_audio(false);
         self.at = now;
         self.phase = Phase::PowerWait;
-        Ok(())
     }
     /// Start only after caller has obtained ordinary calibrated FM-TX ownership.
     /// No RF PA/route changes here. Startup is explicit, no beacon timer.
     pub fn start_tx(&mut self, wire: &Wire, now: u32, level: u8) -> Result<(), Error> {
-        if self.phase != Phase::Ready {
+        if self.phase != Phase::Ready || self.receive_gain.is_some() {
             return Err(Error::NotReady);
         }
         if wire.len == 0 || wire.len > WIRE_CAPACITY {
@@ -106,11 +138,13 @@ impl<B: Bus> Modem<B> {
         Ok(())
     }
     pub fn off(&mut self) -> Result<(), Error> {
-        self.bus.tx_audio(false);
         self.phase = Phase::Off;
-        let first = self.bus.write16(0xe1, 0);
-        let second = self.bus.write16(0xe0, 0x1000);
-        first.and(second)
+        self.receive_gain = None;
+        shutdown(&mut self.bus)
+    }
+    fn fail_receive(&mut self) {
+        let _ = self.off();
+        self.phase = Phase::Fault;
     }
     pub fn poll(&mut self, now: u32) -> Result<Progress, Error> {
         if self.phase == Phase::Fault {
@@ -118,9 +152,13 @@ impl<B: Bus> Modem<B> {
         }
         let result = self.poll_inner(now);
         if result.is_err() {
-            self.bus.tx_audio(false);
-            let _ = self.bus.write16(0xe1, 0);
-            self.phase = Phase::Fault;
+            if self.receive_gain.is_some() {
+                self.fail_receive();
+            } else {
+                self.bus.tx_audio(false);
+                let _ = self.bus.write16(0xe1, 0);
+                self.phase = Phase::Fault;
+            }
         }
         result
     }
@@ -157,11 +195,12 @@ impl<B: Bus> Modem<B> {
                 if elapsed < 100 {
                     return Ok(Progress::Starting);
                 }
-                // Probe only the internal modem. PB7 remains HIGH, and this
-                // driver does not own RF PA. Zero idle status is legitimate;
-                // require an observable TX-ready flag in synchronous mode.
+                // The control registers are write-only. Probe internal
+                // synchronous TX-ready with PB7 HIGH, as for the manual
+                // beacon. This driver owns neither RF nor the PA.
                 self.bus.write16(0xe1, 0x321c)?;
-                self.bus.write16(0xe2, 0x303e)?; // Bell202, synchronous 8bit data
+                let gain = u16::from(self.receive_gain.unwrap_or(0)) << 9;
+                self.bus.write16(RX_MODE, RX_BELL_202 | gain)?;
                 self.phase = Phase::Probe;
                 self.at = now;
                 Ok(Progress::Starting)
@@ -170,7 +209,7 @@ impl<B: Bus> Modem<B> {
                 if elapsed < 10 {
                     return Ok(Progress::Starting);
                 }
-                let status = self.bus.read16(0xe6)?;
+                let status = self.bus.read16(STATUS)?;
                 if status == 0xffff {
                     return Err(Error::Bus);
                 }
@@ -182,6 +221,10 @@ impl<B: Bus> Modem<B> {
                     };
                 }
                 self.bus.write16(0xe1, 0)?;
+                if self.receive_gain.is_some() {
+                    // Discard any byte accumulated during the internal probe.
+                    self.bus.read8(RX_DATA)?;
+                }
                 self.phase = Phase::Ready;
                 Ok(Progress::Ready)
             }
@@ -235,21 +278,32 @@ impl<B: Bus> Modem<B> {
             }
         }
     }
-    /// One bounded status+read. Overflow discards the byte; caller resets HDLC.
+    /// One bounded status+read during a ready RX session. Bit 0 arrived first.
+    /// On overflow the pending byte is discarded and the caller resets HDLC.
     pub fn receive(&mut self) -> Result<Option<u8>, Error> {
-        if self.phase != Phase::Ready {
+        if self.phase != Phase::Ready || self.receive_gain.is_none() {
             return Ok(None);
         }
-        let status = self.bus.read16(0xe6)?;
-        if status & 0x0020 != 0 {
-            let _ = self.bus.read8(0xe5)?;
+        let result = self.read_rx_byte();
+        if !matches!(result, Ok(_) | Err(Error::Overflow)) {
+            self.fail_receive();
+        }
+        result
+    }
+    fn read_rx_byte(&mut self) -> Result<Option<u8>, Error> {
+        let status = self.bus.read16(STATUS)?;
+        if status == 0xffff {
             return Err(Error::Bus);
         }
-        if status & 0x0040 != 0 {
-            Ok(Some(self.bus.read8(0xe5)?))
-        } else {
-            Ok(None)
+        if status & (RX_READY | RX_OVERFLOW) == 0 {
+            return Ok(None);
         }
+        // Reading E5 clears READY and OVERFLOW (CML §1.5.9 and §1.5.10.7).
+        let byte = self.bus.read8(RX_DATA)?;
+        if status & RX_OVERFLOW != 0 {
+            return Err(Error::Overflow);
+        }
+        Ok(Some(byte))
     }
     pub const fn sending(&self) -> bool {
         matches!(self.phase, Phase::Priming | Phase::Sending | Phase::Drain)
@@ -398,8 +452,7 @@ pub mod hardware {
     }
     impl Drop for CBus {
         fn drop(&mut self) {
-            self.tx_audio(false);
-            let _ = self.write16(0xe1, 0);
+            let _ = super::shutdown(self);
         }
     }
 }
@@ -407,18 +460,35 @@ pub mod hardware {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[derive(Default)]
     struct Mock {
         status: u16,
         audio: bool,
         last: (u8, u16),
         written: u16,
+        control: u16,
+        tx_mode: u16,
+        rx_mode: u16,
+        rx_reads: u8,
+        rx_byte: u8,
+        fail_write: Option<u8>,
+        fail_read: bool,
     }
     impl Bus for Mock {
         fn reset(&mut self) -> Result<(), Error> {
             Ok(())
         }
         fn write16(&mut self, r: u8, v: u16) -> Result<(), Error> {
+            if self.fail_write == Some(r) {
+                return Err(Error::Bus);
+            }
             self.last = (r, v);
+            match r {
+                0xe0 => self.control = v,
+                0xe1 => self.tx_mode = v,
+                RX_MODE => self.rx_mode = v,
+                _ => unreachable!(),
+            }
             Ok(())
         }
         fn write8(&mut self, _: u8, _: u8) -> Result<(), Error> {
@@ -428,8 +498,14 @@ mod tests {
         fn read16(&mut self, _: u8) -> Result<u16, Error> {
             Ok(self.status)
         }
-        fn read8(&mut self, _: u8) -> Result<u8, Error> {
-            Ok(0)
+        fn read8(&mut self, r: u8) -> Result<u8, Error> {
+            assert_eq!(r, RX_DATA);
+            if self.fail_read {
+                return Err(Error::Bus);
+            }
+            self.rx_reads += 1;
+            self.status &= !(RX_READY | RX_OVERFLOW);
+            Ok(self.rx_byte)
         }
         fn tx_audio(&mut self, e: bool) {
             self.audio = e;
@@ -439,9 +515,7 @@ mod tests {
     fn underrun_and_deadline_remove_audio() {
         let mut modem = Modem::new(Mock {
             status: 0x1000,
-            audio: false,
-            last: (0, 0),
-            written: 0,
+            ..Mock::default()
         });
         modem.begin(0).unwrap();
         modem.poll(100).unwrap();
@@ -465,9 +539,7 @@ mod tests {
     fn finish_waits_last_shift_byte() {
         let mut modem = Modem::new(Mock {
             status: 0x1000,
-            audio: false,
-            last: (0, 0),
-            written: 0,
+            ..Mock::default()
         });
         modem.begin(0).unwrap();
         modem.poll(100).unwrap();
@@ -496,12 +568,7 @@ mod tests {
     }
     #[test]
     fn idle_zero_is_not_identity_and_unresponsive_probe_times_out() {
-        let mut modem = Modem::new(Mock {
-            status: 0,
-            audio: false,
-            last: (0, 0),
-            written: 0,
-        });
+        let mut modem = Modem::new(Mock::default());
         modem.begin(0).unwrap();
         for now in [100, 150, 175, 275, 285] {
             assert_eq!(modem.poll(now), Ok(Progress::Starting));
@@ -510,5 +577,96 @@ mod tests {
         assert_eq!(modem.poll(325), Err(Error::Timeout));
         assert!(!modem.bus.audio);
         assert_eq!(modem.bus.last, (0xe1, 0));
+    }
+
+    fn rx_starting(status: u16, gain: u8) -> Modem<Mock> {
+        let mut modem = Modem::new(Mock {
+            status,
+            ..Mock::default()
+        });
+        modem.begin_rx(0, gain).unwrap();
+        for now in [100, 150, 175, 275] {
+            assert_eq!(modem.poll(now), Ok(Progress::Starting));
+            assert_eq!(modem.receive(), Ok(None));
+            assert!(!modem.bus.audio);
+        }
+        modem
+    }
+
+    #[test]
+    fn rx_owns_modem_and_delivers_raw_bytes_until_off() {
+        let mut modem = rx_starting(0x1000 | RX_READY | RX_OVERFLOW, 6);
+        assert_eq!(modem.poll(285), Ok(Progress::Ready));
+        assert_eq!(modem.bus.rx_mode, 0x3c3e);
+        assert_eq!(modem.bus.tx_mode, 0);
+        assert_eq!(modem.bus.rx_reads, 1); // Startup byte was discarded.
+        assert_eq!(modem.receive(), Ok(None));
+        assert_eq!(modem.begin(285), Err(Error::Busy));
+        assert_eq!(modem.begin_rx(285, 0), Err(Error::Busy));
+        let wire = Wire {
+            bytes: [0; WIRE_CAPACITY],
+            len: 1,
+        };
+        assert_eq!(modem.start_tx(&wire, 285, 1), Err(Error::NotReady));
+        assert_eq!(modem.bus.written, 0);
+        assert!(!modem.bus.audio);
+
+        modem.bus.rx_byte = 0b1000_0000;
+        modem.bus.status = RX_READY;
+        assert_eq!(modem.receive(), Ok(Some(0b1000_0000)));
+        assert_eq!(modem.receive(), Ok(None));
+        assert_eq!(modem.bus.rx_reads, 2);
+
+        modem.off().unwrap();
+        assert_eq!(modem.poll(286), Ok(Progress::Off));
+        assert_eq!(modem.bus.rx_mode, 0);
+        assert_eq!(modem.bus.control, 0x1000);
+        assert_eq!(modem.receive(), Ok(None));
+        modem.begin(287).unwrap();
+        assert_eq!(modem.begin_rx(287, 0), Err(Error::Busy));
+    }
+
+    #[test]
+    fn rx_overflow_discards_one_byte_and_next_byte_is_available() {
+        let mut modem = rx_starting(0x1000, 0xff);
+        assert_eq!(modem.poll(285), Ok(Progress::Ready));
+        assert_eq!(modem.bus.rx_mode, 0x303e);
+        modem.bus.status = RX_READY | RX_OVERFLOW;
+        assert_eq!(modem.receive(), Err(Error::Overflow));
+        assert_eq!(modem.bus.rx_reads, 2);
+        assert_eq!(modem.receive(), Ok(None));
+        modem.bus.status = RX_READY;
+        modem.bus.rx_byte = 0x6a;
+        assert_eq!(modem.receive(), Ok(Some(0x6a)));
+    }
+
+    #[test]
+    fn rx_probe_timeout_or_floating_bus_shuts_down() {
+        for (status, error) in [(0, Error::Timeout), (0xffff, Error::Bus)] {
+            let mut modem = rx_starting(status, 0);
+            assert_eq!(modem.poll(325), Err(error));
+            assert_eq!(modem.bus.rx_mode, 0);
+            assert_eq!(modem.bus.tx_mode, 0);
+            assert_eq!(modem.bus.control, 0x1000);
+            assert!(!modem.bus.audio);
+            assert_eq!(modem.receive(), Ok(None));
+            assert_eq!(modem.poll(326), Err(Error::NotReady));
+            modem.begin_rx(327, 0).unwrap();
+        }
+    }
+
+    #[test]
+    fn rx_data_bus_failure_attempts_all_shutdown_writes() {
+        let mut modem = rx_starting(0x1000, 0);
+        assert_eq!(modem.poll(285), Ok(Progress::Ready));
+        modem.bus.status = RX_READY | RX_OVERFLOW;
+        modem.bus.fail_read = true;
+        modem.bus.fail_write = Some(RX_MODE);
+        assert_eq!(modem.receive(), Err(Error::Bus));
+        assert_eq!(modem.bus.tx_mode, 0);
+        assert_eq!(modem.bus.rx_mode, RX_BELL_202);
+        assert_eq!(modem.bus.control, 0x1000);
+        assert!(!modem.bus.audio);
+        assert_eq!(modem.receive(), Ok(None));
     }
 }

@@ -82,6 +82,16 @@ pub struct Fix {
     pub report: Report,
 }
 
+/// Position and motion from one RMC sentence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MotionFix {
+    pub position: Position,
+    pub speed_centi_knots: Option<u32>,
+    /// True course in hundredths of a degree, in 0..36000.
+    pub course_centi_degrees: Option<u16>,
+    pub received_at_ms: u32,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     Framing,
@@ -106,6 +116,7 @@ pub struct Parser {
     collecting: bool,
     awaiting_lf: bool,
     last: Option<Report>,
+    motion: Option<MotionFix>,
 }
 
 impl Parser {
@@ -116,6 +127,7 @@ impl Parser {
             collecting: false,
             awaiting_lf: false,
             last: None,
+            motion: None,
         }
     }
     pub const fn buffered_len(&self) -> usize {
@@ -144,6 +156,14 @@ impl Parser {
         })
     }
 
+    /// Latest fresh RMC motion fix. GGA never refreshes its age or supplies
+    /// its coordinates. An accepted no-fix sentence clears the motion fix.
+    pub fn motion_snapshot(&self, now_ms: u32, max_age_ms: u32) -> Option<MotionFix> {
+        let fix = self.motion?;
+        let age = now_ms.wrapping_sub(fix.received_at_ms);
+        (max_age_ms < HALF_CLOCK && age <= max_age_ms).then_some(fix)
+    }
+
     /// Each byte performs bounded work. A new '$' resynchronizes immediately;
     /// overflow discards the partial sentence until another '$'. No partial,
     /// malformed or unsupported sentence overwrites the last accepted report.
@@ -168,13 +188,16 @@ impl Parser {
             let parsed = parse_line(&self.line[..self.len], now_ms);
             self.len = 0;
             return Some(match parsed {
-                Ok(Some(report)) => {
+                Ok(Some((report, motion))) => {
                     if self
                         .last
                         .is_some_and(|last| now_ms.wrapping_sub(last.received_at_ms) >= HALF_CLOCK)
                     {
                         Event::Rejected(Error::Clock)
                     } else {
+                        if report.kind == Kind::Rmc || !report.valid {
+                            self.motion = motion;
+                        }
                         self.last = Some(report);
                         Event::Accepted(report)
                     }
@@ -208,7 +231,7 @@ impl Default for Parser {
     }
 }
 
-fn parse_line(line: &[u8], now: u32) -> Result<Option<Report>, Error> {
+fn parse_line(line: &[u8], now: u32) -> Result<Option<(Report, Option<MotionFix>)>, Error> {
     let star = line
         .iter()
         .position(|byte| *byte == b'*')
@@ -259,6 +282,7 @@ fn parse_line(line: &[u8], now: u32) -> Result<Option<Report>, Error> {
         mode: None,
         received_at_ms: now,
     };
+    let mut motion = None;
     match kind {
         Kind::Gga => {
             if f.len() != 15 {
@@ -303,16 +327,28 @@ fn parse_line(line: &[u8], now: u32) -> Result<Option<Report>, Error> {
                 return Err(Error::Fields);
             }
             report.position = position(f[3], f[4], f[5], f[6], report.valid)?;
-            optional_centi(f[7], u32::MAX)?;
-            optional_centi(f[8], 36_000)?;
+            let speed_centi_knots = optional_centi(f[7], u32::MAX)?;
+            let course_centi_degrees =
+                optional_centi(f[8], 36_000)?
+                    .map(|course| if course == 36_000 { 0 } else { course as u16 });
             report.date = date(f[9])?;
             optional_centi(f[10], 18_000)?;
             if !matches!(f[11], b"" | b"E" | b"W") || (!f[10].is_empty() && f[11].is_empty()) {
                 return Err(Error::Fields);
             }
+            // Dead reckoning, manual and simulated positions remain available
+            // as ordinary reports, but cannot drive automatic transmission.
+            if !matches!(report.mode, Some(b'E' | b'M' | b'S')) {
+                motion = report.position.map(|position| MotionFix {
+                    position,
+                    speed_centi_knots,
+                    course_centi_degrees,
+                    received_at_ms: now,
+                });
+            }
         }
     }
-    Ok(Some(report))
+    Ok(Some((report, motion)))
 }
 
 fn hex(byte: u8) -> Option<u8> {
@@ -348,39 +384,35 @@ fn optional_integer(bytes: &[u8], maximum: u32) -> Result<Option<u32>, Error> {
         .map(Some)
         .ok_or(Error::Fields)
 }
-/// Decimal numerator and power-of-ten denominator, <=9 fractional digits.
-fn decimal(bytes: &[u8]) -> Option<(u64, u64)> {
-    let dot = bytes.iter().position(|byte| *byte == b'.');
-    let whole = integer(&bytes[..dot.unwrap_or(bytes.len())])? as u64;
-    let Some(dot) = dot else {
-        return Some((whole, 1));
+/// Decimal whole part and fraction in billionths. NMEA allows up to nine
+/// fractional digits. Keep them all for time, position limits and rounding.
+fn decimal(bytes: &[u8]) -> Option<(u32, u32)> {
+    let dot = bytes.iter().position(|&b| b == b'.').unwrap_or(bytes.len());
+    let whole = integer(&bytes[..dot])?;
+    let Some(fraction) = bytes.get(dot + 1..) else {
+        return Some((whole, 0));
     };
-    let fraction = &bytes[dot + 1..];
-    if fraction.is_empty() || fraction.len() > 9 {
+    if fraction.len() > 9 {
         return None;
     }
-    let denominator = 10u64.pow(fraction.len() as u32);
-    Some((
-        whole
-            .checked_mul(denominator)?
-            .checked_add(integer(fraction)? as u64)?,
-        denominator,
-    ))
+    let mut billionths = integer(fraction)?;
+    for _ in fraction.len()..9 {
+        billionths *= 10;
+    }
+    Some((whole, billionths))
 }
+
 fn optional_centi(bytes: &[u8], maximum: u32) -> Result<Option<u32>, Error> {
     if bytes.is_empty() {
         return Ok(None);
     }
-    let (numerator, denominator) = decimal(bytes).ok_or(Error::Fields)?;
-    let scaled = numerator
+    let (whole, fraction) = decimal(bytes).ok_or(Error::Fields)?;
+    whole
         .checked_mul(100)
-        .and_then(|value| value.checked_add(denominator / 2))
-        .ok_or(Error::Fields)?
-        / denominator;
-    if scaled > maximum as u64 {
-        return Err(Error::Fields);
-    }
-    Ok(Some(scaled as u32))
+        .and_then(|base| base.checked_add((fraction + 5_000_000) / 10_000_000))
+        .filter(|&scaled| scaled <= maximum)
+        .map(Some)
+        .ok_or(Error::Fields)
 }
 fn signed_decimal(bytes: &[u8]) -> Result<(), Error> {
     if bytes.is_empty() {
@@ -398,10 +430,11 @@ fn coordinate(bytes: &[u8], hemisphere: &[u8], latitude: bool) -> Result<i32, Er
     if whole_len != degrees_digits + 2 {
         return Err(Error::Coordinate);
     }
-    let degrees = integer(&bytes[..degrees_digits]).ok_or(Error::Coordinate)? as u64;
-    let (minutes, scale) = decimal(&bytes[degrees_digits..]).ok_or(Error::Coordinate)?;
+    let degrees = integer(&bytes[..degrees_digits]).ok_or(Error::Coordinate)?;
+    let (minutes, fraction) = decimal(&bytes[degrees_digits..]).ok_or(Error::Coordinate)?;
     let maximum = if latitude { 90 } else { 180 };
-    if degrees > maximum || minutes >= 60 * scale || (degrees == maximum && minutes != 0) {
+    if degrees > maximum || minutes >= 60 || (degrees == maximum && (minutes != 0 || fraction != 0))
+    {
         return Err(Error::Coordinate);
     }
     let negative = match (latitude, hemisphere) {
@@ -409,8 +442,11 @@ fn coordinate(bytes: &[u8], hemisphere: &[u8], latitude: bool) -> Result<i32, Er
         (true, b"S") | (false, b"W") => true,
         _ => return Err(Error::Coordinate),
     };
-    // Rounding to nearest e7; the validated decimal/range bounds fit u64.
-    let value = (degrees * 10_000_000 + (minutes * 10_000_000 + scale * 30) / (scale * 60)) as i32;
+    // Convert minutes to units of 1e-7 minutes, then round once to 1e-7
+    // degrees. The discarded fraction is <1, so it cannot cross the next
+    // integer threshold when dividing by 60.
+    let minute_e7 = minutes * 10_000_000 + fraction / 100;
+    let value = (degrees * 10_000_000 + (minute_e7 + 30) / 60) as i32;
     Ok(if negative { -value } else { value })
 }
 fn position(
@@ -442,8 +478,7 @@ fn time(bytes: &[u8]) -> Result<Option<Utc>, Error> {
     }
     let hour = integer(&bytes[..2]).ok_or(Error::Time)? as u8;
     let minute = integer(&bytes[2..4]).ok_or(Error::Time)? as u8;
-    let (seconds, scale) = decimal(&bytes[4..]).ok_or(Error::Time)?;
-    let second = seconds / scale;
+    let (second, nanosecond) = decimal(&bytes[4..]).ok_or(Error::Time)?;
     if hour > 23 || minute > 59 || second > 60 || (second == 60 && (hour != 23 || minute != 59)) {
         return Err(Error::Time);
     }
@@ -451,7 +486,7 @@ fn time(bytes: &[u8]) -> Result<Option<Utc>, Error> {
         hour,
         minute,
         second: second as u8,
-        nanosecond: ((seconds % scale) * (1_000_000_000 / scale)) as u32,
+        nanosecond,
     }))
 }
 fn date(bytes: &[u8]) -> Result<Option<Date>, Error> {

@@ -2,14 +2,16 @@
 //! preview; no effect tunes RF, transmits, or changes a saved channel record.
 use crate::cb::CbChannel;
 use crate::input::InputEvent;
-use crate::locale::Language;
 use crate::text_entry::{Editor, InputMode, TextValue};
+use crate::Language;
+use uv98_codeplug::zones::ZONE_COUNT;
 use uv98_keys::Key;
 use uv98_signaling::mdc1200::UnitId;
 pub use uv98_signaling::radio_name::RadioName;
 use uv98_signaling::radio_name::NAME_BYTES;
 
 pub const CHANNEL_COUNT: usize = 1024;
+const NO_ZONE_PRIORITY: u16 = u16::MAX;
 // This is an editor bound, not a claim that the radio supports every frequency.
 pub const MIN_FREQUENCY_10HZ: u32 = 10_000;
 pub const MAX_FREQUENCY_10HZ: u32 = 99_999_999;
@@ -76,6 +78,22 @@ pub struct Context {
     pub reverse: bool,
 }
 
+impl Context {
+    const MEMORY_POSITION: u32 = 1 << 30;
+
+    fn position(self) -> u32 {
+        if self.mode == Mode::Vfo {
+            self.vfo_10hz
+        } else {
+            Self::MEMORY_POSITION
+                | (self.zone.map_or(0, |zone| u32::from(zone) + 1) << 11)
+                | self.channel.map_or(0, |channel| u32::from(channel) + 1)
+        }
+    }
+}
+
+pub const POSITION_ACTIVE_B: u32 = 1 << 31;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SideAction {
     PttA,
@@ -122,6 +140,58 @@ pub enum Screen {
     Cb,
     Mdc,
     RadioName,
+    RxToneSearch,
+    DtmfMemory,
+    AprsRx,
+}
+
+pub const DTMF_MEMORY_SLOTS: usize = 3;
+pub const DTMF_MEMORY_LENGTH: usize = 12;
+
+/// Compact view of one selected memory slot. All three saved slots stay in
+/// Controller RAM; View carries only the page's current preview or draft.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DtmfMemoryPage {
+    pub slot: u8,
+    pub bytes: [u8; DTMF_MEMORY_LENGTH],
+    pub len: u8,
+    pub active: bool,
+    pub editing: bool,
+}
+
+/// Snapshot identifies the receive source for one temporary tone search.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RxToneSource {
+    Channel { slot: Slot, channel: u16 },
+    Vfo { slot: Slot, frequency_10hz: u32 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RxToneSearch {
+    pub source: RxToneSource,
+    /// Raw `uv98_codeplug::channels::Tone` encoding; None means still waiting.
+    pub result_raw: Option<u16>,
+}
+
+impl RxToneSource {
+    /// Canonical source snapshot for a plain RX profile. Channel activity and
+    /// any hardware-specific RX guard remain the caller's responsibility.
+    pub fn for_view(view: View) -> Option<Self> {
+        if view.reverse || view.cb_for_slot(view.active_slot).is_some() {
+            return None;
+        }
+        match view.mode {
+            Mode::Channel => Some(Self::Channel {
+                slot: view.active_slot,
+                channel: view.channel?,
+            }),
+            Mode::Vfo if valid_frequency(view.vfo_10hz) => Some(Self::Vfo {
+                slot: view.active_slot,
+                frequency_10hz: view.vfo_10hz,
+            }),
+            Mode::Vfo => None,
+        }
+    }
 }
 
 /// Menu choice pages are drafts. Only MENU commits; opening, arrows and EXIT
@@ -135,6 +205,7 @@ pub enum Setting {
     Reverse,
     ActiveSlot,
     Scan,
+    ScanPriority,
     DisplayLight,
     KeyLight,
     Shift,
@@ -147,6 +218,7 @@ pub enum Setting {
     Dtmf,
     NameRoger,
     MicrophoneGain,
+    TxTimeout,
 }
 
 impl Setting {
@@ -169,7 +241,7 @@ impl Setting {
             LIGHT_MODES.len() as u8
         } else if matches!(self, Self::TopKey | Self::BottomKey) {
             4
-        } else if matches!(self, Self::Power) {
+        } else if matches!(self, Self::Power | Self::TxTimeout) {
             3
         } else {
             2
@@ -212,10 +284,15 @@ pub enum MenuItem {
     RadioName,
     NameRoger,
     MicrophoneGain,
+    ScanPriority,
+    RxToneSearch,
+    DtmfMemory,
+    TxTimeout,
+    AprsRx,
 }
 
 /// Full catalog for tooling. The visible menu uses `menu_entries`.
-pub const MENU_ITEMS: [MenuItem; 33] = [
+pub const MENU_ITEMS: [MenuItem; 38] = [
     MenuItem::Mode,
     MenuItem::Modulation,
     MenuItem::Channels,
@@ -249,6 +326,11 @@ pub const MENU_ITEMS: [MenuItem; 33] = [
     MenuItem::RadioName,
     MenuItem::NameRoger,
     MenuItem::MicrophoneGain,
+    MenuItem::ScanPriority,
+    MenuItem::RxToneSearch,
+    MenuItem::DtmfMemory,
+    MenuItem::TxTimeout,
+    MenuItem::AprsRx,
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -300,18 +382,23 @@ pub const fn menu_entries(group: Option<MenuGroup>) -> &'static [MenuEntry] {
             Item(MenuItem::Scan),
             Item(MenuItem::Spectrum),
             Item(MenuItem::Shortwave),
+            Item(MenuItem::ScanPriority),
+            Item(MenuItem::RxToneSearch),
         ],
         Some(MenuGroup::Keys) => &[
             Item(MenuItem::Shortcuts),
             Item(MenuItem::SideKeys),
             Item(MenuItem::TopKey),
             Item(MenuItem::BottomKey),
+            Item(MenuItem::DtmfMemory),
+            Item(MenuItem::TxTimeout),
         ],
         Some(MenuGroup::Navigation) => &[
             Item(MenuItem::Gps),
             Item(MenuItem::GpsEnable),
             Item(MenuItem::GpsBaud),
             Item(MenuItem::Aprs),
+            Item(MenuItem::AprsRx),
             Item(MenuItem::Mdc),
         ],
         Some(MenuGroup::System) => &[
@@ -326,9 +413,8 @@ pub const fn menu_entries(group: Option<MenuGroup>) -> &'static [MenuEntry] {
     }
 }
 
-/// Stable path for simulations/CPS. FM/AM uses its direct root entry.
-pub fn menu_location(item: MenuItem) -> (Option<MenuGroup>, u8) {
-    for group in [
+const MENU_LOCATIONS: [(Option<MenuGroup>, u8); MENU_ITEMS.len()] = {
+    let groups = [
         None,
         Some(MenuGroup::Mode),
         Some(MenuGroup::Receive),
@@ -336,15 +422,38 @@ pub fn menu_location(item: MenuItem) -> (Option<MenuGroup>, u8) {
         Some(MenuGroup::Keys),
         Some(MenuGroup::System),
         Some(MenuGroup::Navigation),
-    ] {
-        if let Some(index) = menu_entries(group)
-            .iter()
-            .position(|entry| *entry == MenuEntry::Item(item))
-        {
-            return (group, index as u8);
+    ];
+    let mut locations = [(None, u8::MAX); MENU_ITEMS.len()];
+    let mut group_index = 0;
+    while group_index < groups.len() {
+        let group = groups[group_index];
+        let entries = menu_entries(group);
+        let mut index = 0;
+        while index < entries.len() {
+            if let MenuEntry::Item(item) = entries[index] {
+                let slot = item as usize;
+                if locations[slot].1 == u8::MAX {
+                    locations[slot] = (group, index as u8);
+                }
+            }
+            index += 1;
         }
+        group_index += 1;
     }
-    unreachable!("every MenuItem belongs to a menu group")
+    let mut index = 0;
+    while index < locations.len() {
+        assert!(
+            locations[index].1 != u8::MAX,
+            "menu item missing from catalog"
+        );
+        index += 1;
+    }
+    locations
+};
+
+/// Stable path for simulations/CPS. FM/AM uses its direct root entry.
+pub fn menu_location(item: MenuItem) -> (Option<MenuGroup>, u8) {
+    MENU_LOCATIONS[item as usize]
 }
 
 /// Global lighting policies. On/Off are not timers; the runtime owns actual GPIO
@@ -378,6 +487,24 @@ impl LightMode {
             Self::Seconds30 => Some(30_000),
             Self::Seconds60 => Some(60_000),
         }
+    }
+}
+
+/// RAM-only limit for a manual PTT session.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum TxTimeout {
+    Seconds10,
+    Seconds20,
+    #[default]
+    Seconds30,
+}
+
+impl TxTimeout {
+    const CHOICES: [Self; 3] = [Self::Seconds10, Self::Seconds20, Self::Seconds30];
+
+    pub const fn milliseconds(self) -> u32 {
+        (self as u32 + 1) * 10_000
     }
 }
 
@@ -472,6 +599,13 @@ pub enum Request {
     SetDisplayLight(LightMode),
     SetKeyLight(LightMode),
     StartSpectrum,
+    StartRxToneSearch {
+        source: RxToneSource,
+    },
+    ApplyRxToneOverride {
+        source: RxToneSource,
+        tone_raw: u16,
+    },
     StopSpectrum,
     /// Apply the volatile span/step selection: stop the current sweep and start
     /// a new one around the same confirmed receive frequency.
@@ -536,6 +670,10 @@ pub enum Notice {
     InvalidMdcId,
     NameSaved,
     NameSaveUnconfirmed,
+    ScanPrioritySet,
+    ScanPriorityCleared,
+    ScanPriorityUnavailable,
+    ScanPriorityStopScan,
 }
 
 pub const SW_MIN_KHZ: u16 = 1_700;
@@ -677,6 +815,58 @@ pub enum AprsStatus {
     Failed,
 }
 
+impl AprsStatus {
+    pub(crate) const fn can_send(self) -> bool {
+        matches!(self, Self::Ready | Self::Sent | Self::Failed)
+    }
+}
+
+const APRS_RX_CAPACITY: u8 = 4;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AprsPacket {
+    source: [u8; 9],
+    information: [u8; 40],
+    source_len: u8,
+    information_len: u8,
+}
+
+impl AprsPacket {
+    #[doc(hidden)]
+    pub const EMPTY: Self = Self {
+        source: [0; 9],
+        information: [0; 40],
+        source_len: 0,
+        information_len: 0,
+    };
+
+    fn new(source: &[u8], information: &[u8]) -> Self {
+        fn copy_printable(destination: &mut [u8], bytes: &[u8]) -> u8 {
+            for (out, &byte) in destination.iter_mut().zip(bytes) {
+                *out = if byte.is_ascii_graphic() || byte == b' ' {
+                    byte
+                } else {
+                    b'?'
+                };
+            }
+            bytes.len().min(destination.len()) as u8
+        }
+
+        let mut packet = Self::EMPTY;
+        packet.source_len = copy_printable(&mut packet.source, source);
+        packet.information_len = copy_printable(&mut packet.information, information);
+        packet
+    }
+
+    pub fn source(&self) -> &str {
+        core::str::from_utf8(&self.source[..usize::from(self.source_len)]).unwrap_or("")
+    }
+
+    pub fn information(&self) -> &str {
+        core::str::from_utf8(&self.information[..usize::from(self.information_len)]).unwrap_or("")
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MdcSettings {
     /// Off, begin, end, both. The runtime validates every command.
@@ -694,7 +884,7 @@ pub enum MdcDraft {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct View {
-    #[cfg(any(test, feature = "locale-all"))]
+    #[cfg(any(test, feature = "locale-all", feature = "renderer-tests"))]
     pub language: Language,
     /// Committed channel grid context for slot A, independent of edit focus.
     pub cb: Option<CbChannel>,
@@ -704,6 +894,7 @@ pub struct View {
     pub name_roger_enabled: bool,
     /// BK4819 microphone sensitivity code, 0..31. Zero is minimum, not mute.
     pub microphone_gain: u8,
+    pub tx_timeout: TxTimeout,
     pub radio_name_draft: Option<Editor<NAME_BYTES>>,
     pub mdc_option: u8,
     pub mdc_draft: Option<MdcDraft>,
@@ -711,6 +902,14 @@ pub struct View {
     pub gps_baud: u8,
     pub gps_status: GpsStatus,
     pub aprs_status: AprsStatus,
+    /// The runtime confirms a supported simplex source and fresh RMC fix.
+    pub aprs_auto_available: bool,
+    /// Explicit operator opt-in, scoped to the APRS beacon page.
+    pub aprs_auto_armed: bool,
+    pub aprs_rx_available: bool,
+    pub aprs_rx_packet: AprsPacket,
+    pub aprs_rx_count: u8,
+    pub aprs_rx_index: u8,
     pub aprs_callsign: [u8; 6],
     pub aprs_ssid: u8,
     pub dtmf_enabled: bool,
@@ -785,12 +984,21 @@ pub struct View {
     pub ptt_slot: Option<Slot>,
     pub setting: Option<Setting>,
     pub setting_index: u8,
+    /// Committed status for the channel being edited in the priority page.
+    pub scan_priority_enabled: bool,
     /// Confirmed global RAM policy, not proof that a physical lamp is lit.
     pub display_light: LightMode,
     pub key_light: LightMode,
+    pub rx_tone_search: Option<RxToneSearch>,
+    pub dtmf_memory_page: Option<DtmfMemoryPage>,
 }
 
 impl View {
+    #[doc(hidden)]
+    pub fn can_arm_aprs_auto(&self) -> bool {
+        self.aprs_auto_available && self.aprs_status.can_send() && !self.ptt_down && !self.locked
+    }
+
     /// Keep one copy of this large comparison at the MCU rendering boundaries.
     #[cfg_attr(target_arch = "arm", inline(never))]
     pub fn same_view(&self, other: &Self) -> bool {
@@ -798,11 +1006,11 @@ impl View {
     }
 
     pub const fn language(&self) -> Language {
-        #[cfg(any(test, feature = "locale-all"))]
+        #[cfg(any(test, feature = "locale-all", feature = "renderer-tests"))]
         {
             self.language
         }
-        #[cfg(not(any(test, feature = "locale-all")))]
+        #[cfg(not(any(test, feature = "locale-all", feature = "renderer-tests")))]
         {
             Language::CURRENT
         }
@@ -916,11 +1124,18 @@ pub struct Controller {
     zones: [u8; 32],
     channel_order: [u16; 200],
     channel_order_len: u8,
+    /// One volatile scan priority per stored zone ID, shared by A and B.
+    zone_priorities: [u16; ZONE_COUNT],
     radio_power: Option<u8>,
     name_last_digit_at: Option<u32>,
     radio_monitor: bool,
     radio_am: bool,
     cancel_temporary: bool,
+    dtmf_memories: [[u8; DTMF_MEMORY_LENGTH]; DTMF_MEMORY_SLOTS],
+    dtmf_memory_lengths: [u8; DTMF_MEMORY_SLOTS],
+    active_dtmf_memory: u8,
+    aprs_rx_history: [AprsPacket; APRS_RX_CAPACITY as usize],
+    aprs_rx_head: u8,
 }
 
 impl Controller {
@@ -949,7 +1164,7 @@ impl Controller {
         Self {
             spectrum_last_bin: SPECTRUM_INTERVALS[0],
             view: View {
-                #[cfg(any(test, feature = "locale-all"))]
+                #[cfg(any(test, feature = "locale-all", feature = "renderer-tests"))]
                 language: Language::CURRENT,
                 cb: None,
                 cb_draft: None,
@@ -957,6 +1172,7 @@ impl Controller {
                 radio_name: None,
                 name_roger_enabled: false,
                 microphone_gain: 16,
+                tx_timeout: TxTimeout::default(),
                 radio_name_draft: None,
                 mdc_option: 0,
                 mdc_draft: None,
@@ -964,6 +1180,12 @@ impl Controller {
                 gps_baud: 1,
                 gps_status: GpsStatus::default(),
                 aprs_status: AprsStatus::Unconfigured,
+                aprs_auto_available: false,
+                aprs_auto_armed: false,
+                aprs_rx_available: false,
+                aprs_rx_packet: AprsPacket::EMPTY,
+                aprs_rx_count: 0,
+                aprs_rx_index: 0,
                 aprs_callsign: [b' '; 6],
                 aprs_ssid: 0,
                 dtmf_enabled: true,
@@ -1040,8 +1262,11 @@ impl Controller {
                 ptt_slot: None,
                 setting: None,
                 setting_index: 0,
+                scan_priority_enabled: false,
                 display_light: LightMode::On,
                 key_light: LightMode::On,
+                rx_tone_search: None,
+                dtmf_memory_page: None,
             },
             request: None,
             ptt_tx_requested: false,
@@ -1055,11 +1280,17 @@ impl Controller {
             zones: [0; 32],
             channel_order: [0; 200],
             channel_order_len: 0,
+            zone_priorities: [NO_ZONE_PRIORITY; ZONE_COUNT],
             radio_power: None,
             name_last_digit_at: None,
             radio_monitor: false,
             radio_am: false,
             cancel_temporary: false,
+            dtmf_memories: [[0; DTMF_MEMORY_LENGTH]; DTMF_MEMORY_SLOTS],
+            dtmf_memory_lengths: [0; DTMF_MEMORY_SLOTS],
+            active_dtmf_memory: 0,
+            aprs_rx_history: [AprsPacket::EMPTY; APRS_RX_CAPACITY as usize],
+            aprs_rx_head: 0,
         }
     }
 
@@ -1075,6 +1306,104 @@ impl Controller {
 
     pub const fn view_ref(&self) -> &View {
         &self.view
+    }
+
+    /// Currently active, committed DTMF sequence. Empty until a slot is saved.
+    pub fn dtmf_memory(&self) -> &[u8] {
+        let slot = usize::from(self.active_dtmf_memory);
+        &self.dtmf_memories[slot][..usize::from(self.dtmf_memory_lengths[slot])]
+    }
+
+    fn dtmf_memory_page(&self, slot: u8) -> DtmfMemoryPage {
+        let slot = slot.min((DTMF_MEMORY_SLOTS - 1) as u8);
+        let index = usize::from(slot);
+        DtmfMemoryPage {
+            slot,
+            bytes: self.dtmf_memories[index],
+            len: self.dtmf_memory_lengths[index],
+            active: slot == self.active_dtmf_memory,
+            editing: false,
+        }
+    }
+
+    fn open_dtmf_memory(&mut self) {
+        self.view.dtmf_memory_page = Some(self.dtmf_memory_page(self.active_dtmf_memory));
+        self.view.screen = Screen::DtmfMemory;
+    }
+
+    fn dtmf_memory_input(&mut self, event: InputEvent) {
+        let Some(mut page) = self.view.dtmf_memory_page else {
+            self.view.screen = Screen::Menu;
+            return;
+        };
+        let index = usize::from(page.slot);
+        if page.editing {
+            match event {
+                InputEvent::Short(Key::Up) | InputEvent::Repeat(Key::Up) => {
+                    page.len = page.len.saturating_sub(1);
+                    self.view.notice = Notice::None;
+                }
+                InputEvent::Short(Key::Menu) => {
+                    self.dtmf_memories[index] = page.bytes;
+                    self.dtmf_memory_lengths[index] = page.len;
+                    self.active_dtmf_memory = page.slot;
+                    page.active = true;
+                    page.editing = false;
+                    self.view.notice = Notice::None;
+                }
+                InputEvent::Short(Key::Exit) | InputEvent::Hold(Key::Exit) => {
+                    page = self.dtmf_memory_page(page.slot);
+                    self.view.notice = Notice::None;
+                }
+                InputEvent::Short(Key::Star) => self.append_dtmf_memory_symbol(&mut page, b'*'),
+                InputEvent::Short(Key::Hash) => self.append_dtmf_memory_symbol(&mut page, b'#'),
+                InputEvent::Short(key) => {
+                    if let Some(digit) = digit(key) {
+                        self.append_dtmf_memory_symbol(&mut page, b'0' + digit);
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            match event {
+                InputEvent::Short(Key::Up) | InputEvent::Repeat(Key::Up) => {
+                    page = self.dtmf_memory_page(adjacent_index(
+                        page.slot,
+                        DTMF_MEMORY_SLOTS as u8,
+                        false,
+                    ));
+                }
+                InputEvent::Short(Key::Down) | InputEvent::Repeat(Key::Down) => {
+                    page = self.dtmf_memory_page(adjacent_index(
+                        page.slot,
+                        DTMF_MEMORY_SLOTS as u8,
+                        true,
+                    ));
+                }
+                InputEvent::Short(Key::Menu) => {
+                    page.editing = true;
+                    self.view.notice = Notice::None;
+                }
+                InputEvent::Short(Key::Exit) | InputEvent::Hold(Key::Exit) => {
+                    self.view.dtmf_memory_page = None;
+                    self.view.screen = Screen::Menu;
+                    return;
+                }
+                _ => {}
+            }
+        }
+        self.view.dtmf_memory_page = Some(page);
+    }
+
+    fn append_dtmf_memory_symbol(&mut self, page: &mut DtmfMemoryPage, symbol: u8) {
+        let len = usize::from(page.len);
+        if len == DTMF_MEMORY_LENGTH {
+            self.view.notice = Notice::EntryFull;
+            return;
+        }
+        page.bytes[len] = symbol;
+        page.len += 1;
+        self.view.notice = Notice::None;
     }
 
     /// Commit only after the spectrum backend restored normal RX successfully.
@@ -1117,6 +1446,91 @@ impl Controller {
         self.radio_am = am;
     }
 
+    /// Accept only a decoded, non-empty tone for the same source that started
+    /// the active search. `None` returns the display to its waiting state.
+    pub fn set_rx_tone_search_result(&mut self, result_raw: Option<u16>) -> bool {
+        let Some(search) = self.view.rx_tone_search else {
+            return false;
+        };
+        if self.view.screen != Screen::RxToneSearch
+            || self.rx_tone_source() != Some(search.source)
+            || search.result_raw == result_raw
+            || result_raw.is_some_and(|raw| {
+                !matches!(
+                    uv98_codeplug::channels::Tone::decode(raw),
+                    Some(
+                        uv98_codeplug::channels::Tone::Ctcss { .. }
+                            | uv98_codeplug::channels::Tone::Dcs { .. }
+                    )
+                )
+            })
+        {
+            return false;
+        }
+        self.view.rx_tone_search = Some(RxToneSearch {
+            result_raw,
+            ..search
+        });
+        true
+    }
+
+    /// Runtime guard rejected the request. Return to the menu without applying
+    /// any tone or changing the receive source.
+    pub fn reject_rx_tone_search(&mut self) {
+        if self.view.screen == Screen::RxToneSearch {
+            self.view.rx_tone_search = None;
+            self.view.screen = Screen::Menu;
+            self.view.notice = Notice::RadioUnavailable;
+        }
+    }
+
+    fn rx_tone_source(&self) -> Option<RxToneSource> {
+        RxToneSource::for_view(self.view)
+    }
+
+    fn start_rx_tone_search(&mut self, bitmap: &[u8; 128]) {
+        let source = self.rx_tone_source().filter(|source| {
+            !self.view.locked
+                && !self.view.ptt_down
+                && self.view.scan == ScanState::Stopped
+                && !self.radio_am
+                && match source {
+                    RxToneSource::Channel { channel, .. } => {
+                        channel_active(bitmap, *channel)
+                            && (self.view.zone.is_none()
+                                || self.zone_exists(self.view.zone.unwrap())
+                                    && self.channel_order().contains(channel))
+                    }
+                    RxToneSource::Vfo { .. } => true,
+                }
+        });
+        let Some(source) = source else {
+            self.view.notice = Notice::RadioUnavailable;
+            return;
+        };
+        self.view.rx_tone_search = Some(RxToneSearch {
+            source,
+            result_raw: None,
+        });
+        self.view.screen = Screen::RxToneSearch;
+        self.queue_request(Request::StartRxToneSearch { source });
+    }
+
+    fn rx_tone_search_ptt(&mut self, index: usize, down: bool) {
+        self.view.side_down[index] = down;
+        self.view.ptt_down = self.view.side_down.iter().any(|&pressed| pressed);
+        self.view.last_key = Some(if index == 0 { Key::Ptt } else { Key::Aux16 });
+        self.view.ptt_slot = None;
+        self.ptt_tx_requested = false;
+        if down {
+            self.ptt_suppressed_until_release = true;
+            self.view.rx_tone_search = None;
+            self.view.screen = Screen::Menu;
+        } else if !self.view.ptt_down {
+            self.ptt_suppressed_until_release = false;
+        }
+    }
+
     pub fn apply_radio_name_settings(&mut self, name: Option<RadioName>, enabled: bool) {
         self.view.radio_name = name;
         self.view.name_roger_enabled = enabled;
@@ -1143,6 +1557,7 @@ impl Controller {
             Setting::Dtmf => u8::from(self.view.dtmf_enabled),
             Setting::NameRoger => u8::from(self.view.name_roger_enabled),
             Setting::MicrophoneGain => self.view.microphone_gain,
+            Setting::TxTimeout => self.view.tx_timeout as u8,
             Setting::TopKey => {
                 self.view.top_draft = self.view.top_key;
                 self.view.top_action
@@ -1162,6 +1577,7 @@ impl Controller {
             Setting::Reverse => u8::from(self.view.reverse),
             Setting::ActiveSlot => u8::from(self.view.active_slot == Slot::B),
             Setting::Scan => u8::from(self.view.scan.accepts_cursor()),
+            Setting::ScanPriority => u8::from(self.view.scan_priority_enabled),
             Setting::DisplayLight => LIGHT_MODES
                 .iter()
                 .position(|mode| *mode == self.view.display_light)
@@ -1187,6 +1603,7 @@ impl Controller {
             Setting::Dtmf => self.view.dtmf_enabled = selected != 0,
             Setting::NameRoger => self.view.name_roger_enabled = selected != 0,
             Setting::MicrophoneGain => self.apply_microphone_gain(selected),
+            Setting::TxTimeout => self.view.tx_timeout = TxTimeout::CHOICES[selected as usize],
             Setting::BandPreset => {
                 // Presets select frequency, modulation and step together. The
                 // RF runtime still derives its relay route from frequency.
@@ -1280,6 +1697,10 @@ impl Controller {
                     self.toggle_scan(bitmap);
                 }
             }
+            Setting::ScanPriority => {
+                self.set_scan_zone_priority(bitmap, selected != 0);
+                return;
+            }
         }
         self.view.screen = Screen::Menu;
     }
@@ -1290,6 +1711,45 @@ impl Controller {
         } else {
             self.contexts[slot.index()]
         }
+    }
+
+    pub fn positions(&self) -> [u32; 2] {
+        [
+            self.context(Slot::A).position()
+                | if self.view.active_slot == Slot::B {
+                    POSITION_ACTIVE_B
+                } else {
+                    0
+                },
+            self.context(Slot::B).position(),
+        ]
+    }
+
+    /// Restore only the boot position. The App checks current zone membership
+    /// and rebuilds both channel records before either slot is used for RF.
+    pub fn restore_position(&mut self, slot: Slot, word: u32) -> Change {
+        let before = self.view;
+        self.switch_slot(slot);
+        self.view.notice = Notice::None;
+        let mut context = self.current_context();
+        if valid_frequency(word) {
+            context.mode = Mode::Vfo;
+            context.vfo_10hz = word;
+            context.zone = None;
+        } else if word & !0x000f_ffff == Context::MEMORY_POSITION {
+            let zone = (word >> 11) & 0x1ff;
+            let channel = word & 0x7ff;
+            context.mode = Mode::Channel;
+            context.zone = (1..=256)
+                .contains(&zone)
+                .then(|| (zone - 1) as u8)
+                .filter(|&zone| self.zone_exists(zone));
+            context.channel = (1..=CHANNEL_COUNT as u32)
+                .contains(&channel)
+                .then(|| (channel - 1) as u16);
+        }
+        self.load_context(context);
+        self.change_since(before)
     }
 
     /// Preserve CPS zone membership order, dropping invalid or repeated slots.
@@ -1353,6 +1813,52 @@ impl Controller {
             }
         }
         None
+    }
+
+    /// Current named-zone scan priority, if it is still an active member.
+    /// A and B share the designation for a zone with the same stored ID.
+    pub fn scan_zone_priority(&self, bitmap: &[u8; 128]) -> Option<u16> {
+        if self.view.mode != Mode::Channel || self.selected_cb().is_some() {
+            return None;
+        }
+        let zone = self.view.zone?;
+        if !self.zone_exists(zone) {
+            return None;
+        }
+        let channel = self.zone_priorities[zone as usize];
+        (channel != NO_ZONE_PRIORITY
+            && channel_active(bitmap, channel)
+            && self.channel_order().contains(&channel))
+        .then_some(channel)
+    }
+
+    fn set_scan_zone_priority(&mut self, bitmap: &[u8; 128], enabled: bool) {
+        self.view.screen = Screen::Home;
+        let Some(zone) = self.view.zone else {
+            self.view.notice = Notice::ScanPriorityUnavailable;
+            return;
+        };
+        let Some(channel) = self.view.channel.filter(|&channel| {
+            self.view.scan == ScanState::Stopped
+                && !self.view.locked
+                && self.view.mode == Mode::Channel
+                && self.selected_cb().is_none()
+                && self.zone_exists(zone)
+                && channel_active(bitmap, channel)
+                && self.channel_order().contains(&channel)
+        }) else {
+            self.view.notice = Notice::ScanPriorityUnavailable;
+            return;
+        };
+
+        let priority = &mut self.zone_priorities[zone as usize];
+        if enabled {
+            *priority = channel;
+            self.view.notice = Notice::ScanPrioritySet;
+        } else if *priority == channel {
+            *priority = NO_ZONE_PRIORITY;
+            self.view.notice = Notice::ScanPriorityCleared;
+        }
     }
 
     fn current_context(&self) -> Context {
@@ -1753,8 +2259,20 @@ impl Controller {
     }
 
     fn change_since(&mut self, before: View) -> Change {
+        if self.view.rx_tone_search.is_some()
+            && (self.view.screen != Screen::RxToneSearch
+                || self.rx_tone_source() != self.view.rx_tone_search.map(|search| search.source))
+        {
+            self.view.rx_tone_search = None;
+        }
+        if self.view.screen != Screen::DtmfMemory {
+            self.view.dtmf_memory_page = None;
+        }
+        if self.view.aprs_auto_armed && (self.view.screen != Screen::Aprs || self.view.ptt_down) {
+            self.disarm_aprs_auto();
+        }
         Change {
-            redraw: self.view != before || self.view.screen == Screen::Keys,
+            redraw: !self.view.same_view(&before) || self.view.screen == Screen::Keys,
             channel_changed: self.view.channel != before.channel,
             request: self.request.take(),
             cancel_temporary: core::mem::take(&mut self.cancel_temporary),
@@ -1793,6 +2311,38 @@ impl Controller {
 
     pub fn set_aprs_status(&mut self, status: AprsStatus) {
         self.view.aprs_status = status;
+        if matches!(status, AprsStatus::Unconfigured | AprsStatus::Unsupported) {
+            self.disarm_aprs_auto();
+        }
+    }
+
+    pub fn disarm_aprs_auto(&mut self) {
+        self.view.aprs_auto_armed = false;
+    }
+
+    pub fn set_aprs_auto_available(&mut self, available: bool) {
+        self.view.aprs_auto_available = available;
+    }
+
+    pub fn set_aprs_rx_available(&mut self, available: bool) {
+        self.view.aprs_rx_available = available;
+    }
+
+    pub fn push_aprs_packet(&mut self, source: &[u8], information: &[u8]) {
+        self.aprs_rx_head = (self.aprs_rx_head + APRS_RX_CAPACITY - 1) % APRS_RX_CAPACITY;
+        self.aprs_rx_history[usize::from(self.aprs_rx_head)] = AprsPacket::new(source, information);
+        self.view.aprs_rx_count = (self.view.aprs_rx_count + 1).min(APRS_RX_CAPACITY);
+        let index = self.view.aprs_rx_index;
+        // Follow live at the newest packet. While browsing, keep the selected
+        // packet until it ages out of the four-entry history.
+        self.select_aprs_packet(if index == 0 { 0 } else { index + 1 });
+    }
+
+    fn select_aprs_packet(&mut self, index: u8) {
+        let index = index.min(self.view.aprs_rx_count.saturating_sub(1));
+        self.view.aprs_rx_index = index;
+        let slot = (self.aprs_rx_head + index) % APRS_RX_CAPACITY;
+        self.view.aprs_rx_packet = self.aprs_rx_history[usize::from(slot)];
     }
 
     pub fn set_aprs_identity(&mut self, callsign: [u8; 6], ssid: u8) {
@@ -2053,14 +2603,54 @@ impl Controller {
     fn apply(&mut self, event: InputEvent, bitmap: &[u8; 128]) {
         match event {
             InputEvent::Ptt(down) => {
+                if self.view.screen == Screen::RxToneSearch {
+                    self.rx_tone_search_ptt(0, down);
+                    return;
+                }
                 self.side_event(0, down, bitmap);
                 return;
             }
             InputEvent::PttB(down) => {
+                if self.view.screen == Screen::RxToneSearch {
+                    self.rx_tone_search_ptt(1, down);
+                    return;
+                }
                 self.side_event(1, down, bitmap);
                 return;
             }
             _ => {}
+        }
+        if self.view.screen == Screen::RxToneSearch {
+            match event {
+                InputEvent::Short(Key::Exit) | InputEvent::Hold(Key::Exit) => {
+                    self.view.rx_tone_search = None;
+                    self.view.screen = Screen::Menu;
+                }
+                InputEvent::Short(Key::Menu) => self.apply_rx_tone_search(),
+                _ => {}
+            }
+            return;
+        }
+        if self.view.screen == Screen::DtmfMemory {
+            self.dtmf_memory_input(event);
+            return;
+        }
+        if self.view.screen == Screen::AprsRx {
+            match event {
+                InputEvent::Hold(Key::Exit) => {
+                    self.view.screen = Screen::Home;
+                    self.cancel_temporary = true;
+                }
+                InputEvent::Short(Key::Exit) => self.view.screen = Screen::Menu,
+                InputEvent::Short(Key::Up) | InputEvent::Repeat(Key::Up) => {
+                    self.select_aprs_packet(self.view.aprs_rx_index.saturating_sub(1));
+                }
+                InputEvent::Short(Key::Down) | InputEvent::Repeat(Key::Down) => {
+                    self.select_aprs_packet(self.view.aprs_rx_index + 1);
+                }
+                _ => {}
+            }
+            return;
         }
         if self.view.screen == Screen::Gps || self.view.screen == Screen::Aprs {
             match event {
@@ -2072,13 +2662,12 @@ impl Controller {
                 InputEvent::Short(Key::Menu) if self.view.screen == Screen::Gps => {
                     self.open_setting(Setting::GpsEnable)
                 }
-                InputEvent::Short(Key::Menu)
-                    if matches!(
-                        self.view.aprs_status,
-                        AprsStatus::Ready | AprsStatus::Sent | AprsStatus::Failed
-                    ) =>
-                {
+                InputEvent::Short(Key::Menu) if self.view.aprs_status.can_send() => {
                     self.queue_request(Request::SendAprs)
+                }
+                InputEvent::Short(Key::Star) if self.view.screen == Screen::Aprs => {
+                    self.view.aprs_auto_armed =
+                        !self.view.aprs_auto_armed && self.view.can_arm_aprs_auto();
                 }
                 _ => {}
             }
@@ -2360,9 +2949,11 @@ impl Controller {
                 | Screen::Crossband
                 | Screen::Gps
                 | Screen::Aprs
+                | Screen::AprsRx
                 | Screen::Cb
                 | Screen::Mdc
                 | Screen::RadioName
+                | Screen::DtmfMemory
         ) {
             self.view.ptt_slot = None;
             self.ptt_suppressed_until_release = true;
@@ -3063,6 +3654,35 @@ impl Controller {
         }
     }
 
+    fn apply_rx_tone_search(&mut self) {
+        let Some(search) = self.view.rx_tone_search else {
+            return;
+        };
+        let Some(tone_raw) = search.result_raw.filter(|raw| {
+            matches!(
+                uv98_codeplug::channels::Tone::decode(*raw),
+                Some(
+                    uv98_codeplug::channels::Tone::Ctcss { .. }
+                        | uv98_codeplug::channels::Tone::Dcs { .. }
+                )
+            )
+        }) else {
+            return;
+        };
+        if self.rx_tone_source() != Some(search.source) {
+            self.view.rx_tone_search = None;
+            self.view.screen = Screen::Menu;
+            self.view.notice = Notice::RadioUnavailable;
+            return;
+        }
+        self.view.rx_tone_search = None;
+        self.view.screen = Screen::Menu;
+        self.queue_request(Request::ApplyRxToneOverride {
+            source: search.source,
+            tone_raw,
+        });
+    }
+
     fn confirm(&mut self, bitmap: &[u8; 128]) {
         if let Some(entry) = self.view.entry {
             match entry.kind {
@@ -3141,6 +3761,7 @@ impl Controller {
                     MenuItem::Dtmf => self.open_setting(Setting::Dtmf),
                     MenuItem::NameRoger => self.open_setting(Setting::NameRoger),
                     MenuItem::MicrophoneGain => self.open_setting(Setting::MicrophoneGain),
+                    MenuItem::TxTimeout => self.open_setting(Setting::TxTimeout),
                     MenuItem::RadioName => {
                         let text = self.view.radio_name.as_ref().map_or("", RadioName::as_str);
                         self.view.radio_name_draft = Some(Editor::new(
@@ -3152,6 +3773,10 @@ impl Controller {
                     }
                     MenuItem::Gps => self.view.screen = Screen::Gps,
                     MenuItem::Aprs => self.view.screen = Screen::Aprs,
+                    MenuItem::AprsRx => {
+                        self.select_aprs_packet(0);
+                        self.view.screen = Screen::AprsRx;
+                    }
                     MenuItem::Mode => self.open_setting(Setting::Mode),
                     MenuItem::Channels => self.open_channels(bitmap),
                     MenuItem::ChannelDetails => self.view.screen = Screen::ChannelDetails,
@@ -3170,6 +3795,18 @@ impl Controller {
                     MenuItem::About => self.view.screen = Screen::About,
                     MenuItem::Reverse => self.open_setting(Setting::Reverse),
                     MenuItem::Scan => self.open_setting(Setting::Scan),
+                    MenuItem::ScanPriority => {
+                        if self.view.scan != ScanState::Stopped {
+                            self.view.notice = Notice::ScanPriorityStopScan;
+                            return;
+                        }
+                        self.view.scan_priority_enabled = self
+                            .scan_zone_priority(bitmap)
+                            .is_some_and(|priority| Some(priority) == self.view.channel);
+                        self.open_setting(Setting::ScanPriority);
+                    }
+                    MenuItem::RxToneSearch => self.start_rx_tone_search(bitmap),
+                    MenuItem::DtmfMemory => self.open_dtmf_memory(),
                     MenuItem::Shortcuts => self.view.screen = Screen::Shortcuts,
                     MenuItem::Power => self.open_setting(Setting::Power),
                     MenuItem::Monitor => self.open_setting(Setting::Monitor),
@@ -3245,11 +3882,14 @@ impl Controller {
                 self.view.screen = Screen::SideKeys;
             }
             Screen::Setting => self.commit_setting(bitmap),
+            Screen::RxToneSearch => self.apply_rx_tone_search(),
+            Screen::DtmfMemory => {}
             // A test page must allow MENU/EXIT to leave; other keys stay visible.
             Screen::Shortwave
             | Screen::Crossband
             | Screen::Gps
             | Screen::Aprs
+            | Screen::AprsRx
             | Screen::Cb
             | Screen::Mdc
             | Screen::RadioName => {}
@@ -3272,6 +3912,11 @@ impl Controller {
             } else {
                 self.view.screen = Screen::Home;
             }
+            return;
+        }
+        if self.view.screen == Screen::RxToneSearch {
+            self.view.rx_tone_search = None;
+            self.view.screen = Screen::Menu;
             return;
         }
         self.view.screen = match self.view.screen {
@@ -3733,6 +4378,194 @@ mod tests {
     }
 
     #[test]
+    fn aprs_auto_requires_opt_in_and_disarms_on_exit_or_ptt() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        choose_menu(&mut ui, MenuItem::Aprs, &bitmap);
+        assert!(!ui.view.aprs_auto_available);
+        assert!(!ui.view.aprs_auto_armed);
+        press(&mut ui, Key::Star, &bitmap);
+        assert!(!ui.view.aprs_auto_armed);
+
+        ui.set_aprs_status(AprsStatus::Ready);
+        assert_eq!(press(&mut ui, Key::Star, &bitmap).request, None);
+        assert!(!ui.view.aprs_auto_armed);
+        assert_eq!(
+            press(&mut ui, Key::Menu, &bitmap).request,
+            Some(Request::SendAprs)
+        );
+        ui.set_aprs_auto_available(true);
+        assert_eq!(press(&mut ui, Key::Star, &bitmap).request, None);
+        assert!(ui.view.aprs_auto_armed);
+        assert_eq!(
+            press(&mut ui, Key::Menu, &bitmap).request,
+            Some(Request::SendAprs)
+        );
+        ui.set_aprs_auto_available(false);
+        assert!(ui.view.aprs_auto_armed);
+        press(&mut ui, Key::Star, &bitmap);
+        assert!(!ui.view.aprs_auto_armed);
+        ui.set_aprs_auto_available(true);
+        ui.set_aprs_status(AprsStatus::NoFix);
+        press(&mut ui, Key::Star, &bitmap);
+        assert!(!ui.view.aprs_auto_armed);
+
+        ui.set_aprs_status(AprsStatus::Ready);
+        for (down, up) in [
+            (InputEvent::Ptt(true), InputEvent::Ptt(false)),
+            (InputEvent::PttB(true), InputEvent::PttB(false)),
+        ] {
+            press(&mut ui, Key::Star, &bitmap);
+            assert!(ui.view.aprs_auto_armed);
+            let change = ui.handle(down, &bitmap);
+            assert!(!ui.view.aprs_auto_armed);
+            assert_eq!(change.request, None);
+            assert!(!change.ptt_tx_requested);
+            assert_eq!(ui.view.screen, Screen::Aprs);
+            press(&mut ui, Key::Star, &bitmap);
+            assert!(!ui.view.aprs_auto_armed);
+            ui.handle(up, &bitmap);
+        }
+
+        press(&mut ui, Key::Star, &bitmap);
+        ui.set_aprs_status(AprsStatus::Unsupported);
+        assert!(!ui.view.aprs_auto_armed);
+        ui.set_aprs_status(AprsStatus::Ready);
+        assert!(!ui.view.aprs_auto_armed);
+
+        press(&mut ui, Key::Star, &bitmap);
+        press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(ui.view.screen, Screen::Menu);
+        assert!(!ui.view.aprs_auto_armed);
+        press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(ui.view.screen, Screen::Aprs);
+        assert!(!ui.view.aprs_auto_armed);
+        press(&mut ui, Key::Star, &bitmap);
+        ui.handle(InputEvent::Hold(Key::Exit), &bitmap);
+        assert_eq!(ui.view.screen, Screen::Home);
+        assert!(!ui.view.aprs_auto_armed);
+    }
+
+    #[test]
+    fn aprs_rx_browses_four_packets_and_remains_receive_only() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        ui.set_aprs_status(AprsStatus::Ready);
+        let opened = choose_menu(&mut ui, MenuItem::AprsRx, &bitmap);
+        assert_eq!(opened.request, None);
+        assert_eq!(ui.view.screen, Screen::AprsRx);
+        assert!(!ui.view.aprs_rx_available);
+        assert_eq!(ui.view.aprs_rx_count, 0);
+        for event in [
+            InputEvent::Short(Key::Menu),
+            InputEvent::Short(Key::Down),
+            InputEvent::Short(Key::Up),
+            InputEvent::Short(Key::Aux16),
+            InputEvent::Short(Key::Aux17),
+            InputEvent::Ptt(true),
+            InputEvent::Ptt(false),
+            InputEvent::PttB(true),
+            InputEvent::PttB(false),
+        ] {
+            let change = ui.handle(event, &bitmap);
+            assert_eq!(change.request, None);
+            assert!(!change.ptt_tx_requested);
+            assert_eq!(ui.view.ptt_slot, None);
+        }
+        assert_eq!(ui.view.aprs_rx_index, 0);
+
+        ui.set_aprs_rx_available(true);
+        ui.push_aprs_packet(b"N0CALL-10 extra", &[0x1f; 64]);
+        assert_eq!(ui.view.aprs_rx_packet.source(), "N0CALL-10");
+        assert_eq!(ui.view.aprs_rx_packet.information().len(), 40);
+        assert!(ui
+            .view
+            .aprs_rx_packet
+            .information()
+            .bytes()
+            .all(|b| b == b'?'));
+        ui.push_aprs_packet(b"A", b"Two");
+        press(&mut ui, Key::Down, &bitmap);
+        ui.push_aprs_packet(b"B", b"Three");
+        assert_eq!(ui.view.aprs_rx_index, 2);
+        assert_eq!(ui.view.aprs_rx_packet.source(), "N0CALL-10");
+        ui.push_aprs_packet(b"C", b"Four");
+        assert_eq!(ui.view.aprs_rx_packet.source(), "N0CALL-10");
+        ui.push_aprs_packet(b"D", b"Five");
+        assert_eq!(ui.view.aprs_rx_count, 4);
+        assert_eq!(ui.view.aprs_rx_index, 3);
+        assert_eq!(ui.view.aprs_rx_packet.source(), "A");
+        ui.set_aprs_rx_available(false);
+        ui.handle(InputEvent::Repeat(Key::Up), &bitmap);
+        assert_eq!(ui.view.aprs_rx_packet.source(), "B");
+
+        ui.handle(InputEvent::Ptt(true), &bitmap);
+        press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(ui.view.screen, Screen::Menu);
+        assert!(!ui.handle(InputEvent::Ptt(true), &bitmap).ptt_tx_requested);
+        ui.handle(InputEvent::Ptt(false), &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(ui.view.screen, Screen::AprsRx);
+        assert_eq!(ui.view.aprs_rx_packet.information(), "Five");
+
+        choose_menu(&mut ui, MenuItem::Aprs, &bitmap);
+        assert_eq!(
+            press(&mut ui, Key::Menu, &bitmap).request,
+            Some(Request::SendAprs)
+        );
+    }
+
+    #[test]
+    fn menu_location_matches_every_visible_catalog_item() {
+        for item in MENU_ITEMS {
+            let (group, index) = menu_location(item);
+            assert_eq!(
+                menu_entries(group)[index as usize],
+                MenuEntry::Item(item),
+                "{item:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn tx_timeout_defaults_to_thirty_and_commits_only_on_menu() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        assert_eq!(ui.view.tx_timeout, TxTimeout::Seconds30);
+        assert_eq!(
+            menu_location(MenuItem::TxTimeout),
+            (Some(MenuGroup::Keys), 5)
+        );
+        assert_eq!(
+            choose_menu(&mut ui, MenuItem::TxTimeout, &bitmap).request,
+            None
+        );
+        assert_eq!(ui.view.setting, Some(Setting::TxTimeout));
+        assert_eq!(ui.view.setting_index, 2);
+        assert_eq!(press(&mut ui, Key::Down, &bitmap).request, None);
+        assert_eq!(ui.view.setting_index, 0);
+        assert_eq!(ui.view.tx_timeout, TxTimeout::Seconds30);
+        assert_eq!(press(&mut ui, Key::Exit, &bitmap).request, None);
+        assert_eq!(ui.view.tx_timeout, TxTimeout::Seconds30);
+
+        for (index, (choice, milliseconds)) in [
+            (TxTimeout::Seconds10, 10_000),
+            (TxTimeout::Seconds20, 20_000),
+            (TxTimeout::Seconds30, 30_000),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            choose_menu(&mut ui, MenuItem::TxTimeout, &bitmap);
+            assert_eq!(press(&mut ui, Key::Down, &bitmap).request, None);
+            assert_eq!(usize::from(ui.view.setting_index), index);
+            assert_eq!(press(&mut ui, Key::Menu, &bitmap).request, None);
+            assert_eq!(ui.view.tx_timeout, choice);
+            assert_eq!(ui.view.tx_timeout.milliseconds(), milliseconds);
+        }
+    }
+
+    #[test]
     fn microphone_gain_commits_only_on_menu_and_rejects_invalid_restore() {
         let bitmap = catalog(&[0]);
         let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
@@ -3758,6 +4591,163 @@ mod tests {
         assert_eq!(ui.view.microphone_gain, 0);
         ui.apply_microphone_gain(255);
         assert_eq!(ui.view.microphone_gain, 0);
+    }
+
+    #[test]
+    fn rx_tone_search_waits_then_applies_only_accepted_detected_tone() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        let started = choose_menu(&mut ui, MenuItem::RxToneSearch, &bitmap);
+        let source = RxToneSource::Channel {
+            slot: Slot::A,
+            channel: 0,
+        };
+        assert_eq!(started.request, Some(Request::StartRxToneSearch { source }));
+        assert_eq!(ui.view.screen, Screen::RxToneSearch);
+        assert_eq!(ui.view.rx_tone_search.unwrap().result_raw, None);
+        assert!(!started.cancel_temporary);
+
+        assert_eq!(press(&mut ui, Key::Menu, &bitmap).request, None);
+        assert_eq!(ui.view.screen, Screen::RxToneSearch);
+        ui.set_rx_tone_search_result(Some(0x1302));
+        let applied = press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(
+            applied.request,
+            Some(Request::ApplyRxToneOverride {
+                source,
+                tone_raw: 0x1302,
+            })
+        );
+        assert_eq!(ui.view.screen, Screen::Menu);
+        assert_eq!(ui.view.rx_tone_search, None);
+        assert!(!applied.cancel_temporary);
+        assert!(!applied.ptt_tx_requested);
+    }
+
+    #[test]
+    fn rx_tone_search_exit_and_ptt_cancel_without_tx_or_temporary_stop() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        choose_menu(&mut ui, MenuItem::RxToneSearch, &bitmap);
+        let exited = press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(ui.view.screen, Screen::Menu);
+        assert_eq!(ui.view.rx_tone_search, None);
+        assert!(!exited.cancel_temporary);
+        assert_eq!(exited.request, None);
+
+        choose_menu(&mut ui, MenuItem::RxToneSearch, &bitmap);
+        let ptt = ui.handle(InputEvent::Ptt(true), &bitmap);
+        assert_eq!(ui.view.screen, Screen::Menu);
+        assert_eq!(ui.view.rx_tone_search, None);
+        assert!(ui.view.ptt_down);
+        assert!(!ptt.ptt_tx_requested);
+        assert!(!ptt.cancel_temporary);
+        assert_eq!(ptt.request, None);
+        let release = ui.handle(InputEvent::Ptt(false), &bitmap);
+        assert!(!release.ptt_tx_requested);
+    }
+
+    #[test]
+    fn dtmf_memory_slots_edit_save_replace_and_cancel_in_ram() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        assert!(ui.dtmf_memory().is_empty());
+        choose_menu(&mut ui, MenuItem::DtmfMemory, &bitmap);
+        assert_eq!(ui.view.screen, Screen::DtmfMemory);
+        assert_eq!(ui.view.dtmf_memory_page.unwrap().slot, 0);
+
+        press(&mut ui, Key::Menu, &bitmap);
+        for key in [Key::Digit1, Key::Digit2, Key::Star, Key::Digit9, Key::Hash] {
+            press(&mut ui, key, &bitmap);
+        }
+        press(&mut ui, Key::Up, &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(ui.dtmf_memory(), b"12*9");
+        assert_eq!(ui.view.screen, Screen::DtmfMemory);
+
+        press(&mut ui, Key::Down, &bitmap);
+        assert_eq!(ui.view.dtmf_memory_page.unwrap().slot, 1);
+        press(&mut ui, Key::Menu, &bitmap);
+        press(&mut ui, Key::Digit7, &bitmap);
+        press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(ui.dtmf_memory(), b"12*9");
+        assert_eq!(ui.view.dtmf_memory_page.unwrap().len, 0);
+
+        press(&mut ui, Key::Menu, &bitmap);
+        press(&mut ui, Key::Digit3, &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        assert_eq!(ui.dtmf_memory(), b"3");
+        assert_eq!(ui.view.dtmf_memory_page.unwrap().slot, 1);
+        press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(ui.view.screen, Screen::Menu);
+        assert_eq!(ui.view.dtmf_memory_page, None);
+    }
+
+    #[test]
+    fn dtmf_memory_limits_length_and_blocks_tx_and_side_actions() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        choose_menu(&mut ui, MenuItem::DtmfMemory, &bitmap);
+        press(&mut ui, Key::Menu, &bitmap);
+        for _ in 0..DTMF_MEMORY_LENGTH {
+            press(&mut ui, Key::Digit1, &bitmap);
+        }
+        press(&mut ui, Key::Digit2, &bitmap);
+        assert_eq!(ui.view.notice, Notice::EntryFull);
+        assert_eq!(
+            ui.view.dtmf_memory_page.unwrap().len as usize,
+            DTMF_MEMORY_LENGTH
+        );
+        assert!(ui.dtmf_memory().is_empty());
+
+        ui.view.scan = ScanState::Running;
+        ui.view.side_bindings = [SideAction::Monitor, SideAction::Power];
+        let ptt = ui.handle(InputEvent::Ptt(true), &bitmap);
+        assert!(ui.view.ptt_down);
+        assert!(!ptt.ptt_tx_requested);
+        assert_eq!(ptt.request, None);
+        assert_eq!(ui.view.scan, ScanState::Running);
+        let ptt_release = ui.handle(InputEvent::Ptt(false), &bitmap);
+        assert!(!ptt_release.ptt_tx_requested);
+
+        let ptt_b = ui.handle(InputEvent::PttB(true), &bitmap);
+        assert!(ui.view.ptt_down);
+        assert!(!ptt_b.ptt_tx_requested);
+        assert_eq!(ptt_b.request, None);
+        assert_eq!(ui.view.scan, ScanState::Running);
+        ui.handle(InputEvent::PttB(false), &bitmap);
+        assert_eq!(
+            ui.view.dtmf_memory_page.unwrap().len as usize,
+            DTMF_MEMORY_LENGTH
+        );
+    }
+
+    #[test]
+    fn rx_tone_search_rejects_unstable_or_non_fm_context() {
+        let bitmap = catalog(&[0]);
+        let (group, index) = menu_location(MenuItem::RxToneSearch);
+        for (am, scanning, reverse) in [
+            (true, false, false),
+            (false, true, false),
+            (false, false, true),
+        ] {
+            let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+            ui.radio_am = am;
+            ui.view.scan = if scanning {
+                ScanState::Running
+            } else {
+                ScanState::Stopped
+            };
+            ui.view.reverse = reverse;
+            ui.view.screen = Screen::Menu;
+            ui.view.menu_group = group;
+            ui.view.menu_index = index;
+            let denied = press(&mut ui, Key::Menu, &bitmap);
+            assert_eq!(denied.request, None);
+            assert_eq!(ui.view.screen, Screen::Menu);
+            assert_eq!(ui.view.notice, Notice::RadioUnavailable);
+            assert!(!denied.cancel_temporary);
+        }
     }
 
     #[test]
@@ -4470,6 +5460,142 @@ mod tests {
     }
 
     #[test]
+    fn zone_scan_priority_commits_replaces_shares_and_guards_context() {
+        fn set_priority(ui: &mut Controller, bitmap: &[u8; 128], enabled: bool) {
+            assert_eq!(
+                choose_menu(ui, MenuItem::ScanPriority, bitmap).request,
+                None
+            );
+            assert_eq!(ui.view.setting, Some(Setting::ScanPriority));
+            if ui.view.setting_index != u8::from(enabled) {
+                press(ui, Key::Down, bitmap);
+            }
+            assert_eq!(press(ui, Key::Menu, bitmap).request, None);
+        }
+
+        let bitmap = catalog(&[2, 4, 8]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        let mut zones = [0; 32];
+        zones[9 / 8] |= 1 << (9 % 8);
+        zones[10 / 8] |= 1 << (10 % 8);
+        ui.set_zone_catalog(&zones);
+        ui.view.mode = Mode::Channel;
+        ui.view.zone = Some(9);
+        ui.view.zone_cursor = Some(9);
+        ui.view.channel = Some(2);
+        ui.set_channel_order(&[2, 4]);
+
+        choose_menu(&mut ui, MenuItem::ScanPriority, &bitmap);
+        press(&mut ui, Key::Down, &bitmap);
+        assert_eq!(ui.scan_zone_priority(&bitmap), None);
+        press(&mut ui, Key::Exit, &bitmap);
+        assert_eq!(ui.view.screen, Screen::Menu);
+        assert_eq!(ui.scan_zone_priority(&bitmap), None);
+
+        set_priority(&mut ui, &bitmap, true);
+        assert_eq!(ui.view.notice, Notice::ScanPrioritySet);
+        assert_eq!(ui.scan_zone_priority(&bitmap), Some(2));
+        ui.view.scan = ScanState::Requested;
+        assert_eq!(ui.scan_zone_priority(&bitmap), Some(2));
+        ui.view.scan = ScanState::Stopped;
+
+        ui.contexts[Slot::B.index()].mode = Mode::Channel;
+        ui.contexts[Slot::B.index()].channel = Some(4);
+        ui.contexts[Slot::B.index()].zone = Some(9);
+        ui.select_slot(Slot::B);
+        ui.set_channel_order(&[2, 4]);
+        assert_eq!(ui.scan_zone_priority(&bitmap), Some(2));
+        set_priority(&mut ui, &bitmap, false);
+        assert_eq!(ui.scan_zone_priority(&bitmap), Some(2));
+        set_priority(&mut ui, &bitmap, true);
+        assert_eq!(ui.view.notice, Notice::ScanPrioritySet);
+        assert_eq!(ui.scan_zone_priority(&bitmap), Some(4));
+
+        ui.select_slot(Slot::A);
+        ui.set_channel_order(&[2, 4]);
+        assert_eq!(ui.scan_zone_priority(&bitmap), Some(4));
+        ui.select_slot(Slot::B);
+        ui.set_channel_order(&[2, 4]);
+        set_priority(&mut ui, &bitmap, false);
+        assert_eq!(ui.view.notice, Notice::ScanPriorityCleared);
+        assert_eq!(ui.scan_zone_priority(&bitmap), None);
+
+        ui.select_slot(Slot::A);
+        ui.contexts[Slot::B.index()].zone = Some(10);
+        ui.contexts[Slot::B.index()].channel = Some(2);
+        ui.select_slot(Slot::B);
+        assert_eq!(ui.view.zone, Some(10));
+        ui.set_channel_order(&[2, 4]);
+        set_priority(&mut ui, &bitmap, true);
+        assert_eq!(ui.scan_zone_priority(&bitmap), Some(2));
+        ui.select_slot(Slot::A);
+        ui.set_channel_order(&[2, 4]);
+        assert_eq!(ui.scan_zone_priority(&bitmap), None);
+
+        for (zone, mode, channel, scan, order) in [
+            (
+                None,
+                Mode::Channel,
+                Some(2),
+                ScanState::Stopped,
+                &[2, 4][..],
+            ),
+            (
+                Some(11),
+                Mode::Channel,
+                Some(2),
+                ScanState::Stopped,
+                &[2, 4][..],
+            ),
+            (Some(9), Mode::Vfo, Some(2), ScanState::Stopped, &[2, 4][..]),
+            (
+                Some(9),
+                Mode::Channel,
+                Some(8),
+                ScanState::Stopped,
+                &[2, 4][..],
+            ),
+        ] {
+            ui.view.zone = zone;
+            ui.view.mode = mode;
+            ui.view.channel = channel;
+            ui.view.scan = scan;
+            ui.set_channel_order(order);
+            set_priority(&mut ui, &bitmap, true);
+            assert_eq!(ui.view.notice, Notice::ScanPriorityUnavailable);
+            assert_eq!(ui.scan_zone_priority(&bitmap), None);
+        }
+
+        for scan in [
+            ScanState::Requested,
+            ScanState::Running,
+            ScanState::Paused,
+            ScanState::Stopping,
+        ] {
+            ui.view.zone = Some(9);
+            ui.view.mode = Mode::Channel;
+            ui.view.channel = Some(2);
+            ui.view.scan = scan;
+            ui.set_channel_order(&[2, 4]);
+            let (group, index) = menu_location(MenuItem::ScanPriority);
+            ui.view.screen = Screen::Menu;
+            ui.view.menu_group = group;
+            ui.view.menu_index = index;
+            assert_eq!(press(&mut ui, Key::Menu, &bitmap).request, None);
+            assert_eq!(ui.view.screen, Screen::Menu);
+            assert_eq!(ui.view.setting, None);
+            assert_eq!(ui.view.notice, Notice::ScanPriorityStopScan);
+            assert_eq!(ui.view.scan, scan);
+            ui.select_scan_channel(4, &bitmap);
+            ui.acknowledge_scan_stopped();
+            assert_eq!(press(&mut ui, Key::Menu, &bitmap).request, None);
+            assert_eq!(ui.view.setting, Some(Setting::ScanPriority));
+            assert_eq!(ui.view.setting_index, 0);
+            assert_eq!(ui.scan_zone_priority(&bitmap), None);
+        }
+    }
+
+    #[test]
     fn scan_ptt_press_only_stops_and_requires_release_before_a_new_tx_intent() {
         let bitmap = catalog(&[0]);
         let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
@@ -4813,6 +5939,7 @@ mod tests {
             (MenuItem::Reverse, Setting::Reverse),
             (MenuItem::ActiveSlot, Setting::ActiveSlot),
             (MenuItem::Scan, Setting::Scan),
+            (MenuItem::ScanPriority, Setting::ScanPriority),
         ] {
             let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
             ui.set_radio_choices(Some(2), true, true);

@@ -10,13 +10,13 @@ Independent A/B operation, a colour spectrum display, shortwave tools and access
 
 **English** · [Deutsch](README.de.md) · [Русский](README.ru.md)
 
-[**R43.3 release**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r43.3) · [**Start here — backup and installation**](docs/GETTING-STARTED.en.md)
+[**R53 release**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r53) · [**Start here — backup and installation**](docs/GETTING-STARTED.en.md)
 
-[**CPS 0.8.0 for Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.3/UV98-CPS-0.8.0.zip) · R43.3 BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.3/UV98-r43.3-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.3/UV98-r43.3-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.3/UV98-r43.3-de.bin)
+[**CPS 0.8.0 for Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r53/UV98-CPS-0.8.0.zip) · R53 BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r53/UV98-r53-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r53/UV98-r53-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r53/UV98-r53-de.bin)
 
-> **Experimental firmware for the investigated AT32F423 board profile.** Verify board compatibility. Use CPS to prepare a personal R43.3 image from your radio's verified NOR backup before flashing. CPS binds the image to your factory calibration. [Backup and preparation guide](docs/GETTING-STARTED.en.md#4-check-compatibility-before-flashing)
+> **Experimental firmware for the investigated AT32F423 board profile.** Verify board compatibility. Use CPS to prepare a personal R53 image from your radio's verified NOR backup before flashing. CPS binds the image to your factory calibration. [Backup and preparation guide](docs/GETTING-STARTED.en.md#4-check-compatibility-before-flashing)
 
-R43.3 frees 10,264 bytes of Flash in each language build and retains the R43.2 features and settings journal layout. [Changes and device checks](R43.3-NOTES-RU.txt).
+R53 adds compact scan and menu modules. It frees 3,540 bytes of Flash in RU and EN and 3,536 in DE compared with R52. [Changes, downloads and offline validation](RELEASE-NOTES-R53.md).
 
 ## Windows CPS 0.8.0
 
@@ -78,10 +78,10 @@ In **Firmware → Select BIN…**, open a compatible application BIN with a cali
 | Area | Features |
 |---|---|
 | Everyday operation | Independent A/B channel or VFO contexts, zones, repeater shift, CTCSS/DCS indications, segmented signal meters and assignable keys. |
-| Finding signals | Frequency scanning, spectrum cursor and window control, peak listening and a colour waterfall. |
+| Finding signals | Frequency scanning, priority zone scanning, temporary channel skip, CTCSS/DCS receive-tone search and a colour spectrum waterfall. |
 | Shortwave | Si4732 receiver, AM/USB/LSB/CW controls, band and step selection, sequential RSSI waterfall, AM filters and soft mute. |
-| Signalling | Radio name after PTT, numeric MDC1200 PTT ID, incoming FM DTMF popup and keypad DTMF while holding PTT. |
-| Navigation | GPS position handling and an explicitly requested APRS position beacon through the supported C-BUS modem. |
+| Signalling | Radio name after PTT, numeric MDC1200 PTT ID, incoming FM DTMF, three DTMF memories and 1750 Hz tone. |
+| Navigation | GPS, APRS receive history, manual and operator-enabled automatic GPS beacons on supported C-BUS/CMX868 boards. |
 | Windows CPS | Channel/zone editing, calibration and NOR backups, GPS/APRS file settings, image validation and flashing through the stock loader. |
 | Languages | Separate RU, EN and DE firmware BINs. Choose the desired language before flashing. CPS has its own language selector. |
 
@@ -92,19 +92,19 @@ The stock “800 MHz” mode starts at **840 MHz**. The preset uses 850.000 MHz.
 1. Keep the radio on its stock firmware and save its original `.880dmf` / `.98pdmf` file.
 2. Use our CPS to save **calibration**, **4 MiB NOR** and **settings/channel sections**. Each operation reads twice and compares the results.
 3. Keep the complete snapshot folders and a matching factory recovery file in two places. The public package does not include the manufacturer's firmware.
-4. Check board compatibility, then prepare your personal R43.3 image in CPS from the verified NOR snapshot. No Rust compiler is needed for this step.
+4. Check board compatibility, then prepare your personal R53 image in CPS from the verified NOR snapshot. No Rust compiler is needed for this step.
 
 The [file checklist and step-by-step guide](docs/GETTING-STARTED.en.md) names every CPS button and expected file. **The 4 MiB NOR backup is not an MCU firmware or bootloader dump.**
 
 ## Current limits
 
-R42 still needs on-radio checks of name signalling and saving across power-off, display timing, reception after PTT, DTMF decoding and shortwave filter changes.
+On one RT-880, the operator confirmed that R53 RU started, both PTT buttons worked and the repeater tail was audible. On-radio checks of zone scan and APRS remain open.
 
 - Dual Watch alternates the receiver. Simultaneous audio from two BK4819 receivers is not implemented.
 - The HF waterfall retunes one Si4732 and interrupts audio during the sweep; it is not an FFT.
-- APRS is currently a manual beacon. An APRS receive UI, automatic beacons and the alternative GPIO modem remain unfinished.
+- APRS reception, manual beaconing and operator-enabled automatic beaconing use the supported C-BUS/CMX868 modem.
 - AM filters/soft mute are available; general-purpose voice NR/NB on the main BK4819 is not implemented.
-- The radio name, its PTT toggle and microphone gain use the internal journal. Other on-radio edits remain in RAM until power-off. The flashed BIN fixes the interface language.
+- The internal journal stores the radio name, its PTT toggle, microphone gain and the saved A/B position. Firmware language is fixed by the BIN.
 
 ## Source and development
 
@@ -116,7 +116,7 @@ R42 still needs on-radio checks of name signalling and saving across power-off, 
 | [`apps/handheld-image-sim/`](apps/handheld-image-sim/) | Screen simulator using the shared renderer. |
 | [`research/`](research/) | Hardware evidence and protocol notes. |
 
-[Build instructions](BUILDING.md) · [Contributing](CONTRIBUTING.md) · [R37 handoff](HANDOFF-R37.md) · [Requirements and observations](FEATURES-NEXT-RU.txt) · [Proposed features (Russian)](docs/NEXT-FEATURES.ru.md) · [Private input policy](PRIVATE-INPUTS.md)
+[Build instructions](BUILDING.md) · [Contributing](CONTRIBUTING.md) · [R37 handoff](HANDOFF-R37.md) · [Requirements and observations](FEATURES-NEXT-RU.txt) · [Firmware modules (Russian)](docs/FIRMWARE-MODULES.ru.md) · [Private input policy](PRIVATE-INPUTS.md)
 
 Personal calibration blocks, NOR dumps and codeplugs are excluded from the repository. Some verification uses an original private fixture; see the build instructions before attempting to reproduce it. Original project code and documentation use the [MIT licence](LICENSE); third-party files retain their [own licences and attribution](THIRD-PARTY-NOTICES.md).
 

@@ -336,8 +336,7 @@ impl Scope {
             .min(u32::from(u16::MAX)) as u16;
         // Use the lower quartile so a strong signal or one low bin cannot
         // stretch the scale. Limit changes to four counts per complete sweep.
-        let mut levels = plot.latest;
-        let (_, floor, _) = levels[..len].select_nth_unstable(len / 4);
+        let floor = lower_quartile(&plot.latest[..len]);
         let target = floor.saturating_sub(8).min(447) & !3;
         plot.display_floor = Some(
             self.completed_plot
@@ -531,6 +530,57 @@ impl Scope {
             compact::Action::Terminal { .. } => return Err(radio.fail(Error::State)),
         }
         Ok(Completion::None)
+    }
+}
+
+// A completed sweep holds at most 81 nine-bit samples. Two histogram
+// passes select the exact order statistic without sorting or copying the plot.
+fn lower_quartile(levels: &[u16]) -> u16 {
+    const { assert!(compact::BINS <= u8::MAX as usize && compact::MAX_RAW < 1024) };
+    let mut rank = (levels.len() / 4) as u8;
+    let mut prefix = 0;
+    for shift in [5, 0] {
+        let mut counts = [0u8; 32];
+        for &level in levels {
+            let part = level >> shift;
+            if part >> 5 == prefix {
+                counts[usize::from(part & 31)] += 1;
+            }
+        }
+        for (digit, count) in counts.into_iter().enumerate() {
+            if rank < count {
+                prefix = (prefix << 5) | digit as u16;
+                break;
+            }
+            rank -= count;
+        }
+    }
+    prefix
+}
+
+#[cfg(test)]
+mod quartile_tests {
+    use super::*;
+
+    #[test]
+    fn selected_floor_matches_sorted_sweeps() {
+        for seed in [0, 1, 31, 32, 127, 511] {
+            let mut levels = core::array::from_fn::<_, { compact::BINS }, _>(|i| {
+                ((i as u16 * 7) ^ seed) % (seed + 1)
+            });
+            for order in 0..3 {
+                if order == 1 {
+                    levels.sort_unstable();
+                } else if order == 2 {
+                    levels.reverse();
+                }
+                for len in 1..=levels.len() {
+                    let mut sorted = levels;
+                    sorted[..len].sort_unstable();
+                    assert_eq!(lower_quartile(&levels[..len]), sorted[len / 4]);
+                }
+            }
+        }
     }
 }
 

@@ -11,12 +11,13 @@ use uv98_keys::Key;
 use uv98_spectrum::compact::{Plot, BINS as SPECTRUM_BINS};
 
 #[cfg(test)]
-use crate::controller::MENU_ITEMS;
 use crate::controller::{
-    binding_digit, menu_entries, vfo_tx_frequency_for, CrossbandProbe, EntryKind, LightMode,
-    MdcDraft, MenuEntry, MenuGroup, MenuItem, Mode, Notice, ScanState, Screen, Setting,
-    ShortcutAction, SideAction, Slot, View, LIGHT_MODES, SHORTCUT_ACTIONS, SIDE_ACTIONS,
-    SPECTRUM_INTERVALS, STEP_10HZ, TX_CTCSS,
+    binding_digit, vfo_tx_frequency_for, LightMode, MenuEntry, MenuGroup, MenuItem, ShortcutAction,
+    SideAction, MENU_ITEMS,
+};
+use crate::controller::{
+    menu_entries, CrossbandProbe, EntryKind, MdcDraft, Mode, Notice, ScanState, Screen, Setting,
+    Slot, View, SHORTCUT_ACTIONS, SIDE_ACTIONS, SPECTRUM_INTERVALS, STEP_10HZ, TX_CTCSS,
 };
 use crate::meter::{receive_segments, transmit_segments, SEGMENTS as METER_SEGMENTS};
 
@@ -25,8 +26,26 @@ mod signaling_popup;
 pub use signaling_popup::{DtmfReception, NameReception};
 pub const NAME_POPUP_PRIORITY_ROWS: (u16, u16) = signaling_popup::NAME_PRIORITY_ROWS;
 
+#[path = "damage.rs"]
+mod damage;
+pub use damage::{
+    dirty_ranges, plan_damage, radio_dirty_ranges, spectrum_dirty_ranges, DamagePlan, DirtyRanges,
+};
+#[path = "navigation.rs"]
+mod navigation;
+use navigation::{
+    actions, channels, menu, menu_start, setting, setting_geometry, setting_title,
+    setting_uses_radio, shift_tx_preview, shortcuts, side_keys, zones,
+};
+#[cfg(test)]
+use navigation::{current_setting_label, setting_options, MENU_LABEL_X, SHIFT_TX_X};
+pub use navigation::{
+    menu_group_label, menu_item_rows, menu_label, shortcut_label, side_action_label, MenuCache,
+};
 #[path = "font.rs"]
 mod font;
+#[path = "frequency_font.rs"]
+mod frequency_font;
 #[path = "utility.rs"]
 mod utility;
 pub use utility::ShortwaveScope;
@@ -61,22 +80,11 @@ const HOME_HEADER_END: u16 = 28;
 const HOME_NAME_Y: u16 = 30;
 const HOME_FREQUENCY_Y: u16 = 54;
 const HOME_DIGIT_HEIGHT: u16 = 48;
-const HOME_DIGIT_ROW_BYTES: usize = 7;
-const HOME_DIGIT_COUNT: usize = 13;
-const HOME_DIGIT_ROWS: usize = HOME_DIGIT_COUNT * HOME_DIGIT_HEIGHT as usize;
-const HOME_DIGIT_UNIQUE_ROWS: usize = 235;
-const HOME_DIGIT_PACKED_ROWS: usize = 256;
-const HOME_DIGIT_SOURCE: &[u8; HOME_DIGIT_ROW_BYTES * HOME_DIGIT_ROWS] =
-    include_bytes!("../fonts/chakra-frequency-2bpp.bin");
 pub const HOME_METER_Y: u16 = 112;
 const HOME_META_Y: u16 = 130;
 const LIST_Y: u16 = 54;
 const LIST_ROW_HEIGHT: u16 = 32;
 const ITEM_PAINT_HEIGHT: u16 = 30;
-const SETTING_Y: u16 = 112;
-const SETTING_ROW_HEIGHT: u16 = 44;
-const SETTING_PAINT_HEIGHT: u16 = 36;
-const SHIFT_TX_X: usize = 152;
 
 pub mod color {
     pub const BACKGROUND: u16 = 0x0842;
@@ -361,6 +369,7 @@ pub struct Model<'a> {
     pub ptt_pressed: bool,
     pub input_ready: bool,
     pub radio: RadioView,
+    pub manual_tx: Option<ManualTxStatus>,
     /// Pack voltage in millivolts, or None while the measurement is unavailable.
     pub battery_mv: Option<u16>,
     /// None means all channels, not a fabricated stored zone name.
@@ -376,6 +385,13 @@ pub struct Model<'a> {
     pub lower_side_mapped: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ManualTxStatus {
+    pub remaining_seconds: u8,
+    /// Receive minus transmit pack voltage on the display scale.
+    pub sag_mv: Option<u16>,
+}
+
 /// Fixed physical positions: selecting B never swaps the cards on screen.
 pub const fn home_slot_rows(slot: Slot) -> (u16, u16) {
     match slot {
@@ -388,6 +404,12 @@ pub const fn home_slot_rows(slot: Slot) -> (u16, u16) {
 pub const fn home_ptt_badge_rows(slot: Slot) -> (u16, u16) {
     let top = home_slot_rows(slot).0;
     (top + 5, top + 21)
+}
+
+/// Countdown and voltage drop occupy unused space between TX meter labels.
+pub const fn home_tx_status_rows(slot: Slot) -> (u16, u16) {
+    let start = home_slot_rows(slot).0 + HOME_METER_Y + 8;
+    (start, start + 7)
 }
 
 /// The same header location is used on Home and secondary screens.
@@ -508,78 +530,6 @@ pub enum RenderError<E> {
     Display(uv98_display::Error<E>),
 }
 
-/// At most four sorted, disjoint half-open row intervals. This is a render
-/// plan, not a pixel buffer: the caller can merge it into a pending row bitmap
-/// and render short slices between input samples using the latest model.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct DirtyRanges {
-    ranges: [(u16, u16); 4],
-    len: usize,
-    home_outline_edges: u8,
-}
-
-impl DirtyRanges {
-    pub fn ranges(&self) -> &[(u16, u16)] {
-        &self.ranges[..self.len]
-    }
-
-    pub fn home_outline_edges(&self) -> u8 {
-        self.home_outline_edges
-    }
-
-    fn new() -> Self {
-        Self {
-            ranges: [(0, 0); 4],
-            len: 0,
-            home_outline_edges: 0,
-        }
-    }
-
-    fn push(&mut self, mut start: u16, mut end: u16) {
-        if start >= end {
-            return;
-        }
-        let mut index = 0;
-        while index < self.len {
-            let (a, b) = self.ranges[index];
-            if start <= b && a <= end {
-                start = start.min(a);
-                end = end.max(b);
-                self.ranges.copy_within(index + 1..self.len, index);
-                self.len -= 1;
-            } else {
-                index += 1;
-            }
-        }
-        // Five independent changes need not invalidate the whole display.
-        // Merge the nearest pair; extra rows are harmless, dropped dirty rows
-        // are not. This matters when RSSI, squelch and power change together.
-        if self.len == self.ranges.len() {
-            let mut expanded = [(0, 0); 5];
-            let insert = self.ranges.partition_point(|&(a, _)| a < start);
-            expanded[..insert].copy_from_slice(&self.ranges[..insert]);
-            expanded[insert] = (start, end);
-            expanded[insert + 1..].copy_from_slice(&self.ranges[insert..]);
-            let mut closest = 0;
-            for index in 1..4 {
-                if expanded[index + 1].0 - expanded[index].1
-                    < expanded[closest + 1].0 - expanded[closest].1
-                {
-                    closest = index;
-                }
-            }
-            expanded[closest].1 = expanded[closest + 1].1;
-            expanded.copy_within(closest + 2..5, closest + 1);
-            self.ranges.copy_from_slice(&expanded[..4]);
-            return;
-        }
-        let index = self.ranges[..self.len].partition_point(|&(a, _)| a < start);
-        self.ranges.copy_within(index..self.len, index + 1);
-        self.ranges[index] = (start, end);
-        self.len += 1;
-    }
-}
-
 pub fn render<B: DisplayBus, D: Delay>(
     display: &mut Display<B, D>,
     model: &Model<'_>,
@@ -646,562 +596,6 @@ pub fn render_changed<B: DisplayBus, D: Delay>(
     Ok(())
 }
 
-/// Plan the same updates as `render_changed`, without accessing a display.
-/// Passing None invalidates the whole frame, including external model fields.
-pub fn dirty_ranges(model: &Model<'_>, previous: Option<View>) -> Result<DirtyRanges, Error> {
-    validate(model)?;
-    let mut dirty = DirtyRanges::new();
-    let Some(old) = previous else {
-        dirty.push(0, HEIGHT);
-        return Ok(dirty);
-    };
-    let new = model.view;
-    #[cfg(any(test, feature = "locale-all"))]
-    if old.language() != new.language() {
-        dirty.push(0, HEIGHT);
-        return Ok(dirty);
-    }
-    if old.same_view(&new) {
-        return Ok(dirty);
-    }
-    // Account for shared chrome before any navigation early return. Its
-    // unchanged brand, panel fills and separators need not cross SPI again.
-    if old.locked != new.locked {
-        dirty.push(0, 27);
-        if new.screen != Screen::Home {
-            dirty.push(296, HEIGHT);
-        }
-    }
-    if old.notice != new.notice {
-        if new.screen == Screen::Home {
-            dirty.push(0, 27);
-        } else {
-            dirty.push(269, 295);
-        }
-    }
-    if old.ptt_down != new.ptt_down && model.radio.state == RadioState::Off {
-        dirty.push(
-            radio_banner_rows(new.screen).0,
-            radio_banner_rows(new.screen).1,
-        );
-    }
-    if old.screen != new.screen || new.screen == Screen::Setting && old.setting != new.setting {
-        if old.screen == Screen::Home || new.screen == Screen::Home {
-            dirty.push(0, HEIGHT);
-            return Ok(dirty);
-        } else {
-            dirty.push(11, 18);
-        }
-        dirty.push(48, 296); // All old body content, padding and notice band.
-        dirty.push(305, 312); // Footer labels; its fill and separator are fixed.
-                              // A confirmed spectrum snapshot overrides the ordinary radio banner.
-        if matches!(old.screen, Screen::Spectrum | Screen::Shortwave)
-            || matches!(new.screen, Screen::Spectrum | Screen::Shortwave)
-        {
-            dirty.push(28, 48);
-        }
-        return Ok(dirty);
-    }
-    if new.screen == Screen::Menu && old.menu_group != new.menu_group {
-        dirty.push(11, 18);
-        // Include the old occupied rows when entering a shorter category.
-        // Padding belongs to the list too; clearing only new items leaves
-        // stale entries below Scanning and Keys.
-        let visible_rows = menu_entries(old.menu_group)
-            .len()
-            .max(menu_entries(new.menu_group).len())
-            .min(LIST_ROWS);
-        dirty.push(LIST_Y, LIST_Y + visible_rows as u16 * LIST_ROW_HEIGHT);
-        dirty.push(283, 290);
-        return Ok(dirty);
-    }
-    if old.mode != new.mode || old.active_slot != new.active_slot || old.zone != new.zone {
-        if new.screen != Screen::Home {
-            dirty.push(0, HEIGHT);
-            return Ok(dirty);
-        }
-        if old.active_slot != new.active_slot {
-            dirty.push(home_slot_rows(Slot::A).0, home_slot_rows(Slot::B).1);
-        } else {
-            let (start, end) = home_slot_rows(new.active_slot);
-            dirty.push(start, end);
-        }
-    }
-    match new.screen {
-        Screen::Menu if menu_start(old.menu_index) == menu_start(new.menu_index) => {
-            if old.menu_index == new.menu_index {
-                return Ok(dirty);
-            }
-            for index in [old.menu_index, new.menu_index] {
-                let (start, end) = menu_item_rows(index);
-                dirty.push(start, end);
-            }
-            dirty.push(283, 290);
-        }
-        Screen::Channels => {
-            if old.list_channel == new.list_channel {
-                return Ok(dirty);
-            }
-            let old_row = model
-                .list
-                .iter()
-                .position(|channel| Some(channel.index as u16) == old.list_channel);
-            let new_row = model
-                .list
-                .iter()
-                .position(|channel| Some(channel.index as u16) == new.list_channel);
-            if let (Some(a), Some(b)) = (old_row, new_row) {
-                for index in [a, b] {
-                    let y = LIST_Y + index as u16 * LIST_ROW_HEIGHT;
-                    dirty.push(y, y + ITEM_PAINT_HEIGHT);
-                }
-            } else {
-                dirty.push(LIST_Y, LIST_Y + LIST_ROWS as u16 * LIST_ROW_HEIGHT);
-            }
-        }
-        Screen::Zones => {
-            if old.zone_cursor == new.zone_cursor {
-                return Ok(dirty);
-            }
-            let a = model
-                .zones
-                .iter()
-                .position(|zone| zone.index == old.zone_cursor);
-            let b = model
-                .zones
-                .iter()
-                .position(|zone| zone.index == new.zone_cursor);
-            if let (Some(a), Some(b)) = (a, b) {
-                for index in [a, b] {
-                    let y = LIST_Y + index as u16 * LIST_ROW_HEIGHT;
-                    dirty.push(y, y + ITEM_PAINT_HEIGHT);
-                }
-            } else {
-                dirty.push(LIST_Y, LIST_Y + LIST_ROWS as u16 * LIST_ROW_HEIGHT);
-            }
-        }
-        Screen::SideKeys | Screen::SideAction => {
-            let (a, b) = if new.screen == Screen::SideKeys {
-                (old.side_index, new.side_index)
-            } else {
-                (old.side_action_index, new.side_action_index)
-            };
-            if old.side_bindings != new.side_bindings {
-                dirty.push(48, HEIGHT);
-            } else if a != b {
-                for index in [a, b] {
-                    let y = LIST_Y + u16::from(index) * LIST_ROW_HEIGHT;
-                    dirty.push(y, y + ITEM_PAINT_HEIGHT);
-                }
-            }
-            if new.screen == Screen::SideAction && old.side_index != new.side_index {
-                dirty.push(283, 290);
-            }
-        }
-        Screen::Shortcuts | Screen::ShortcutAction => {
-            let (a, b) = if new.screen == Screen::Shortcuts {
-                (old.binding_index, new.binding_index)
-            } else {
-                (old.binding_action_index, new.binding_action_index)
-            };
-            if menu_start(a) != menu_start(b) || old.bindings != new.bindings {
-                dirty.push(48, HEIGHT);
-            } else if a != b {
-                for index in [a, b] {
-                    let y = LIST_Y + (usize::from(index) - menu_start(b)) as u16 * LIST_ROW_HEIGHT;
-                    dirty.push(y, y + ITEM_PAINT_HEIGHT);
-                }
-                dirty.push(283, 290);
-            }
-        }
-        Screen::Home => {
-            let top = home_slot_rows(new.active_slot).0;
-            match (old.cb, new.cb) {
-                (Some(old_cb), Some(new_cb))
-                    if old_cb.number() != new_cb.number() || old_cb.grid != new_cb.grid =>
-                {
-                    let (a, _) = home_slot_rows(Slot::A);
-                    dirty.push(a + 7, a + 14);
-                    let (a, b) = home_frequency_rows(Slot::A);
-                    dirty.push(a, b);
-                }
-                (Some(_), None) | (None, Some(_)) => {
-                    let (a, b) = home_slot_rows(Slot::A);
-                    dirty.push(a, b);
-                }
-                _ => {}
-            }
-            if old.scan != new.scan || old.dual_watch != new.dual_watch {
-                dirty.push(0, 27);
-            }
-            if (old.reverse != new.reverse
-                || old.shift_index != new.shift_index
-                || old.tx_tone_index != new.tx_tone_index)
-                && new.entry.is_none()
-            {
-                let (a, b) = home_frequency_rows(new.active_slot);
-                dirty.push(a, b + 9);
-                let (a, b) = home_ham_rows(new.active_slot);
-                dirty.push(a, b);
-            }
-            if old.entry != new.entry {
-                if let (Some(a), Some(b)) = (old.entry, new.entry) {
-                    if a.kind == b.kind {
-                        let (a, b) = home_frequency_rows(new.active_slot);
-                        dirty.push(a, b);
-                        return Ok(dirty);
-                    }
-                }
-                let (a, b) = home_slot_rows(new.active_slot);
-                dirty.push(a, b);
-                return Ok(dirty);
-            }
-            if old.channel != new.channel {
-                dirty.push(top + 7, top + 14);
-                dirty.push(top + HOME_NAME_Y, top + HOME_NAME_Y + 14);
-                let (a, b) = home_frequency_rows(new.active_slot);
-                dirty.push(a, b + 9);
-                let (a, b) = home_ham_rows(new.active_slot);
-                dirty.push(a, b);
-            }
-            if old.vfo_10hz != new.vfo_10hz && new.mode == Mode::Vfo && new.entry.is_none() {
-                let (a, b) = home_frequency_rows(new.active_slot);
-                dirty.push(
-                    a,
-                    if new.shift_index != 0 || new.tx_tone_index != 0 {
-                        b + 9
-                    } else {
-                        b
-                    },
-                );
-            }
-            if old.step_index != new.step_index {
-                if new.mode == Mode::Vfo && new.entry.is_none() {
-                    dirty.push(top + HOME_META_Y, top + HOME_META_Y + 7);
-                }
-            }
-        }
-        Screen::Step => {
-            if old.step_index != new.step_index {
-                for index in [old.step_index, new.step_index] {
-                    let y = 62 + u16::from(index) * 33;
-                    dirty.push(y, y + ITEM_PAINT_HEIGHT);
-                }
-            }
-        }
-        Screen::Gps | Screen::Aprs => {
-            if !old.same_view(&new) {
-                dirty.push(48, 296);
-            }
-        }
-        Screen::Cb => {
-            if old.cb_draft != new.cb_draft || old.entry != new.entry {
-                dirty.push(54, 70);
-            }
-            if old.cb_draft.map(|cb| cb.am) != new.cb_draft.map(|cb| cb.am) {
-                dirty.push(84, 91);
-            }
-            if old.entry.is_some() != new.entry.is_some() {
-                dirty.push(305, 312);
-            }
-            let old_number = old.cb_draft.map(|cb| cb.number());
-            let new_number = new.cb_draft.map(|cb| cb.number());
-            if old_number != new_number {
-                for number in [old_number, new_number].into_iter().flatten() {
-                    let y = cb_channel_rows(number).0;
-                    dirty.push(y, y + CB_CHANNEL_HEIGHT);
-                }
-            }
-            if old.cb.is_some() != new.cb.is_some() {
-                dirty.push(94, 101);
-            }
-        }
-        Screen::RadioName => {
-            if old.radio_name_draft != new.radio_name_draft {
-                dirty.push(96, 110);
-            }
-        }
-        Screen::Mdc => {
-            if mdc_end_replaced_by_name(&old) != mdc_end_replaced_by_name(&new) {
-                dirty.push(MDC_NAME_HINT_ROW, MDC_NAME_HINT_ROW + 7);
-            }
-            if old.mdc_draft.is_some() != new.mdc_draft.is_some() {
-                dirty.push(48, 269);
-                dirty.push(305, 312);
-            } else if old.mdc_draft != new.mdc_draft {
-                dirty.push(75, 119);
-            } else if old.mdc_option != new.mdc_option {
-                for cursor in [old.mdc_option, new.mdc_option] {
-                    let top = mdc_option_top(cursor);
-                    dirty.push(top, top + 37);
-                }
-            }
-        }
-        Screen::Shortwave => {
-            if old.shortwave_scope != new.shortwave_scope {
-                dirty.push(48, 296);
-            }
-            if new.shortwave_scope
-                && (old.shortwave_khz != new.shortwave_khz
-                    || old.shortwave_fraction_hz != new.shortwave_fraction_hz
-                    || old.shortwave_mode != new.shortwave_mode
-                    || old.shortwave_bfo != new.shortwave_bfo
-                    || old.shortwave_scope_points != new.shortwave_scope_points
-                    || old.shortwave_band != new.shortwave_band)
-            {
-                dirty.push(48, 296);
-            }
-            if old.shortwave_filter != new.shortwave_filter
-                || old.shortwave_soft_mute != new.shortwave_soft_mute
-            {
-                dirty.push(234, 296);
-            }
-            if old.shortwave_band_draft != new.shortwave_band_draft {
-                dirty.push(48, 296);
-                dirty.push(305, 312);
-            }
-            if old.shortwave_mode != new.shortwave_mode || old.shortwave_band != new.shortwave_band
-            {
-                dirty.push(63, 70);
-                dirty.push(155, 175);
-            }
-            if old.shortwave_khz != new.shortwave_khz
-                || old.shortwave_fraction_hz != new.shortwave_fraction_hz
-                || old.shortwave_entry != new.shortwave_entry
-            {
-                dirty.push(78, 165);
-            }
-            if old.shortwave_step != new.shortwave_step || old.shortwave_scan != new.shortwave_scan
-            {
-                dirty.push(155, 165);
-            }
-            if old.shortwave_bfo != new.shortwave_bfo {
-                dirty.push(167, 175);
-            }
-            if old.shortwave_status != new.shortwave_status
-                || old.shortwave_scan != new.shortwave_scan
-            {
-                dirty.push(184, 224);
-            }
-        }
-        Screen::Crossband => {
-            if old.crossband_probe != new.crossband_probe {
-                dirty.push(62, 226);
-            }
-        }
-        Screen::Spectrum => {
-            if old.spectrum_listening != new.spectrum_listening
-                || old.spectrum_pending_listen != new.spectrum_pending_listen
-            {
-                dirty.push(28, 48);
-                dirty.push(269, 320);
-            }
-            if old.spectrum_cursor != new.spectrum_cursor {
-                dirty.push(48, 69);
-                dirty.push(176, 183);
-                dirty.push(255, 262);
-            }
-            if old.spectrum_trigger != new.spectrum_trigger
-                || old.spectrum_auto_listen != new.spectrum_auto_listen
-            {
-                dirty.push(264, 271);
-            }
-            if old.spectrum_menu != new.spectrum_menu {
-                // Opening/closing also hides or reveals the marker, the cursor
-                // readout and the points/step line below the graph.
-                dirty.push(28, 48);
-                dirty.push(94, 320);
-            } else if old.spectrum_option != new.spectrum_option {
-                for option in [old.spectrum_option, new.spectrum_option] {
-                    let y = GRAPH_TOP + u16::from(option) * 17;
-                    dirty.push(y, y + 15);
-                }
-            }
-            if old.spectrum_span_index != new.spectrum_span_index
-                || old.spectrum_step_index != new.spectrum_step_index
-            {
-                dirty.push(28, 320);
-            }
-        }
-        Screen::Setting => {
-            if matches!(new.setting, Some(Setting::TopKey | Setting::BottomKey))
-                && old.top_draft != new.top_draft
-            {
-                dirty.push(62, 69);
-            }
-            if old.setting_index != new.setting_index {
-                let setting = new.setting.unwrap();
-                let (start, pitch, height) = setting_geometry(setting);
-                let first = if setting.choice_count() > LIST_ROWS as u8 {
-                    menu_start(new.setting_index)
-                } else {
-                    0
-                };
-                if setting.choice_count() > LIST_ROWS as u8
-                    && first != menu_start(old.setting_index)
-                {
-                    dirty.push(start, start + pitch * LIST_ROWS as u16);
-                } else {
-                    for index in [old.setting_index, new.setting_index] {
-                        let y = start + (usize::from(index) - first) as u16 * pitch;
-                        dirty.push(y, y + height);
-                    }
-                }
-            }
-            if old.reverse != new.reverse
-                || old.scan != new.scan
-                || old.display_light != new.display_light
-                || old.key_light != new.key_light
-                || new.setting == Some(Setting::Shift)
-                    && (old.shift_index != new.shift_index
-                        || shift_tx_preview(&old) != shift_tx_preview(&new))
-            {
-                dirty.push(84, 91);
-            }
-        }
-        Screen::ChannelDetails => {
-            if old.channel != new.channel || old.reverse != new.reverse {
-                dirty.push(48, 295);
-            }
-        }
-        Screen::Keys => dirty.push(52, 270),
-        Screen::Calibration | Screen::Help | Screen::About => {}
-        // Menu window changed. Its header and footer remain unchanged.
-        Screen::Menu => {
-            dirty.push(LIST_Y, LIST_Y + LIST_ROWS as u16 * LIST_ROW_HEIGHT);
-            dirty.push(283, 290);
-        }
-    }
-    Ok(dirty)
-}
-
-/// Metadata changes use much smaller regions than screen navigation. In
-/// particular a live RSSI sample does not invalidate the frequency or footer.
-pub fn radio_dirty_ranges(model: &Model<'_>, previous: RadioView) -> Result<DirtyRanges, Error> {
-    validate(model)?;
-    let new = model.radio;
-    let mut dirty = DirtyRanges::new();
-    if let Some((start, end)) = new.signaling_popup_damage(previous) {
-        dirty.push(start, end);
-    }
-    let (banner_start, banner_end) = radio_banner_rows(model.view.screen);
-    let view = model.view;
-    if view.screen == Screen::Home {
-        let marker_changed = (previous.tx_trial != new.tx_trial && !new.monitor)
-            || (previous.monitor != new.monitor && !view.locked);
-        if previous.state != new.state || marker_changed {
-            dirty.push(banner_start, banner_end);
-        }
-        for slot in [Slot::A, Slot::B] {
-            // The badge, frame and paired frequency all change together.
-            if (previous.transmitting_slot() == Some(slot))
-                != (new.transmitting_slot() == Some(slot))
-            {
-                let (start, end) = home_slot_rows(slot);
-                dirty.push(start, end);
-                continue;
-            }
-            if (previous.receiving_slot() == Some(slot)) != (new.receiving_slot() == Some(slot)) {
-                dirty.home_outline_edges |= if slot == Slot::A { 0x0f } else { 0xf0 };
-            }
-            if view.active_slot == slot
-                && view.entry.is_some()
-                && new.transmitting_slot() != Some(slot)
-            {
-                continue;
-            }
-            let old_meter = home_meter(&view, previous, slot);
-            let new_meter = home_meter(&view, new, slot);
-            if old_meter != new_meter {
-                let (start, end) = home_meter_rows(slot);
-                let only_fill_changed = matches!(
-                    (old_meter, new_meter),
-                    (
-                        MeterReading::Receive(Some(_)),
-                        MeterReading::Receive(Some(_))
-                    ) | (
-                        MeterReading::Transmit(Some(_)),
-                        MeterReading::Transmit(Some(_))
-                    )
-                );
-                // A changed live sample needs only the seven bar rows.
-                dirty.push(start, if only_fill_changed { start + 7 } else { end });
-            }
-            let old_live = home_radio_metadata(&view, previous, slot);
-            let new_live = home_radio_metadata(&view, new, slot);
-            if old_live != new_live
-                || (new_live
-                    && (previous.modulation != new.modulation || previous.power != new.power))
-            {
-                let (start, end) = home_ham_rows(slot);
-                dirty.push(start, end);
-            }
-        }
-        return Ok(dirty);
-    }
-    if previous.state != new.state {
-        dirty.push(banner_start, banner_end);
-        match view.screen {
-            Screen::Keys => dirty.push(211, 218),
-            Screen::Setting
-                if setting_uses_radio(view.setting) || view.setting == Some(Setting::Shift) =>
-            {
-                dirty.push(84, 91);
-            }
-            _ => {}
-        }
-        return Ok(dirty);
-    }
-    if view.screen == Screen::Setting {
-        let changed = match view.setting {
-            Some(Setting::Power) => previous.power != new.power,
-            Some(Setting::Monitor) => previous.monitor != new.monitor,
-            Some(Setting::Modulation) => previous.modulation != new.modulation,
-            Some(Setting::Shift) => previous.vfo_am_override != new.vfo_am_override,
-            _ => false,
-        };
-        if changed {
-            dirty.push(84, 91);
-        }
-    }
-    Ok(dirty)
-}
-
-/// Damage from replacing one stable spectrum snapshot. Cursor-only movement
-/// is handled by dirty_ranges and does not repaint the 114-row graph.
-pub fn spectrum_dirty_ranges(
-    model: &Model<'_>,
-    previous: Option<SpectrumView<'_>>,
-) -> Result<DirtyRanges, Error> {
-    validate(model)?;
-    let mut dirty = DirtyRanges::new();
-    if model.view.screen != Screen::Spectrum {
-        return Ok(dirty);
-    }
-    match (previous, model.spectrum) {
-        (Some(old), Some(new))
-            if old.start_10hz == new.start_10hz
-                && old.step_10hz == new.step_10hz
-                && old.len == new.len =>
-        {
-            if old.plot != new.plot {
-                dirty.push(94, 176);
-                dirty.push(WATERFALL_TOP, 262);
-                if old.plot.held_bin != new.plot.held_bin {
-                    dirty.push(274, 281);
-                }
-            }
-            if old.state != new.state {
-                dirty.push(28, 48);
-                dirty.push(269, 320);
-            }
-        }
-        (None, None) => {}
-        _ => dirty.push(28, 296),
-    }
-    Ok(dirty)
-}
-
 /// Deterministic row renderer. Invalid input preserves the caller's pixel row.
 pub fn render_row(row: u16, out: &mut [u16; WIDTH], model: &Model<'_>) -> Result<(), Error> {
     if row >= HEIGHT {
@@ -1246,18 +640,19 @@ fn render_validated_row(
             Screen::Help => help(row, out),
             Screen::About => about(row, out),
             Screen::Shortcuts => shortcuts(row, out, model),
-            Screen::ShortcutAction => shortcut_actions(row, out, model),
             Screen::Zones => zones(row, out, model),
             Screen::SideKeys => side_keys(row, out, model),
-            Screen::SideAction => side_actions(row, out, model),
+            Screen::ShortcutAction | Screen::SideAction => actions(row, out, model),
             Screen::Setting => setting(row, out, model),
             Screen::Spectrum => spectrum(row, out, model),
             Screen::Shortwave => shortwave(row, out, model),
             Screen::Crossband => crossband(row, out, &model.view),
-            Screen::Gps | Screen::Aprs => utility_page(row, out, model),
+            Screen::Gps | Screen::Aprs | Screen::AprsRx => utility_page(row, out, model),
             Screen::Cb => cb_grid(row, out, &model.view),
             Screen::Mdc => mdc_page(row, out, &model.view),
             Screen::RadioName => radio_name_page(row, out, &model.view),
+            Screen::RxToneSearch => rx_tone_search_page(row, out, &model.view),
+            Screen::DtmfMemory => dtmf_memory_page(row, out, &model.view),
         }
         notice(row, out, model.view.notice);
     } else {
@@ -1270,9 +665,18 @@ fn render_validated_row(
 
 fn validate(model: &Model<'_>) -> Result<(), Error> {
     let view = model.view;
+    let invalid_dtmf_page = view.screen == Screen::DtmfMemory
+        && view.dtmf_memory_page.is_none_or(|page| {
+            usize::from(page.slot) >= crate::controller::DTMF_MEMORY_SLOTS
+                || usize::from(page.len) > crate::controller::DTMF_MEMORY_LENGTH
+                || page.bytes[..usize::from(page.len)]
+                    .iter()
+                    .any(|byte| !byte.is_ascii_digit() && !matches!(byte, b'*' | b'#'))
+        });
     if view.spectrum_cursor as usize >= SPECTRUM_BINS
         || (view.screen == Screen::Cb && view.cb_draft.is_none())
         || (view.screen == Screen::Mdc && view.mdc_option > 1)
+        || invalid_dtmf_page
     {
         return Err(Error::InvalidView);
     }
@@ -1525,10 +929,13 @@ fn page_title(view: View) -> &'static str {
         Screen::Crossband => "\x1f097",
         Screen::Gps => "\x1f019",
         Screen::Aprs => "\x1f00A",
+        Screen::AprsRx => "\x1f183",
         Screen::Cb => cb_label(),
         Screen::Mdc if view.active_slot == Slot::A => "MDC1200 A",
         Screen::Mdc => "MDC1200 B",
         Screen::RadioName => "\x1f16D",
+        Screen::RxToneSearch => "\x1f17B",
+        Screen::DtmfMemory => "\x1f17E",
     }
 }
 
@@ -1753,14 +1160,62 @@ fn radio_name_page(row: u16, out: &mut Row<'_>, view: &View) {
     text(row, out, 16, 153, 1, "\x1f169", color::MUTED);
 }
 
+const WAITING_FOR_SUBTONE: &str = "\x1f0CE";
+const SUBTONE_DETECTED: &str = "\x1f12D";
+
+fn rx_tone_search_page(row: u16, out: &mut Row<'_>, view: &View) {
+    let Some(search) = view.rx_tone_search else {
+        return;
+    };
+    let Some(raw) = search.result_raw else {
+        centered(row, out, 120, 2, WAITING_FOR_SUBTONE, color::ACCENT);
+        return;
+    };
+    centered(row, out, 92, 1, SUBTONE_DETECTED, color::GOOD);
+    let value = tone_text(raw);
+    centered(row, out, 130, 2, value.as_str(), color::ACCENT);
+    if matches!(Tone::decode(raw), Some(Tone::Dcs { .. })) {
+        centered(row, out, 182, 1, "\x1f17C", color::MUTED);
+    }
+    centered(row, out, 222, 1, "\x1f17D", color::MUTED);
+}
+
+fn dtmf_memory_page(row: u16, out: &mut Row<'_>, view: &View) {
+    let Some(page) = view.dtmf_memory_page else {
+        return;
+    };
+    if (78..94).contains(&row) {
+        let mut label = Text::new();
+        let _ = write!(label, "{} {}/3", "\x1f17F", page.slot + 1);
+        centered(row, out, 78, 1, label.as_str(), color::MUTED);
+    }
+    if page.active && !page.editing {
+        centered(row, out, 101, 1, "\x1f180", color::GOOD);
+    }
+    if (126..154).contains(&row) {
+        let mut value = Text::new();
+        if page.len == 0 {
+            let _ = value.write_str("----");
+        } else {
+            for &byte in &page.bytes[..usize::from(page.len)] {
+                let _ = value.write_char(byte as char);
+            }
+        }
+        centered(row, out, 126, 2, value.as_str(), color::ACCENT);
+    }
+    if page.editing {
+        centered(row, out, 190, 1, "\x1f181", color::MUTED);
+    }
+}
+
 /// One user-visible build identity for the header and the About page.
 #[cfg(not(feature = "pa5-audio"))]
-pub const VERSION: &str = "0.1.8-r43.3";
+pub const VERSION: &str = "0.1.8-r53";
 #[cfg(feature = "pa5-audio")]
 pub const VERSION: &str = "R42-PA5";
 /// Header has a fixed 42 px slot; About shows the full string.
 #[cfg(not(feature = "pa5-audio"))]
-pub const VERSION_SHORT: &str = "R43";
+pub const VERSION_SHORT: &str = "R53";
 #[cfg(feature = "pa5-audio")]
 pub const VERSION_SHORT: &str = "PA5";
 
@@ -1788,8 +1243,8 @@ fn crossband(row: u16, out: &mut Row<'_>, view: &View) {
             let _ = write!(line, "B RSSI {rssi}   0C {status:04X}");
             centered(row, out, 169, 1, line.as_str(), color::TEXT);
             match tone_match {
-                Some(true) => ("\x1f12D", color::GOOD),
-                Some(false) => ("\x1f0CE", color::MUTED),
+                Some(true) => (SUBTONE_DETECTED, color::GOOD),
+                Some(false) => (WAITING_FOR_SUBTONE, color::MUTED),
                 None => ("\x1f12C", color::MUTED),
             }
         }
@@ -2378,6 +1833,9 @@ fn home(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     }
     slot_card(row, out, model, slot);
     if transmitting {
+        if let Some(status) = model.manual_tx {
+            tx_status(row, out, slot, status);
+        }
         rect(row, out, 4, top, 3, end - top, color::TX_OUTLINE);
         rect(row, out, 233, top, 3, end - top, color::TX_OUTLINE);
     } else if model.radio.receiving_slot() == Some(slot) && (top..end).contains(&row) {
@@ -2387,6 +1845,25 @@ fn home(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
             out[4] = color::RX_OUTLINE;
             out[235] = color::RX_OUTLINE;
         }
+    }
+}
+
+#[inline(never)]
+fn tx_status(row: u16, out: &mut Row<'_>, slot: Slot, status: ManualTxStatus) {
+    let (start, end) = home_tx_status_rows(slot);
+    if !(start..end).contains(&row) {
+        return;
+    }
+    let mut value = Text::new();
+    let _ = write!(value, "{} \x1f10A", status.remaining_seconds);
+    text(row, out, 46, start, 1, value.as_str(), color::TEXT);
+    if let Some(sag) = status.sag_mv {
+        let mut value = Text::new();
+        if sag != 0 {
+            let _ = value.write_char('-');
+        }
+        let _ = write!(value, "{} mV", sag);
+        text(row, out, 140, start, 1, value.as_str(), color::MUTED);
     }
 }
 
@@ -2965,764 +2442,6 @@ fn symbol(row: u16, out: &mut Row<'_>, x: usize, y: u16, symbol: Symbol, color: 
     }
 }
 
-fn menu_start(index: u8) -> usize {
-    usize::from(index) / LIST_ROWS * LIST_ROWS
-}
-
-/// Physical rows of a filled menu item within its seven-item page.
-pub fn menu_item_rows(index: u8) -> (u16, u16) {
-    let start = LIST_Y + (usize::from(index) % LIST_ROWS) as u16 * LIST_ROW_HEIGHT;
-    (start, start + ITEM_PAINT_HEIGHT)
-}
-
-fn setting_title(setting: Setting) -> &'static str {
-    match setting {
-        Setting::BandPreset => "\x1f069",
-        Setting::GpsEnable => "\x1f0E1",
-        Setting::GpsBaud => "\x1f11C",
-        Setting::Dtmf => "\x1f00F",
-        Setting::NameRoger => "\x1f16E",
-        Setting::MicrophoneGain => "\x1f174",
-        Setting::TopKey => "\x1f091",
-        Setting::BottomKey => "\x1f092",
-        Setting::Shift => "\x1f101",
-        Setting::TxTone => "\x1f133",
-        Setting::Mode => "\x1f105",
-        Setting::Power => "\x1f0A0",
-        Setting::Monitor => "\x1f09F",
-        Setting::Modulation => "\x1f104",
-        Setting::Reverse => "\x1f102",
-        Setting::ActiveSlot => "\x1f03F",
-        Setting::Scan => "\x1f118",
-        Setting::DisplayLight => "\x1f0E6",
-        Setting::KeyLight => "\x1f0E5",
-    }
-}
-
-fn setting_options(setting: Setting) -> &'static [&'static str] {
-    match setting {
-        Setting::MicrophoneGain => &[
-            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15",
-            "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29",
-            "30", "31",
-        ],
-        Setting::BandPreset => &[
-            "VHF / 145.500",
-            "UHF / 433.500",
-            "CB / 27.135 AM",
-            "800 / 850.000 FM",
-        ],
-        Setting::GpsEnable | Setting::Dtmf | Setting::NameRoger => &["\x1f05E", "\x1f04F"],
-        Setting::GpsBaud => &[
-            "4800", "9600", "14400", "19200", "38400", "56000", "57600", "115200", "128000",
-            "256000",
-        ],
-        Setting::TopKey | Setting::BottomKey => &["\x1f05D", "\x1f09F", "\x1f118", "\x1f123"],
-        Setting::TxTone => &[],
-        Setting::Shift => &[
-            "\x1f005", "\x1f14B", "\x1f148", "\x1f14C", "\x1f149", "\x1f14D", "\x1f14A",
-        ],
-        Setting::Mode => &["\x1f08A", "\x1f138"],
-        Setting::Power => &["\x1f0BD", "\x1f12A", "\x1f060"],
-        Setting::Monitor | Setting::Reverse => &["\x1f05E", "\x1f04F"],
-        Setting::Modulation => &["FM", "AM"],
-        Setting::ActiveSlot => &["\x1f11D", "\x1f11E"],
-        Setting::Scan => &["\x1f0D0", "\x1f07C"],
-        Setting::DisplayLight | Setting::KeyLight => &[
-            "\x1f05F", "\x1f050", "\x1f158", "\x1f14E", "\x1f154", "\x1f156", "\x1f159",
-        ],
-    }
-}
-
-fn setting_geometry(setting: Setting) -> (u16, u16, u16) {
-    if matches!(
-        setting,
-        Setting::DisplayLight
-            | Setting::KeyLight
-            | Setting::Shift
-            | Setting::TxTone
-            | Setting::GpsBaud
-            | Setting::MicrophoneGain
-    ) {
-        (100, 26, 22)
-    } else {
-        (SETTING_Y, SETTING_ROW_HEIGHT, SETTING_PAINT_HEIGHT)
-    }
-}
-
-fn light_index(mode: LightMode) -> usize {
-    LIGHT_MODES
-        .iter()
-        .position(|&candidate| candidate == mode)
-        .unwrap()
-}
-
-fn setting_uses_radio(setting: Option<Setting>) -> bool {
-    matches!(
-        setting,
-        Some(Setting::Power | Setting::Monitor | Setting::Modulation)
-    )
-}
-
-/// This is the committed value, never the highlighted draft. For RF settings
-/// the backend must report an active state before the UI calls it confirmed.
-fn current_setting_label(model: &Model<'_>, setting: Setting) -> &'static str {
-    const UNKNOWN: &str = "\x1f0B6";
-    if setting_uses_radio(Some(setting))
-        && !matches!(
-            model.radio.state,
-            RadioState::Receiving | RadioState::Transmitting
-        )
-    {
-        return UNKNOWN;
-    }
-    let index = match setting {
-        Setting::BandPreset => return "\x1f05C",
-        Setting::GpsEnable => usize::from(model.view.gps_enabled),
-        Setting::GpsBaud => usize::from(model.view.gps_baud),
-        Setting::Dtmf => usize::from(model.view.dtmf_enabled),
-        Setting::NameRoger => usize::from(model.view.name_roger_enabled),
-        Setting::MicrophoneGain => usize::from(model.view.microphone_gain),
-        Setting::TopKey => usize::from(model.view.top_action),
-        Setting::BottomKey => usize::from(model.view.bottom_action),
-        Setting::Shift => usize::from(model.view.shift_index),
-        Setting::TxTone => return UNKNOWN,
-        Setting::Mode => usize::from(model.view.mode == Mode::Vfo),
-        Setting::Power => match model.radio.power {
-            Some(power) => usize::from(power),
-            None => return UNKNOWN,
-        },
-        Setting::Monitor => usize::from(model.radio.monitor),
-        Setting::Modulation => usize::from(model.radio.modulation == Modulation::Am),
-        Setting::Reverse => usize::from(model.view.reverse),
-        Setting::ActiveSlot => usize::from(model.view.active_slot == Slot::B),
-        Setting::DisplayLight => light_index(model.view.display_light),
-        Setting::KeyLight => light_index(model.view.key_light),
-        Setting::Scan => {
-            return match model.view.scan {
-                ScanState::Stopped => "\x1f0D2",
-                ScanState::Requested => "\x1f07B",
-                ScanState::Running | ScanState::Paused => "\x1f11B",
-                ScanState::Stopping => "\x1f0D1",
-            }
-        }
-    };
-    setting_options(setting)
-        .get(index)
-        .copied()
-        .unwrap_or(UNKNOWN)
-}
-
-fn ctcss_label(index: usize) -> Text {
-    let mut text = Text::new();
-    match TX_CTCSS.get(index) {
-        Some(0) => {
-            let _ = text.write_str("\x1f05E");
-        }
-        Some(tone) => {
-            let _ = write!(text, "{}.{} \x1f065", tone / 10, tone % 10);
-        }
-        None => {
-            let _ = text.write_str("?");
-        }
-    }
-    text
-}
-
-fn shift_tx_preview(view: &View) -> Option<u32> {
-    if view.mode != Mode::Vfo || view.cb_for_slot(view.active_slot).is_some() {
-        return None;
-    }
-    let base = view.vfo_10hz;
-    let shifted = vfo_tx_frequency_for(base, view.setting_index, None)?;
-    for frequency in [base, shifted] {
-        uv98_band_plan::operating_range(frequency)?;
-        if uv98_band_plan::aviation_band(frequency) {
-            return None;
-        }
-    }
-    Some(if view.reverse { base } else { shifted })
-}
-
-fn setting(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
-    let Some(setting) = model.view.setting else {
-        return;
-    };
-    if matches!(setting, Setting::TopKey | Setting::BottomKey) {
-        let label = model
-            .view
-            .top_draft
-            .map(key_label)
-            .unwrap_or(if setting == Setting::TopKey {
-                "\x1f0A5"
-            } else {
-                "\x1f0A6"
-            });
-        text(row, out, 16, 62, 1, label, color::ACCENT);
-    } else {
-        text(row, out, 16, 62, 1, "\x1f059", color::ACCENT);
-    }
-    if (84..91).contains(&row) {
-        let mut current = Text::new();
-        let tone;
-        let label = if setting == Setting::TxTone {
-            tone = ctcss_label(usize::from(model.view.tx_tone_index));
-            tone.as_str()
-        } else {
-            current_setting_label(model, setting)
-        };
-        let _ = write!(current, "\x1f110 {}", label);
-        text(row, out, 16, 84, 1, current.as_str(), color::MUTED);
-        if setting == Setting::Shift {
-            let tx = if model.radio.vfo_am_override {
-                None
-            } else {
-                shift_tx_preview(&model.view)
-            };
-            let ink = if tx.is_some() {
-                color::TEXT
-            } else {
-                color::MUTED
-            };
-            raw_text(row, out, SHIFT_TX_X, 84, 1, "TX", ink);
-            raw_text(
-                row,
-                out,
-                SHIFT_TX_X + 18,
-                84,
-                1,
-                frequency(tx.unwrap_or(0)).as_str(),
-                ink,
-            );
-        }
-    }
-    let (start, pitch, height) = setting_geometry(setting);
-    let first = if setting.choice_count() > LIST_ROWS as u8 {
-        menu_start(model.view.setting_index)
-    } else {
-        0
-    };
-    let last = (first + LIST_ROWS).min(usize::from(setting.choice_count()));
-    for index in first..last {
-        let y = start + (index - first) as u16 * pitch;
-        if !(y..y + height).contains(&row) {
-            continue;
-        }
-        let selected = index == usize::from(model.view.setting_index);
-        let tone;
-        let label = if setting == Setting::TxTone {
-            tone = ctcss_label(index);
-            tone.as_str()
-        } else {
-            setting_options(setting)[index]
-        };
-        rect(
-            row,
-            out,
-            12,
-            y,
-            216,
-            height,
-            if selected {
-                color::ACCENT
-            } else {
-                color::PANEL
-            },
-        );
-        text(
-            row,
-            out,
-            24,
-            y + (height - 14) / 2,
-            2,
-            label,
-            item_color(selected),
-        );
-    }
-    if setting == Setting::NameRoger {
-        text(row, out, 16, 261, 1, MDC_NAME_HINT, color::MUTED);
-    }
-    if setting.choice_count() > 3 {
-        return;
-    }
-    text(row, out, 16, 252, 1, "\x1f0F3", color::MUTED);
-}
-
-pub fn menu_label(item: MenuItem) -> &'static str {
-    match item {
-        MenuItem::Cb => cb_label(),
-        MenuItem::Mdc => "MDC1200",
-        MenuItem::RadioName => "\x1f16D",
-        MenuItem::NameRoger => "\x1f16E",
-        MenuItem::MicrophoneGain => "\x1f174",
-        MenuItem::BandPreset => "\x1f069",
-        MenuItem::Gps => "\x1f01B",
-        MenuItem::GpsEnable => "\x1f0E1",
-        MenuItem::GpsBaud => "\x1f11C",
-        MenuItem::Aprs => "\x1f00B",
-        MenuItem::Dtmf => "\x1f00E",
-        MenuItem::Mode => "\x1f087",
-        MenuItem::Channels => "\x1f126",
-        MenuItem::ChannelDetails => "\x1f066",
-        MenuItem::TopKey => "\x1f094",
-        MenuItem::BottomKey => "\x1f0BC",
-        MenuItem::Shift => "\x1f100",
-        MenuItem::TxTone => "\x1f132",
-        MenuItem::Step => "\x1f13F",
-        MenuItem::About => "\x1f0C3",
-        MenuItem::Reverse => "\x1f102",
-        MenuItem::Scan => "\x1f118",
-        MenuItem::Shortcuts => "\x1f06D",
-        MenuItem::Power => "\x1f0A1",
-        MenuItem::Monitor => "\x1f09F",
-        MenuItem::Modulation => "\x1f104",
-        MenuItem::Zones => "\x1f080",
-        MenuItem::ActiveSlot => "\x1f05B",
-        MenuItem::SideKeys => "\x1f047",
-        MenuItem::DisplayLight => "\x1f10D",
-        MenuItem::KeyLight => "\x1f10C",
-        MenuItem::Spectrum => "\x1f125",
-        MenuItem::Shortwave => "\x1f08D",
-    }
-}
-
-pub fn menu_group_label(group: MenuGroup) -> &'static str {
-    match group {
-        MenuGroup::Mode => "\x1f08B",
-        MenuGroup::Receive => "\x1f0F1",
-        MenuGroup::Scanning => "\x1f0EA",
-        MenuGroup::Keys => "\x1f095",
-        MenuGroup::Navigation => "\x1f162",
-        MenuGroup::System => "\x1f117",
-    }
-}
-
-const MENU_LABEL_X: usize = 44;
-const MENU_GLYPHS: usize = (WIDTH - MENU_LABEL_X).div_ceil(6);
-
-/// The label depends only on an item's semantic ID and current language.
-/// Store glyph rows once, independently of the selection and LCD window.
-pub struct MenuCache {
-    key: Option<(MenuEntry, Language)>,
-    glyphs: [[u8; 7]; MENU_GLYPHS],
-    len: usize,
-    scale: u16,
-    #[cfg(test)]
-    resolutions: usize,
-}
-
-impl MenuCache {
-    pub const fn new() -> Self {
-        Self {
-            key: None,
-            glyphs: [[0; 7]; MENU_GLYPHS],
-            len: 0,
-            scale: 1,
-            #[cfg(test)]
-            resolutions: 0,
-        }
-    }
-
-    fn paint(&mut self, entry: MenuEntry, row: u16, out: &mut Row<'_>, y: u16, ink: u16) {
-        let key = (entry, out.language);
-        if self.key != Some(key) {
-            let template = match entry {
-                MenuEntry::Item(item) => menu_label(item),
-                MenuEntry::Group(group) => menu_group_label(group),
-            };
-            let message = locale::resolve(template, out.language);
-            let text = message.as_str();
-            self.scale = fitting_scale(text, 2, WIDTH - MENU_LABEL_X);
-            self.len = 0;
-            let limit = (WIDTH - MENU_LABEL_X).div_ceil(6 * usize::from(self.scale));
-            for (glyph, ch) in self.glyphs[..limit].iter_mut().zip(text.chars()) {
-                *glyph = glyph_rows(ch);
-                self.len += 1;
-            }
-            self.key = Some(key);
-            #[cfg(test)]
-            {
-                self.resolutions += 1;
-            }
-        }
-        if row < y || row >= y + 7 * self.scale {
-            return;
-        }
-        let glyph_row = usize::from((row - y) / self.scale);
-        let scale = usize::from(self.scale);
-        for (index, glyph) in self.glyphs[..self.len].iter().enumerate() {
-            draw_glyph_row(
-                out,
-                MENU_LABEL_X + index * 6 * scale,
-                glyph[glyph_row],
-                scale,
-                ink,
-            );
-        }
-    }
-}
-
-fn menu(row: u16, out: &mut Row<'_>, model: &Model<'_>, cache: &mut MenuCache) {
-    let entries = menu_entries(model.view.menu_group);
-    if (LIST_Y..LIST_Y + LIST_ROWS as u16 * LIST_ROW_HEIGHT).contains(&row) {
-        let offset = (row - LIST_Y) / LIST_ROW_HEIGHT;
-        let index = menu_start(model.view.menu_index) + usize::from(offset);
-        let Some(&entry) = entries.get(index) else {
-            return;
-        };
-        let y = LIST_Y + offset * LIST_ROW_HEIGHT;
-        let selected = index == usize::from(model.view.menu_index);
-        item_background(row, out, y, selected);
-        if !(y + 7..y + 23).contains(&row) {
-            return;
-        }
-        let item = match entry {
-            MenuEntry::Item(item) => Some(item),
-            MenuEntry::Group(_) => None,
-        };
-        let glyph = match item {
-            Some(MenuItem::Mode | MenuItem::Modulation) => Symbol::Wave,
-            Some(MenuItem::Cb | MenuItem::Channels | MenuItem::ChannelDetails) => Symbol::Channels,
-            Some(MenuItem::Zones) => Symbol::Bank,
-            Some(MenuItem::Scan | MenuItem::Spectrum) => Symbol::Scan,
-            Some(MenuItem::Monitor) => Symbol::Monitor,
-            Some(MenuItem::Power) => Symbol::Power,
-            Some(MenuItem::Reverse) => Symbol::Reverse,
-            Some(MenuItem::ActiveSlot) => {
-                if model.view.active_slot == Slot::A {
-                    Symbol::SlotA
-                } else {
-                    Symbol::SlotB
-                }
-            }
-            None => match entry {
-                MenuEntry::Group(MenuGroup::Mode) => Symbol::Channels,
-                MenuEntry::Group(MenuGroup::Receive) => Symbol::Monitor,
-                MenuEntry::Group(MenuGroup::Scanning) => Symbol::Scan,
-                _ => Symbol::Settings,
-            },
-            _ => Symbol::Settings,
-        };
-        let ink = item_color(selected);
-        let icon_ink = if selected { ink } else { color::ACCENT };
-        symbol(row, out, 20, y + 7, glyph, icon_ink);
-        if row >= y + 8 && row < y + 22 {
-            cache.paint(entry, row, out, y + 8, ink);
-        }
-        if matches!(entry, MenuEntry::Group(_)) {
-            text(row, out, 216, y + 8, 2, ">", ink);
-        }
-    } else if (283..290).contains(&row) {
-        let mut position = Text::new();
-        let _ = write!(
-            position,
-            "{} / {}",
-            model.view.menu_index + 1,
-            entries.len()
-        );
-        text(row, out, 192, 283, 1, position.as_str(), color::MUTED);
-    }
-}
-
-pub fn shortcut_label(action: ShortcutAction) -> &'static str {
-    match action {
-        ShortcutAction::None => "\x1f0B0",
-        ShortcutAction::Power => "\x1f0A1",
-        ShortcutAction::Monitor => "\x1f09F",
-        ShortcutAction::Scan => "\x1f118",
-        ShortcutAction::Reverse => "\x1f102",
-        ShortcutAction::Mode => "\x1f086",
-        ShortcutAction::Step => "\x1f13F",
-        ShortcutAction::Channels => "\x1f126",
-        ShortcutAction::Keys => "\x1f0F6",
-        ShortcutAction::Lock => "\x1f042",
-        ShortcutAction::Modulation => "\x1f104",
-        ShortcutAction::Zones => "\x1f080",
-        ShortcutAction::SwitchSlot => "\x1f05B",
-        ShortcutAction::Spectrum => "\x1f125",
-        ShortcutAction::Crossband => "\x1f097",
-        ShortcutAction::DualWatch => "DUAL WATCH A/B",
-        ShortcutAction::Cb => cb_label(),
-    }
-}
-
-fn shortcuts(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
-    let index = model.view.binding_index;
-    let start = menu_start(index);
-    for (offset, &action) in model
-        .view
-        .bindings
-        .iter()
-        .skip(start)
-        .take(LIST_ROWS)
-        .enumerate()
-    {
-        let y = LIST_Y + offset as u16 * LIST_ROW_HEIGHT;
-        if row < y || row >= y + LIST_ROW_HEIGHT {
-            continue;
-        }
-        let selected = start + offset == usize::from(index);
-        item_background(row, out, y, selected);
-        let mut number = Text::new();
-        let _ = write!(
-            number,
-            "{}",
-            binding_digit((start + offset) as u8).unwrap_or(0)
-        );
-        text(
-            row,
-            out,
-            18,
-            y + 8,
-            2,
-            number.as_str(),
-            item_color(selected),
-        );
-        text(
-            row,
-            out,
-            48,
-            y + 8,
-            2,
-            shortcut_label(action),
-            item_color(selected),
-        );
-    }
-    if model.view.notice == Notice::None && (283..290).contains(&row) {
-        text(row, out, 16, 283, 1, "\x1f06B", color::MUTED);
-        let mut count = Text::new();
-        let _ = write!(count, "{} / {}", index + 1, model.view.bindings.len());
-        text(row, out, 182, 283, 1, count.as_str(), color::MUTED);
-    }
-}
-
-fn shortcut_actions(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
-    let index = model.view.binding_action_index;
-    let start = menu_start(index);
-    for (offset, &action) in SHORTCUT_ACTIONS
-        .iter()
-        .skip(start)
-        .take(LIST_ROWS)
-        .enumerate()
-    {
-        let y = LIST_Y + offset as u16 * LIST_ROW_HEIGHT;
-        if row < y || row >= y + LIST_ROW_HEIGHT {
-            continue;
-        }
-        let selected = start + offset == usize::from(index);
-        item_background(row, out, y, selected);
-        text(
-            row,
-            out,
-            21,
-            y + 8,
-            2,
-            shortcut_label(action),
-            item_color(selected),
-        );
-    }
-    if model.view.notice == Notice::None && (283..290).contains(&row) {
-        let mut key = Text::new();
-        let _ = write!(
-            key,
-            "\x1f06E {}\x1f008",
-            binding_digit(model.view.binding_index).unwrap_or(0)
-        );
-        text(row, out, 16, 283, 1, key.as_str(), color::MUTED);
-    }
-}
-
-fn zones(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
-    if model.zones.is_empty() {
-        centered(row, out, 128, 2, "\x1f0B8", color::TEXT);
-        return;
-    }
-    for (offset, zone) in model.zones.iter().enumerate() {
-        let y = LIST_Y + offset as u16 * LIST_ROW_HEIGHT;
-        if row < y || row >= y + LIST_ROW_HEIGHT {
-            continue;
-        }
-        let selected = zone.index == model.view.zone_cursor;
-        item_background(row, out, y, selected);
-        let name = channel_name(zone.name);
-        text(
-            row,
-            out,
-            16,
-            y + 4,
-            2,
-            if zone.index.is_none() {
-                "\x1f056"
-            } else {
-                name.as_str()
-            },
-            item_color(selected),
-        );
-        let mut count = Text::new();
-        let _ = write!(count, "\x1f089 {}", zone.channel_count);
-        text(
-            row,
-            out,
-            16,
-            y + 22,
-            1,
-            count.as_str(),
-            item_color(selected),
-        );
-    }
-    if model.view.notice == Notice::None {
-        text(row, out, 16, 283, 1, "\x1f07D", color::MUTED);
-    }
-}
-
-pub fn side_action_label(action: SideAction) -> &'static str {
-    match action {
-        SideAction::PttA => "PTT A",
-        SideAction::PttB => "PTT B",
-        SideAction::Active => "\x1f032",
-        SideAction::Monitor => "\x1f09F",
-        SideAction::Scan => "\x1f118",
-        SideAction::Power => "\x1f0A1",
-        SideAction::None => "\x1f0B0",
-    }
-}
-
-fn side_keys(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
-    for (index, &action) in model.view.side_bindings.iter().enumerate() {
-        let y = LIST_Y + index as u16 * LIST_ROW_HEIGHT;
-        if row < y || row >= y + LIST_ROW_HEIGHT {
-            continue;
-        }
-        let selected = usize::from(model.view.side_index) == index;
-        item_background(row, out, y, selected);
-        text(
-            row,
-            out,
-            16,
-            y + 4,
-            2,
-            if index == 0 { "PTT 1" } else { "PTT 2" },
-            item_color(selected),
-        );
-        text(
-            row,
-            out,
-            16,
-            y + 22,
-            1,
-            side_action_label(action),
-            item_color(selected),
-        );
-    }
-    for (y, label) in [
-        (154, "\x1f031"),
-        (178, "\x1f033"),
-        (210, "\x1f06F"),
-        (248, "\x1f081"),
-    ] {
-        text(row, out, 16, y, 1, label, color::MUTED);
-    }
-    if model.lower_side_mapped {
-        text(row, out, 16, 124, 1, "\x1f0BA", color::GOOD);
-    } else {
-        text(row, out, 16, 124, 1, "\x1f0B9", color::WARNING);
-    }
-}
-
-fn side_actions(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
-    for (index, &action) in SIDE_ACTIONS.iter().enumerate() {
-        let y = LIST_Y + index as u16 * LIST_ROW_HEIGHT;
-        if row < y || row >= y + LIST_ROW_HEIGHT {
-            continue;
-        }
-        let selected = usize::from(model.view.side_action_index) == index;
-        item_background(row, out, y, selected);
-        text(
-            row,
-            out,
-            21,
-            y + 8,
-            2,
-            side_action_label(action),
-            item_color(selected),
-        );
-    }
-    if model.view.notice == Notice::None {
-        text(
-            row,
-            out,
-            16,
-            283,
-            1,
-            if model.view.side_index == 0 {
-                "\x1f0A9"
-            } else {
-                "\x1f0AA"
-            },
-            color::MUTED,
-        );
-    }
-}
-
-fn channels(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
-    if model.list.is_empty() {
-        centered(row, out, 128, 2, "\x1f127", color::TEXT);
-        centered(row, out, 163, 1, "\x1f122", color::MUTED);
-        return;
-    }
-    for (offset, channel) in model.list.iter().enumerate() {
-        let y = LIST_Y + offset as u16 * LIST_ROW_HEIGHT;
-        if row < y || row >= y + LIST_ROW_HEIGHT {
-            continue;
-        }
-        let selected = model.view.list_channel == Some(channel.index as u16);
-        item_background(row, out, y, selected);
-        if (y + 7..y + 14).contains(&row) {
-            let mut number = Text::new();
-            let _ = write!(number, "{:04}", channel.index + 1);
-            text(
-                row,
-                out,
-                15,
-                y + 7,
-                1,
-                number.as_str(),
-                item_color(selected),
-            );
-        }
-        if (y + 3..y + 17).contains(&row) {
-            let name = channel_name(channel.name);
-            let scale = if text_width(name.as_str(), 2) <= 184 {
-                2
-            } else {
-                1
-            };
-            text(
-                row,
-                out,
-                44,
-                y + 3,
-                scale,
-                name.as_str(),
-                item_color(selected),
-            );
-        }
-        if (y + 22..y + 29).contains(&row) {
-            let value = frequency(channel.rx_10hz);
-            text(
-                row,
-                out,
-                44,
-                y + 22,
-                1,
-                value.as_str(),
-                item_color(selected),
-            );
-            text(row, out, 108, y + 22, 1, "\x1f09A", item_color(selected));
-        }
-    }
-}
-
 fn details(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     let Some(channel) = model.channel else {
         centered(row, out, 128, 2, "\x1f088", color::TEXT);
@@ -3993,6 +2712,10 @@ fn notice_label(value: Notice) -> Option<&'static str> {
         Notice::ChannelOnly => "\x1f103",
         Notice::RadioUnavailable => "\x1f0FE",
         Notice::SpectrumUnavailable => "\x1f0C4",
+        Notice::ScanPrioritySet => "\x1f177",
+        Notice::ScanPriorityCleared => "\x1f178",
+        Notice::ScanPriorityUnavailable => "\x1f179",
+        Notice::ScanPriorityStopScan => "\x1f17A",
     })
 }
 
@@ -4017,6 +2740,19 @@ fn footer(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
             Screen::Home if model.radio.monitor => ("\x1f020", "\x1f011"),
             Screen::Home => ("", ""),
             Screen::Menu | Screen::Channels | Screen::Cb => ("\x1f01E", "\x1f012"),
+            Screen::RxToneSearch
+                if model
+                    .view
+                    .rx_tone_search
+                    .is_some_and(|search| search.result_raw.is_none()) =>
+            {
+                ("", "\x1f012")
+            }
+            Screen::RxToneSearch => ("\x1f01E", "\x1f012"),
+            Screen::DtmfMemory if model.view.dtmf_memory_page.is_some_and(|page| page.editing) => {
+                ("\x1f027", "\x1f013")
+            }
+            Screen::DtmfMemory => ("\x1f01F", "\x1f012"),
             Screen::Step => ("\x1f026", "\x1f013"),
             Screen::Shortcuts => ("\x1f01F", "\x1f012"),
             Screen::ShortcutAction => ("\x1f027", "\x1f013"),
@@ -4035,6 +2771,8 @@ fn footer(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
             }
             Screen::Shortwave => ("\x1f028", "\x1f012"),
             Screen::Crossband => ("\x1f075", "EXIT"),
+            Screen::Aprs => ("MENU", "\x1f012"),
+            Screen::AprsRx => ("", "\x1f012"),
             Screen::RadioName => ("\x1f027", "\x1f013"),
             Screen::Mdc if model.view.mdc_draft.is_some() => ("\x1f027", "\x1f013"),
             Screen::Mdc => ("\x1f01F", "\x1f012"),
@@ -4345,79 +3083,10 @@ fn frequency(value: u32) -> FrequencyText {
     result
 }
 
-struct PackedHomeDigitRows {
-    rows: [[u8; HOME_DIGIT_ROW_BYTES]; HOME_DIGIT_PACKED_ROWS],
-    indices: [u8; HOME_DIGIT_ROWS],
-}
-
-const fn pack_home_digit_rows(
-    source: &[u8; HOME_DIGIT_ROW_BYTES * HOME_DIGIT_ROWS],
-) -> PackedHomeDigitRows {
-    let mut packed = [[0; HOME_DIGIT_ROW_BYTES]; HOME_DIGIT_PACKED_ROWS];
-    let mut indices = [0; HOME_DIGIT_ROWS];
-    let mut slots = [u8::MAX; HOME_DIGIT_PACKED_ROWS];
-    let mut unique = 0;
-    let mut row = 0;
-    while row < HOME_DIGIT_ROWS {
-        let mut hash = 0usize;
-        let mut column = 0;
-        while column < HOME_DIGIT_ROW_BYTES {
-            hash = (hash.wrapping_mul(31) + source[row * HOME_DIGIT_ROW_BYTES + column] as usize)
-                & (HOME_DIGIT_PACKED_ROWS - 1);
-            column += 1;
-        }
-
-        loop {
-            let candidate = slots[hash];
-            if candidate == u8::MAX {
-                if unique >= HOME_DIGIT_UNIQUE_ROWS {
-                    panic!("home digit font has more unique rows than expected");
-                }
-                column = 0;
-                while column < HOME_DIGIT_ROW_BYTES {
-                    packed[unique][column] = source[row * HOME_DIGIT_ROW_BYTES + column];
-                    column += 1;
-                }
-                slots[hash] = unique as u8;
-                indices[row] = unique as u8;
-                unique += 1;
-                break;
-            }
-
-            let mut equal = true;
-            column = 0;
-            while column < HOME_DIGIT_ROW_BYTES {
-                if packed[candidate as usize][column] != source[row * HOME_DIGIT_ROW_BYTES + column]
-                {
-                    equal = false;
-                    break;
-                }
-                column += 1;
-            }
-            if equal {
-                indices[row] = candidate;
-                break;
-            }
-            hash = (hash + 1) & (HOME_DIGIT_PACKED_ROWS - 1);
-        }
-        row += 1;
-    }
-
-    if unique != HOME_DIGIT_UNIQUE_ROWS {
-        panic!("home digit font unique row count changed");
-    }
-    PackedHomeDigitRows {
-        rows: packed,
-        indices,
-    }
-}
-
-const PACKED_HOME_DIGIT_ROWS: PackedHomeDigitRows = pack_home_digit_rows(HOME_DIGIT_SOURCE);
-
 #[inline(never)]
 fn home_digits(row: u16, out: &mut Row<'_>, top: u16, value: &str, ink: u16, base: u16) {
     // Chakra Petch SemiBold, SIL OFL 1.1. Four pixels per byte.
-    const WIDTH_DIGIT: usize = 26;
+    const INK_WIDTH: usize = frequency_font::INK_BYTES * 4;
     let blend = |opacity: u16| {
         let component = |shift: u32, mask: u16| {
             (((ink >> shift) & mask) * opacity + ((base >> shift) & mask) * (3 - opacity) + 1) / 3
@@ -4431,14 +3100,12 @@ fn home_digits(row: u16, out: &mut Row<'_>, top: u16, value: &str, ink: u16, bas
     let mut x = (WIDTH - width) / 2;
     for byte in value.bytes() {
         let (glyph, left, count, advance) = match byte {
-            b'0'..=b'9' => (usize::from(byte - b'0'), 0, WIDTH_DIGIT, 27),
+            b'0'..=b'9' => (usize::from(byte - b'0'), 0, INK_WIDTH, 27),
             b'.' => (10, 7, 12, 12),
-            b'-' => (11, 0, WIDTH_DIGIT, 27),
-            _ => (12, 0, WIDTH_DIGIT, 27),
+            b'-' => (11, 0, INK_WIDTH, 27),
+            _ => (12, 0, INK_WIDTH, 27),
         };
-        let source_row = glyph * HOME_DIGIT_HEIGHT as usize + glyph_row;
-        let bitmap_row =
-            &PACKED_HOME_DIGIT_ROWS.rows[PACKED_HOME_DIGIT_ROWS.indices[source_row] as usize];
+        let bitmap_row = frequency_font::row(glyph, glyph_row);
         for column in 0..count {
             let bit = column + left;
             let alpha = bitmap_row[bit / 4] >> ((bit % 4) * 2) & 3;
@@ -4599,16 +3266,6 @@ mod tests {
     use std::{cell::RefCell, rc::Rc, vec, vec::Vec};
 
     #[test]
-    fn packed_home_digit_rows_reconstruct_every_source_byte() {
-        for (offset, &expected) in HOME_DIGIT_SOURCE.iter().enumerate() {
-            let row = offset / HOME_DIGIT_ROW_BYTES;
-            let column = offset % HOME_DIGIT_ROW_BYTES;
-            let packed_row = PACKED_HOME_DIGIT_ROWS.indices[row] as usize;
-            assert_eq!(PACKED_HOME_DIGIT_ROWS.rows[packed_row][column], expected);
-        }
-    }
-
-    #[test]
     fn menu_cache_matches_label_pixels_and_reuses_glyphs_across_windows() {
         let mut cache = MenuCache::new();
         let mut expected_resolutions = 0;
@@ -4683,6 +3340,7 @@ mod tests {
             radio_name: None,
             name_roger_enabled: false,
             microphone_gain: 16,
+            tx_timeout: crate::controller::TxTimeout::default(),
             radio_name_draft: None,
             mdc_option: 0,
             mdc_draft: None,
@@ -4690,6 +3348,12 @@ mod tests {
             gps_baud: 1,
             gps_status: crate::controller::GpsStatus::default(),
             aprs_status: crate::controller::AprsStatus::Unconfigured,
+            aprs_auto_available: false,
+            aprs_auto_armed: false,
+            aprs_rx_available: false,
+            aprs_rx_packet: crate::controller::AprsPacket::EMPTY,
+            aprs_rx_count: 0,
+            aprs_rx_index: 0,
             aprs_callsign: [b' '; 6],
             aprs_ssid: 0,
             dtmf_enabled: true,
@@ -4758,6 +3422,10 @@ mod tests {
                 None
             },
             setting_index: 0,
+            scan_priority_enabled: false,
+            rx_tone_search: None,
+            dtmf_memory_page: (screen == Screen::DtmfMemory)
+                .then(crate::controller::DtmfMemoryPage::default),
             display_light: LightMode::On,
             key_light: LightMode::On,
         }
@@ -4783,6 +3451,7 @@ mod tests {
             ptt_pressed: false,
             input_ready: true,
             radio: RadioView::OFF,
+            manual_tx: None,
             battery_mv: None,
             zone_name: None,
             zones: &[],
@@ -4791,6 +3460,110 @@ mod tests {
             shortwave_scope: None,
             spectrum_error: SpectrumError::None,
             lower_side_mapped: false,
+        }
+    }
+
+    #[test]
+    fn tone_search_refreshes_the_footer_when_a_result_becomes_actionable() {
+        use crate::controller::{RxToneSearch, RxToneSource};
+        assert_eq!(
+            locale::resolve(WAITING_FOR_SUBTONE, Language::Russian).as_str(),
+            "ОЖИДАНИЕ СУБТОНА"
+        );
+        assert_eq!(
+            locale::resolve(SUBTONE_DETECTED, Language::Russian).as_str(),
+            "СУБТОН ОБНАРУЖЕН"
+        );
+        let mut model = model(Screen::RxToneSearch);
+        model.view.rx_tone_search = Some(RxToneSearch {
+            source: RxToneSource::Channel {
+                slot: Slot::A,
+                channel: 0,
+            },
+            result_raw: None,
+        });
+        let previous = model.view;
+        model.view.rx_tone_search.as_mut().unwrap().result_raw = Some(0x1302);
+        let dirty = dirty_ranges(&model, Some(previous)).unwrap();
+        for row in 305..312 {
+            assert!(dirty
+                .ranges()
+                .iter()
+                .any(|&(start, end)| (start..end).contains(&row)));
+        }
+    }
+
+    #[test]
+    fn dtmf_memory_page_renders_localized_slot_and_incremental_edits() {
+        for (language, expected) in [
+            (Language::Russian, "ПАМЯТЬ DTMF"),
+            (Language::English, "DTMF MEMORY"),
+            (Language::German, "DTMF SPEICHER"),
+        ] {
+            assert_eq!(
+                locale::resolve(menu_label(MenuItem::DtmfMemory), language).as_str(),
+                expected
+            );
+            let mut before = model(Screen::DtmfMemory);
+            before.view.language = language;
+            let mut after = before;
+            after.view.dtmf_memory_page = Some(crate::controller::DtmfMemoryPage {
+                slot: 1,
+                bytes: *b"12*#00000000",
+                len: 4,
+                active: true,
+                editing: true,
+            });
+            compare_incremental(before, after);
+        }
+    }
+
+    #[test]
+    fn aprs_auto_status_renders_incrementally_in_each_language() {
+        for language in [Language::Russian, Language::English, Language::German] {
+            let mut off = model(Screen::Aprs);
+            off.view.language = language;
+            off.view.aprs_status = crate::controller::AprsStatus::Ready;
+            off.view.aprs_auto_available = true;
+            let mut on = off;
+            on.view.aprs_auto_armed = true;
+            let mut waiting = on;
+            waiting.view.aprs_auto_available = false;
+            let mut unavailable = waiting;
+            unavailable.view.aprs_auto_armed = false;
+            for label in ["* \x1f188", "\x1f189", "\x1f18A", "\x1f18B"] {
+                assert!((1..WIDTH).contains(&localized_width(label, 1, language)));
+            }
+            compare_incremental(off, on);
+            compare_incremental(on, waiting);
+            compare_incremental(waiting, unavailable);
+            compare_incremental(unavailable, off);
+        }
+    }
+
+    #[test]
+    fn tx_timeout_setting_labels_and_draft_render_in_each_locale() {
+        for (language, title, unit) in [
+            (Language::Russian, "ТАЙМЕР ПЕРЕДАЧИ", "С"),
+            (Language::English, "TX TIMEOUT", "S"),
+            (Language::German, "SENDEZEITLIMIT", "S"),
+        ] {
+            assert_eq!(
+                locale::resolve(setting_title(Setting::TxTimeout), language).as_str(),
+                title
+            );
+            assert_eq!(locale::resolve("\x1f10A", language).as_str(), unit);
+            let mut before = model(Screen::Setting);
+            before.view.language = language;
+            before.view.setting = Some(Setting::TxTimeout);
+            before.view.setting_index = 2;
+            let mut after = before;
+            after.view.setting_index = 0;
+            assert_eq!(
+                current_setting_label(&after, Setting::TxTimeout),
+                setting_options(Setting::TxTimeout)[2]
+            );
+            compare_incremental(before, after);
         }
     }
 
@@ -5145,7 +3918,7 @@ mod tests {
         Some(MenuGroup::System),
     ];
 
-    const ALL_SETTINGS: [Setting; 9] = [
+    const ALL_SETTINGS: [Setting; 10] = [
         Setting::Mode,
         Setting::Power,
         Setting::Monitor,
@@ -5153,6 +3926,7 @@ mod tests {
         Setting::Reverse,
         Setting::ActiveSlot,
         Setting::Scan,
+        Setting::ScanPriority,
         Setting::DisplayLight,
         Setting::KeyLight,
     ];
@@ -5177,12 +3951,9 @@ mod tests {
             .collect();
         for (a, old) in models.iter().enumerate() {
             for (b, new) in models.iter().enumerate() {
-                let plans = [
-                    dirty_ranges(new, Some(old.view)).unwrap(),
-                    radio_dirty_ranges(new, old.radio).unwrap(),
-                    spectrum_dirty_ranges(new, old.spectrum).unwrap(),
-                ];
-                let edges = plans[1].home_outline_edges();
+                let damage = plan_damage(new, Some(&old.view), old.radio, old.spectrum).unwrap();
+                let plans = [damage.controller, damage.radio, damage.spectrum];
+                let edges = damage.radio.home_outline_edges();
                 for y in 0..HEIGHT {
                     let old_row = &frames[a][usize::from(y)];
                     let new_row = &frames[b][usize::from(y)];
@@ -5344,6 +4115,9 @@ mod tests {
                 Notice::NoChannels,
                 Notice::ChannelOnly,
                 Notice::RadioUnavailable,
+                Notice::ScanPrioritySet,
+                Notice::ScanPriorityCleared,
+                Notice::ScanPriorityUnavailable,
             ] {
                 for locked in [false, true] {
                     let mut m = model(screen);
@@ -5541,6 +4315,9 @@ mod tests {
             Notice::NoChannels,
             Notice::TxDisabled,
             Notice::InvalidChannel,
+            Notice::ScanPrioritySet,
+            Notice::ScanPriorityCleared,
+            Notice::ScanPriorityUnavailable,
         ] {
             let mut shown = normal;
             shown.view.notice = notice;
@@ -5556,6 +4333,26 @@ mod tests {
             assert_eq!(compare_incremental(normal, shown), WIDTH * rows);
             assert_eq!(compare_incremental(shown, normal), WIDTH * rows);
         }
+    }
+
+    #[test]
+    fn combined_damage_validates_before_planning_the_initial_frame() {
+        let mut home = model(Screen::Home);
+        let initial = plan_damage(&home, None, home.radio, None).unwrap();
+        assert_eq!(initial.controller.ranges(), &[(0, HEIGHT)]);
+        assert!(initial.radio.ranges().is_empty());
+        assert!(initial.spectrum.ranges().is_empty());
+        assert_eq!(initial.radio.home_outline_edges(), 0);
+
+        home.view.spectrum_cursor = u8::MAX;
+        assert_eq!(
+            plan_damage(&home, None, home.radio, None),
+            Err(Error::InvalidView)
+        );
+        assert_eq!(
+            plan_damage(&home, Some(&home.view), home.radio, None),
+            Err(Error::InvalidView)
+        );
     }
 
     #[test]
@@ -6493,6 +5290,7 @@ mod tests {
             Setting::Reverse,
             Setting::ActiveSlot,
             Setting::Scan,
+            Setting::ScanPriority,
             Setting::DisplayLight,
             Setting::KeyLight,
         ] {
@@ -6696,6 +5494,7 @@ mod tests {
                 Screen::Shortwave,
                 Screen::Gps,
                 Screen::Aprs,
+                Screen::AprsRx,
                 Screen::About,
                 Screen::Help,
             ] {
@@ -7141,6 +5940,8 @@ mod tests {
             locale::resolve(shortcut_label(ShortcutAction::Spectrum), Language::Russian).as_str(),
             "СПЕКТР ЧАСТОТ"
         );
+        #[cfg(not(feature = "pa5-audio"))]
+        assert_eq!(VERSION.rsplit_once("-r").unwrap().1, &VERSION_SHORT[1..]);
         assert!(212 + text_width(VERSION_SHORT, 1) <= WIDTH - 10);
         assert!(16 + text_width("ВЕРСИЯ ", 2) + text_width(VERSION, 2) <= WIDTH - 8);
         let mut old = model(Screen::Shortcuts);

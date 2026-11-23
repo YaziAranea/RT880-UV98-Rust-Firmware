@@ -92,6 +92,7 @@ impl Plan {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Error {
     Receive(uv98_receive::PlanError),
+    UnsupportedToneSearch,
     InvalidTone(u16),
     UnsupportedToneMode(u8),
     InvalidOption(u8),
@@ -325,8 +326,27 @@ fn option(plan: &mut Plan, option: u8) {
 /// The stock AM software gain loop is not included in these immutable requests.
 /// It accepts all stock selector routes; that is not a measured coverage claim.
 pub fn receive(calibration: &Calibration<'_>, request: RxRequest) -> Result<Plan, Error> {
+    receive_inner(calibration, request, false)
+}
+
+/// Start both CSS scan detectors before enabling the normal FM RX link.
+pub fn receive_tone_search(
+    calibration: &Calibration<'_>,
+    mut request: RxRequest,
+) -> Result<Plan, Error> {
+    if request.modulation != Modulation::Fm {
+        return Err(Error::UnsupportedToneSearch);
+    }
+    request.level = request.level.max(1);
+    receive_inner(calibration, request, true)
+}
+
+fn receive_inner(
+    calibration: &Calibration<'_>,
+    request: RxRequest,
+    tone_search: bool,
+) -> Result<Plan, Error> {
     validate_options(request.tone_mode, request.option_nibble)?;
-    let tone = tone(request.tone, request.tone_mode)?;
     let rx = uv98_receive::Plan::primary(
         calibration,
         request.frequency_10hz,
@@ -361,7 +381,12 @@ pub fn receive(calibration: &Calibration<'_>, request: RxRequest) -> Result<Plan
             plan.write(register, value);
         }
     }
-    plan.append(&tone);
+    if tone_search {
+        // 23-bit CDCSS, generator and both automatic CSS bandwidth modes off.
+        plan.write(0x51, 0x0300);
+    } else {
+        plan.append(&tone(request.tone, request.tone_mode)?);
+    }
     const DELAY_CODES: [u16; 11] = [20, 30, 40, 50, 60, 70, 100, 120, 160, 200, 255];
     let delay = DELAY_CODES[usize::from(request.squelch_delay % 11)];
     plan.write(0x4d, 0xa000 + delay);

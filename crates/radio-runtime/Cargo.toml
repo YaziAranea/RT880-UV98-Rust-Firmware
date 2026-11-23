@@ -23,4 +23,6 @@ uv98-handheld-ui = { path = "../handheld-ui" }
 uv98-band-plan = { path = "../band-plan" }
 
 [dev-dependencies]
+uv98-gps-nmea = { path = "../gps-nmea" }
 uv98-keys = { path = "../keys" }
+uv98-smart-beacon = { path = "../smart-beacon" }

@@ -1,13 +1,16 @@
-//! One explicitly requested APRS packet on the selected calibrated FM TX path.
+//! One operator-authorized APRS packet on the selected calibrated FM TX path.
 //! The modem owns PB7/audio only; Runtime alone owns RF, PA and antenna gates.
+#[cfg(target_arch = "arm")]
 use uv98_board_pins::ModemPins;
 use uv98_calibration::Calibration;
 use uv98_handheld_ui::controller::AprsStatus;
 use uv98_radio_runtime::{policy::Profile, Fault, Io, Runtime, State};
 use uv98_rf_sequence::Modulation;
+#[cfg(target_arch = "arm")]
+use uv98_signaling::cmx868::hardware::CBus;
 use uv98_signaling::{
     aprs::{Config, Wire},
-    cmx868::{hardware::CBus, Modem, Progress},
+    cmx868::{Bus, Modem, Progress},
 };
 
 const REQUEST_TIMEOUT_MS: u32 = 5_000;
@@ -23,8 +26,10 @@ enum Phase {
     Sending,
 }
 
-pub struct Beacon {
-    modem: Option<Modem<CBus>>,
+pub struct Beacon<B: Bus> {
+    modem: Option<Modem<B>>,
+    automatic: bool,
+    last_carrier_check: u32,
     config: Option<Config>,
     level: u8,
     phase: Phase,
@@ -39,13 +44,20 @@ pub struct Beacon {
     finished: bool,
 }
 
-impl Beacon {
+#[cfg(target_arch = "arm")]
+impl Beacon<CBus> {
     /// # Safety
     /// Verified 48 MHz AT32F423, exclusive ModemPins/CRM configuration, and
     /// serialized foreground access. An unsupported PB4 strap does not create
     /// a modem or enable any RF backend.
     pub unsafe fn new(pins: ModemPins, config: Option<Config>, level: u8) -> Self {
         let modem = unsafe { CBus::new(pins) }.ok().map(Modem::new);
+        Self::from_modem(modem, config, level)
+    }
+}
+
+impl<B: Bus> Beacon<B> {
+    pub fn from_modem(modem: Option<Modem<B>>, config: Option<Config>, level: u8) -> Self {
         let status = if config.is_none() {
             AprsStatus::Unconfigured
         } else if modem.is_none() {
@@ -58,6 +70,8 @@ impl Beacon {
             config,
             level: level.min(7),
             phase: Phase::Idle,
+            automatic: false,
+            last_carrier_check: 0,
             status,
             packet: None,
             profile: None,
@@ -72,6 +86,14 @@ impl Beacon {
 
     pub fn active(&self) -> bool {
         self.phase != Phase::Idle
+    }
+
+    pub fn idle_modem(&mut self) -> Option<&mut Modem<B>> {
+        if self.active() {
+            None
+        } else {
+            self.modem.as_mut()
+        }
     }
 
     pub const fn status(&self) -> AprsStatus {
@@ -108,15 +130,17 @@ impl Beacon {
         }
     }
 
-    /// Called only for the APRS page's explicit MENU action. Validate the exact
+    /// Validate the manual or explicitly armed automatic request against the exact
     /// selected TX plan before modem startup. Callsign/path/position come from
     /// the user's configuration and a current GPS fix, never placeholders.
+    #[cfg_attr(target_arch = "arm", inline(never))]
     pub fn request(
         &mut self,
         calibration: &Calibration<'_>,
         profile: Profile,
         fix: Option<(i32, i32)>,
         now: u32,
+        automatic: bool,
     ) -> bool {
         if self.active() {
             return false;
@@ -137,7 +161,11 @@ impl Beacon {
         let packet = config
             .position(latitude, longitude)
             .and_then(|frame| Wire::encode(&frame));
-        if !valid || packet.is_err() || self.modem.is_none() {
+        if !valid
+            || (automatic && !auto_channel(&profile))
+            || packet.is_err()
+            || self.modem.is_none()
+        {
             self.status = AprsStatus::Failed;
             self.finished_at = Some(now);
             return false;
@@ -149,6 +177,8 @@ impl Beacon {
             self.finished_at = Some(now);
             return false;
         }
+        self.automatic = automatic;
+        self.last_carrier_check = now;
         self.packet = packet.ok();
         self.profile = Some(profile);
         self.requested_at = now;
@@ -220,6 +250,7 @@ impl Beacon {
         lower: bool,
         aux_clear: bool,
         matrix: Option<u16>,
+        mut clear_at_keying: impl FnMut() -> bool,
     ) -> Result<bool, Fault<I::Error>> {
         if !self.active() {
             return Ok(false);
@@ -229,7 +260,7 @@ impl Beacon {
                 self.menu_released = true;
                 true
             }
-            Some(MENU_MATRIX) => !self.menu_released,
+            Some(MENU_MATRIX) => !self.automatic && !self.menu_released,
             _ => false,
         };
         if !screen_open
@@ -256,11 +287,23 @@ impl Beacon {
                         let rx = profile.receive.unwrap();
                         // A tone-mismatched carrier still owns the channel.
                         // Inspect carrier SQL, never the decoded audio gate.
-                        let signal = match radio.observe(profile.audio, rx.tone) {
-                            Ok(signal) => signal,
+                        let carrier = if self.automatic {
+                            // Keep RX audio and tone detection running while deferring.
+                            if now.wrapping_sub(self.last_carrier_check) > 50 {
+                                self.quiet_since = None;
+                            }
+                            self.last_carrier_check = now;
+                            radio.carrier_present()
+                        } else {
+                            radio
+                                .observe(profile.audio, rx.tone)
+                                .map(|s| s.squelch_open)
+                        };
+                        let busy = match carrier {
+                            Ok(busy) => busy,
                             Err(fault) => return Err(self.radio_fault(fault, now)),
                         };
-                        if signal.squelch_open {
+                        if busy {
                             self.quiet_since = None;
                             return Ok(false);
                         }
@@ -272,6 +315,19 @@ impl Beacon {
                         // A second qualification immediately precedes keying.
                         if uv98_rf_sequence::transmit(calibration, tx).is_err() {
                             return self.finish(radio, now, AprsStatus::Failed);
+                        }
+                        if self.automatic {
+                            if !clear_at_keying() {
+                                return self.finish(radio, now, AprsStatus::Failed);
+                            }
+                            match radio.carrier_present() {
+                                Ok(false) => {}
+                                Ok(true) => {
+                                    self.quiet_since = None;
+                                    return Ok(false);
+                                }
+                                Err(fault) => return Err(self.radio_fault(fault, now)),
+                            }
                         }
                         self.owns_rf = true;
                         if let Err(fault) = radio.stop() {
@@ -323,4 +379,18 @@ impl Beacon {
             }
         }
     }
+}
+
+/// Carrier sensing is meaningful only on the exact frequency about to be keyed.
+pub fn auto_channel(profile: &Profile) -> bool {
+    profile
+        .receive
+        .zip(profile.transmit)
+        .is_some_and(|(rx, tx)| {
+            rx.modulation == Modulation::Fm
+                && rx.frequency_10hz == tx.frequency_10hz
+                && rx.level != 0
+                && !profile.audio.monitor
+                && profile.audio.squelch != 0
+        })
 }

@@ -5,10 +5,10 @@ edition = "2021"
 publish = false
 [features]
 pa5-audio = []
-locale-ru = []
-locale-en = []
-locale-de = []
-locale-all = []
+locale-ru = ["uv98-handheld-ui-state/locale-ru"]
+locale-en = ["uv98-handheld-ui-state/locale-en"]
+locale-de = ["uv98-handheld-ui-state/locale-de"]
+locale-all = ["uv98-handheld-ui-state/locale-all"]
 
 [dependencies]
 uv98-band-plan = { path = "../band-plan" }
@@ -17,3 +17,7 @@ uv98-keys = { path = "../keys" }
 uv98-display = { path = "../display" }
 uv98-codeplug = { path = "../codeplug" }
 uv98-signaling = { path = "../signaling" }
+uv98-handheld-ui-state = { path = "../handheld-ui-state" }
+
+[target.'cfg(not(target_os = "none"))'.dev-dependencies]
+uv98-handheld-ui-state = { path = "../handheld-ui-state", features = ["renderer-tests"] }

@@ -213,11 +213,15 @@
  * Unknown clock/locked TX does not stop original startup: logging is absent.
  * Init has no frame output; terminal caller attempts RF low requests first. */
 .macro diag_uart_init
-    mov.w r12, #0
+    /* r12[17:16] selects the caller; the low half starts clear. */
+.Lbaud_sample\@:
     diag_baud .Luart_absent\@
-    mov r12, r3
-    diag_baud .Luart_absent\@
-    cmp r3, r12
+    uxth r1, r12
+    cbnz r1, .Lbaud_compare\@
+    orr r12, r12, r3
+    b .Lbaud_sample\@
+.Lbaud_compare\@:
+    cmp r3, r1
     bne.w .Luart_absent\@
     /* Retain DIV in r12 while r0-r3 perform independent GPIO/CRM setup. */
     diag_modify 0x40023830, 0, 1
@@ -242,7 +246,8 @@
     str r1, [r0, #12]
     str r1, [r0, #16]
     str r1, [r0, #20]
-    str r12, [r0, #8]
+    uxth r2, r12
+    str r2, [r0, #8]
     movw r1, #0x2008
     str r1, [r0, #12]
     /* Proven stock TX AF8, push-pull, STRONGER drive1, no pulls. */
@@ -252,11 +257,10 @@
     diag_modify 0x40020024, 0x0000f000, 0x00008000
     diag_modify 0x40020000, 0x00c00000, 0x00800000
     dsb
-    mov.w r12, #0x80000000
-    b .Luart_init_done\@
+    orr.w r12, r12, #0x80000000
 .Luart_absent\@:
-    mov.w r12, #0
-.Luart_init_done\@:
+    lsr.w r12, r12, #16
+    lsl.w r12, r12, #16
 .endm
 
 .section .text.__diag_uart_byte, "ax", %progbits

@@ -67,6 +67,77 @@ fn fixed_known_checksums_coordinates_and_metadata() {
 }
 
 #[test]
+fn motion_keeps_the_exact_rmc_position_and_age_across_valid_gga() {
+    let mut parser = Parser::new();
+    let rmc_at = u32::MAX - 100;
+    accepted(&mut parser, RMC, rmc_at);
+    let motion = parser.motion_snapshot(rmc_at, 0).unwrap();
+    assert_eq!(
+        motion,
+        MotionFix {
+            position: Position {
+                latitude_e7: 481_173_000,
+                longitude_e7: 115_166_667,
+            },
+            speed_centi_knots: Some(2_240),
+            course_centi_degrees: Some(8_440),
+            received_at_ms: rmc_at,
+        },
+    );
+    let other_position = sentence("GPGGA,123520,4808.000,N,01133.000,E,1,08,0.9,0,M,0,M,,");
+    let gga = accepted(&mut parser, &other_position, 25);
+    assert_ne!(gga.position, Some(motion.position));
+    assert_eq!(parser.motion_snapshot(49, 150), Some(motion));
+    assert_eq!(parser.motion_snapshot(50, 150), None);
+    assert_eq!(parser.motion_snapshot(rmc_at - 1, 150), None);
+    assert_eq!(parser.motion_snapshot(0, HALF_CLOCK), None);
+    assert_eq!(
+        feed(&mut parser, RMC, 24),
+        Some(Event::Rejected(Error::Clock))
+    );
+    assert_eq!(parser.motion_snapshot(49, 150), Some(motion));
+}
+
+#[test]
+fn motion_handles_optional_values_north_and_explicit_loss() {
+    let mut parser = Parser::new();
+    let north = sentence("GNRMC,,A,4807.038,N,01131.000,E,0.005,360.0,,,,D");
+    let report = accepted(&mut parser, &north, 100);
+    assert_eq!(report.date, None);
+    let motion = parser.motion_snapshot(100, 0).unwrap();
+    assert_eq!(motion.speed_centi_knots, Some(1));
+    assert_eq!(motion.course_centi_degrees, Some(0));
+
+    let missing = sentence("GNRMC,,A,4807.038,N,01131.000,E,,,,,,A");
+    accepted(&mut parser, &missing, 101);
+    let motion = parser.motion_snapshot(101, 0).unwrap();
+    assert_eq!(motion.speed_centi_knots, None);
+    assert_eq!(motion.course_centi_degrees, None);
+    let malformed = sentence("GNRMC,,A,4807.038,N,01131.000,E,5,360.01,,,,A");
+    assert_eq!(
+        feed(&mut parser, &malformed, 102),
+        Some(Event::Rejected(Error::Fields))
+    );
+    assert_eq!(parser.motion_snapshot(102, 1), Some(motion));
+    assert_eq!(parser.motion_snapshot(102, 0), None);
+
+    for unsupported in [
+        "GPRMC,123520,V,,,,,,,,,",
+        "GPRMC,123520,A,4807.038,N,01131.000,E,5,0,,,,N",
+        "GPRMC,123520,A,4807.038,N,01131.000,E,5,0,,,,E",
+        "GPRMC,123520,A,4807.038,N,01131.000,E,5,0,,,,M",
+        "GPRMC,123520,A,4807.038,N,01131.000,E,5,0,,,,S",
+        "BDGGA,123520,,,,,0,00,,,,,,,",
+    ] {
+        accepted(&mut parser, RMC, 102);
+        accepted(&mut parser, &sentence(unsupported), 102);
+        assert_eq!(parser.motion_snapshot(102, 5_000), None, "{unsupported}");
+        accepted(&mut parser, GGA, 102);
+        assert_eq!(parser.motion_snapshot(102, 5_000), None);
+    }
+}
+
+#[test]
 fn supported_talkers_hemispheres_poles_rounding_and_no_metadata_epoch_merge() {
     let mut parser = Parser::new();
     accepted(&mut parser, RMC, 0);
@@ -284,4 +355,23 @@ fn baud_table_is_exhaustive_and_no_numeric_metadata_defaults_are_invented() {
     let mut lower_checksum = String::from_utf8(RMC.to_vec()).unwrap();
     lower_checksum = lower_checksum.replace("*6A", "*6a");
     accepted(&mut parser, lower_checksum.as_bytes(), 1);
+}
+
+#[test]
+fn decimal_rounding_preserves_the_last_representable_unit() {
+    assert_eq!(
+        optional_centi(b"42949672.954999999", u32::MAX),
+        Ok(Some(u32::MAX))
+    );
+    assert_eq!(
+        optional_centi(b"42949672.955", u32::MAX),
+        Err(Error::Fields)
+    );
+    assert_eq!(coordinate(b"0000.000002999", b"S", true), Ok(0));
+    assert_eq!(coordinate(b"0000.000003000", b"S", true), Ok(-1));
+    assert_eq!(coordinate(b"8959.999999999", b"N", true), Ok(900_000_000));
+    assert_eq!(
+        coordinate(b"9000.000000001", b"N", true),
+        Err(Error::Coordinate)
+    );
 }

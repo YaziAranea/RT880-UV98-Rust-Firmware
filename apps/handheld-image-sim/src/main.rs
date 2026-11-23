@@ -13,7 +13,8 @@ use uv98_handheld_app::{App, InputSample, SpectrumSnapshot, State, Update};
 use uv98_handheld_ui::cb::CbGrid;
 use uv98_handheld_ui::controller::{
     menu_entries, menu_location, LightMode, MdcDraft, MenuEntry, MenuGroup, MenuItem, Mode,
-    Request, ScanState, Screen, Setting, ShortcutAction, SideAction, Slot, SHORTCUT_ACTIONS,
+    Request, ScanState, Screen, Setting, ShortcutAction, SideAction, Slot, TxTimeout,
+    SHORTCUT_ACTIONS,
 };
 use uv98_handheld_ui::locale::Language;
 use uv98_handheld_ui::render::{
@@ -334,9 +335,13 @@ fn tap_request(app: &mut SimApp, now: &mut u32, key: Key) -> Option<Request> {
         }
     }
     if key == Key::Exit && !soft_exit {
-        assert!(
+        assert_eq!(
             cancelled_temporary,
-            "EXIT did not cancel temporary operations"
+            !matches!(
+                view.screen,
+                Screen::RxToneSearch | Screen::DtmfMemory | Screen::AprsRx
+            ),
+            "EXIT did not preserve the expected temporary-operation policy"
         );
     }
     request
@@ -390,13 +395,21 @@ fn menu(app: &mut SimApp, now: &mut u32, item: MenuItem) {
         tap(app, now, Key::Down);
     }
     assert_eq!(app.status().view.menu_index, index);
+    let request = tap_request(app, now, Key::Menu);
+    let expected = match item {
+        MenuItem::Spectrum => Some(Request::StartSpectrum),
+        MenuItem::RxToneSearch => Some(Request::StartRxToneSearch {
+            source: app
+                .status()
+                .view
+                .rx_tone_search
+                .expect("live tone search")
+                .source,
+        }),
+        _ => None,
+    };
     assert_eq!(
-        tap_request(app, now, Key::Menu),
-        if item == MenuItem::Spectrum {
-            Some(Request::StartSpectrum)
-        } else {
-            None
-        },
+        request, expected,
         "opening a menu entry emitted an RF request"
     );
 }
@@ -1166,6 +1179,91 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "20-zone-home.png",
             milliseconds.get(),
         )?);
+        let selected = app.status().view.channel;
+        menu(&mut app, &mut now, MenuItem::ScanPriority);
+        assert_eq!(app.scan_zone_priority(), None);
+        tap(&mut app, &mut now, Key::Down);
+        tap(&mut app, &mut now, Key::Menu);
+        assert_eq!(app.status().view.screen, Screen::Home);
+        assert_eq!(app.scan_zone_priority(), selected);
+        frames.push(capture(
+            &mut app,
+            &panel,
+            output,
+            "20b-zone-priority-set.png",
+            milliseconds.get(),
+        )?);
+        menu(&mut app, &mut now, MenuItem::ScanPriority);
+        tap(&mut app, &mut now, Key::Down);
+        tap(&mut app, &mut now, Key::Menu);
+        assert_eq!(app.scan_zone_priority(), None);
+        let previous_radio = app.radio_view();
+        app.set_radio_view(RadioView {
+            state: RadioState::Receiving,
+            modulation: Modulation::Fm,
+            ..previous_radio
+        })
+        .map_err(|e| format!("RX search radio state: {e:?}"))?;
+        menu(&mut app, &mut now, MenuItem::RxToneSearch);
+        frames.push(capture(
+            &mut app,
+            &panel,
+            output,
+            "20c-rx-tone-search.png",
+            milliseconds.get(),
+        )?);
+        app.set_rx_tone_search_result(Some(0x1302))
+            .map_err(|e| format!("CTCSS result: {e:?}"))?;
+        frames.push(capture(
+            &mut app,
+            &panel,
+            output,
+            "20d-rx-tone-ctcss.png",
+            milliseconds.get(),
+        )?);
+        app.set_rx_tone_search_result(Some(0x3013))
+            .map_err(|e| format!("DCS result: {e:?}"))?;
+        frames.push(capture(
+            &mut app,
+            &panel,
+            output,
+            "20e-rx-tone-dcs.png",
+            milliseconds.get(),
+        )?);
+        tap(&mut app, &mut now, Key::Exit);
+        assert_eq!(app.rx_tone_override(app.status().view), None);
+        app.set_radio_view(previous_radio)
+            .map_err(|e| format!("restore radio state: {e:?}"))?;
+        menu(&mut app, &mut now, MenuItem::DtmfMemory);
+        assert_eq!(app.status().view.screen, Screen::DtmfMemory);
+        assert_eq!(app.dtmf_memory(), b"");
+        tap(&mut app, &mut now, Key::Down);
+        tap(&mut app, &mut now, Key::Menu);
+        digits(&mut app, &mut now, "00");
+        tap(&mut app, &mut now, Key::Star);
+        tap(&mut app, &mut now, Key::Hash);
+        frames.push(capture(
+            &mut app,
+            &panel,
+            output,
+            "20f-dtmf-memory-edit.png",
+            milliseconds.get(),
+        )?);
+        assert_eq!(app.dtmf_memory(), b"");
+        tap(&mut app, &mut now, Key::Menu);
+        assert_eq!(app.dtmf_memory(), b"00*#");
+        frames.push(capture(
+            &mut app,
+            &panel,
+            output,
+            "20g-dtmf-memory-saved.png",
+            milliseconds.get(),
+        )?);
+        tap(&mut app, &mut now, Key::Menu);
+        tap(&mut app, &mut now, Key::Up);
+        tap(&mut app, &mut now, Key::Exit);
+        assert_eq!(app.dtmf_memory(), b"00*#");
+        tap(&mut app, &mut now, Key::Exit);
         menu(&mut app, &mut now, MenuItem::Channels);
         frames.push(capture(
             &mut app,
@@ -2542,9 +2640,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "82-SIMULATED-gps.png",
         milliseconds.get(),
     )?);
+    // The GPS page follows an air-band display test. Select a synthetic
+    // amateur simplex VFO and identity before simulating beacon readiness.
+    home(&mut app, &mut now);
+    digits(&mut app, &mut now, "144800");
+    tap(&mut app, &mut now, Key::Menu);
+    let view = app.status().view;
+    assert_eq!(view.mode, Mode::Vfo);
+    assert_eq!(view.vfo_10hz, 14_480_000);
+    assert_eq!(
+        uv98_handheld_ui::controller::vfo_tx_frequency(&view),
+        Some(view.vfo_10hz)
+    );
+    app.set_aprs_identity(*b"N0CALL", 7);
     menu(&mut app, &mut now, MenuItem::Aprs);
     app.set_aprs_status(uv98_handheld_ui::controller::AprsStatus::Ready)
         .unwrap();
+    app.set_aprs_auto_available(true).unwrap();
     frames.push(capture(
         &mut app,
         &panel,
@@ -2556,6 +2668,97 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tap_request(&mut app, &mut now, Key::Menu),
         Some(Request::SendAprs)
     );
+    assert!(!app.status().view.aprs_auto_armed);
+    assert_eq!(tap_request(&mut app, &mut now, Key::Star), None);
+    assert!(app.status().view.aprs_auto_armed);
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "89-SIMULATED-aprs-auto-armed.png",
+        milliseconds.get(),
+    )?);
+    app.set_aprs_auto_available(false).unwrap();
+    assert!(app.status().view.aprs_auto_armed);
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "90-SIMULATED-aprs-auto-waiting-rmc.png",
+        milliseconds.get(),
+    )?);
+    tap(&mut app, &mut now, Key::Star);
+    assert!(!app.status().view.aprs_auto_armed);
+    tap(&mut app, &mut now, Key::Star);
+    assert!(!app.status().view.aprs_auto_armed);
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "91-SIMULATED-aprs-auto-unavailable.png",
+        milliseconds.get(),
+    )?);
+    app.set_aprs_auto_available(true).unwrap();
+    tap(&mut app, &mut now, Key::Star);
+    assert_eq!(tap_request(&mut app, &mut now, Key::Ptt), None);
+    assert!(!app.status().view.aprs_auto_armed);
+    tap(&mut app, &mut now, Key::Star);
+    app.disarm_aprs_auto().unwrap();
+    assert!(!app.status().view.aprs_auto_armed);
+    tap(&mut app, &mut now, Key::Star);
+    menu(&mut app, &mut now, MenuItem::AprsRx);
+    assert!(!app.status().view.aprs_auto_armed);
+    assert_eq!(app.status().view.screen, Screen::AprsRx);
+    tap(&mut app, &mut now, Key::Exit);
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "84-SIMULATED-aprs-navigation.png",
+        milliseconds.get(),
+    )?);
+    assert_eq!(tap_request(&mut app, &mut now, Key::Menu), None);
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "85-SIMULATED-aprs-rx-unavailable.png",
+        milliseconds.get(),
+    )?);
+    app.set_aprs_rx_available(true).unwrap();
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "86-SIMULATED-aprs-rx-empty.png",
+        milliseconds.get(),
+    )?);
+    for (source, information) in [
+        (&b"N0CALL-1"[..], &b">Portable station"[..]),
+        (b"N0CALL-2", b"!4903.50N/07201.75W-Car"),
+        (b"N0CALL-3", b">Trailhead"),
+        (b"N0CALL-10", b"!4903.50N/07201.75W>Field test"),
+    ] {
+        app.push_aprs_packet(source, information).unwrap();
+    }
+    assert_eq!(tap_request(&mut app, &mut now, Key::Ptt), None);
+    assert_eq!(tap_request(&mut app, &mut now, Key::Menu), None);
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "87-SIMULATED-aprs-rx-latest.png",
+        milliseconds.get(),
+    )?);
+    tap(&mut app, &mut now, Key::Down);
+    assert_eq!(app.status().view.aprs_rx_packet.source(), "N0CALL-3");
+    frames.push(capture(
+        &mut app,
+        &panel,
+        output,
+        "88-SIMULATED-aprs-rx-older.png",
+        milliseconds.get(),
+    )?);
     home(&mut app, &mut now);
     let (memory, _display) = app.into_parts();
     assert!(!memory.selected, "NOR CS left selected");
@@ -2640,6 +2843,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             empty_ms.get(),
         )?);
 
+        open_setting(
+            &mut empty_app,
+            &mut empty_now,
+            MenuItem::TxTimeout,
+            Setting::TxTimeout,
+        );
+        choose_setting(&mut empty_app, &mut empty_now, 1);
+        frames.push(capture(
+            &mut empty_app,
+            &empty_panel,
+            output,
+            &format!("{code}-tx-timeout-setting.png"),
+            empty_ms.get(),
+        )?);
+        assert_eq!(confirm_setting(&mut empty_app, &mut empty_now), None);
+        assert_eq!(empty_app.status().view.tx_timeout, TxTimeout::Seconds20);
         home(&mut empty_app, &mut empty_now);
         empty_app.select_slot(Slot::B).unwrap();
         digits(&mut empty_app, &mut empty_now, "433500");
@@ -2694,13 +2913,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &format!("{code}-tx-b.png"),
             empty_ms.get(),
         )?);
-        empty_app.set_battery_voltage(Some(7800)).unwrap();
+        let tx_b = empty_app.radio_view();
+        let receive = RadioView {
+            state: RadioState::Receiving,
+            ..RadioView::OFF
+        };
+        empty_app.set_radio_view(receive).unwrap();
+        side_sample(&mut empty_app, &mut empty_now, true);
+        let key = side_sample(&mut empty_app, &mut empty_now, true);
+        assert!(key.ptt_tx_requested);
+        assert_eq!(key.ptt_slot, Some(Slot::B));
+        empty_app.set_radio_view(tx_b).unwrap();
+        let seconds = (empty_app.status().view.tx_timeout.milliseconds() / 1_000) as u8;
+        empty_app.set_tx_status(Some(seconds), None).unwrap();
+        frames.push(capture(
+            &mut empty_app,
+            &empty_panel,
+            output,
+            &format!("{code}-tx-b-countdown.png"),
+            empty_ms.get(),
+        )?);
         empty_app
-            .set_radio_view(RadioView {
-                state: RadioState::Receiving,
-                ..RadioView::OFF
-            })
+            .set_tx_status(Some(seconds - 1), Some(300))
             .unwrap();
+        frames.push(capture(
+            &mut empty_app,
+            &empty_panel,
+            output,
+            &format!("{code}-tx-b-sag.png"),
+            empty_ms.get(),
+        )?);
+        side_sample(&mut empty_app, &mut empty_now, false);
+        side_sample(&mut empty_app, &mut empty_now, false);
+        empty_app.set_tx_status(None, None).unwrap();
+        empty_app.set_battery_voltage(Some(7800)).unwrap();
+        empty_app.set_radio_view(receive).unwrap();
         empty_app
             .set_radio_view(RadioView {
                 state: RadioState::Receiving,
@@ -2851,7 +3098,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "localization":{"languages":["ru","en","de"],"default":"ru","firmware_runtime_setting":false,"simulator_locale_override":true,
             "gallery_uses_empty_channel_catalog":true,"gallery_rf_values_are_simulated":true,
             "files_per_language":["home","menu","spectrum","hf","tx-b","battery-low",
-                "cb-grid","cb-tx-a","mdc","radio-name","radio-name-rx"]},
+                "cb-grid","cb-tx-a","mdc","radio-name","radio-name-rx",
+                "tx-timeout-setting","tx-b-countdown","tx-b-sag"]},
         "reads":memory.reads,"render_work":performance,"frame_count":frame_count,"frames":frames,
         "acceptance":["first/adjacent active channels", "channel list choice", "explicit numeric channel confirm",
             "invalid channel does not navigate", "cancel does not commit", "VFO entry commits only on MENU", "six-digit MHz entry pads right",
@@ -2867,6 +3115,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "seven nested setting editors keep draft separate from current state and commit only on MENU",
             "setting EXIT cancels without RF request; SetPower/SetMonitor/SetModulation wait for explicit synthetic acknowledgement",
             "running scan survives setting browsing; ordinary EXIT cancels scan and other temporary operations",
+            "localized RAM-only manual TX timeout commits on MENU; confirmed lower PTT renders a countdown and optional voltage drop",
             "long digit opens the CB grid and the saved A context is recovered after CB",
             "simulated upper TX lights a red A frame while focus remains B",
             "MDC timing and hexadecimal ID are committed only to the chosen slot",

@@ -4,14 +4,7 @@
 
 use core::fmt::Write;
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[repr(u8)]
-pub enum Language {
-    #[default]
-    Russian = 0,
-    English = 1,
-    German = 2,
-}
+pub use uv98_handheld_ui_state::Language;
 
 #[cfg(any(
     all(feature = "locale-ru", feature = "locale-en"),
@@ -26,16 +19,6 @@ compile_error!("Choose only one handheld UI locale feature");
 
 #[cfg(all(feature = "locale-all", target_os = "none"))]
 compile_error!("locale-all is for host previews only");
-
-impl Language {
-    pub const CURRENT: Self = if cfg!(feature = "locale-en") {
-        Self::English
-    } else if cfg!(feature = "locale-de") {
-        Self::German
-    } else {
-        Self::Russian
-    };
-}
 
 const CAPACITY: usize = 256;
 

@@ -124,11 +124,15 @@ def check_ram_routine(loads, sections, names, symbols):
     raise LayoutError("data_copy", "Startup .data is outside an executable file-backed load")
 
 
+def last_flash_load_end(loads):
+    return max(int(segment["physical_address"], 16) + segment["file_bytes"]
+               for segment in loads if segment["file_bytes"])
+
+
 def verify(elf, binary, *, diagnostic=False):
     layout = check_layout(elf, profile=PROFILE)
     loads = layout["load_segments"]
-    flash_end = max(int(segment["physical_address"], 16) + segment["file_bytes"]
-                    for segment in loads if segment["file_bytes"])
+    flash_end = last_flash_load_end(loads)
     require(flash_end <= JOURNAL_START, "journal_overlap", "A file-backed Flash load enters the journal")
     sections, section_names = section_headers(elf)
     symbols = read_symbols(elf, sections)

@@ -10,13 +10,13 @@ Unabhängige A/B-Einstellungen, ein farbiges Spektrum, Kurzwellenfunktionen und 
 
 [English](README.md) · **Deutsch** · [Русский](README.ru.md)
 
-[**R43.3-Version**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r43.3) · [**Hier beginnen — Sicherung und Installation**](docs/GETTING-STARTED.de.md)
+[**R53-Version**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r53) · [**Hier beginnen — Sicherung und Installation**](docs/GETTING-STARTED.de.md)
 
-[**CPS 0.8.0 für Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.3/UV98-CPS-0.8.0.zip) · R43.3-BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.3/UV98-r43.3-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.3/UV98-r43.3-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r43.3/UV98-r43.3-de.bin)
+[**CPS 0.8.0 für Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r53/UV98-CPS-0.8.0.zip) · R53-BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r53/UV98-r53-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r53/UV98-r53-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r53/UV98-r53-de.bin)
 
-> **Experimentelle Firmware für das untersuchte AT32F423-Platinenprofil.** Zuerst die Platinenkompatibilität prüfen. Vor dem Flashen mit CPS ein persönliches R43.3-Image aus der geprüften NOR-Sicherung des eigenen Geräts erstellen. CPS bindet das Image an die eigenen Werkskalibrierungen. [Sicherungs- und Vorbereitungsanleitung](docs/GETTING-STARTED.de.md#4-kompatibilität-vor-dem-flashen-prüfen)
+> **Experimentelle Firmware für das untersuchte AT32F423-Platinenprofil.** Zuerst die Platinenkompatibilität prüfen. Vor dem Flashen mit CPS ein persönliches R53-Image aus der geprüften NOR-Sicherung des eigenen Geräts erstellen. CPS bindet das Image an die eigenen Werkskalibrierungen. [Sicherungs- und Vorbereitungsanleitung](docs/GETTING-STARTED.de.md#4-kompatibilität-vor-dem-flashen-prüfen)
 
-R43.3 schafft in jedem Sprach-Build 10.264 Byte freien Flash-Speicher. Die Funktionen von R43.2 und der Aufbau des Einstellungsjournals bleiben erhalten. [Änderungen und Gerätetest (Russisch)](R43.3-NOTES-RU.txt).
+R53 gliedert Scan und Menü in eigene Module. Gegenüber R52 werden in RU und EN je 3.540 Byte Flash frei, in DE 3.536 Byte. [Änderungen, Downloads und Offline-Prüfung](RELEASE-NOTES-R53.md).
 
 ## Windows-CPS 0.8.0
 
@@ -78,10 +78,10 @@ Unter **Firmware → BIN auswählen…** lässt sich eine kompatible Anwendungs-
 | Bereich | Enthaltene Funktionen |
 |---|---|
 | Funkbetrieb | Unabhängige Kanal-/VFO-Einstellungen für A/B, Zonen, Relaisablage, CTCSS/DCS-Anzeigen, segmentierte S-Meter und belegbare Tasten. |
-| Signalsuche | Frequenzsuchlauf, Spektrumcursor und Verschieben des Frequenzfensters, Abhören eines Peaks und farbiger Wasserfall. |
+| Signalsuche | Frequenzsuche, Zonenscan mit Prioritätskanal, vorübergehendes Überspringen, CTCSS/DCS-Empfangstonsuche und farbiger Spektrum-Wasserfall. |
 | Kurzwelle | Si4732 mit AM/USB/LSB/CW-Bedienung, Band- und Schrittwahl, sequenziellem RSSI-Wasserfall, AM-Filtern und Soft Mute. |
-| Signalisierung | Funkgerätename nach PTT, numerische MDC1200-PTT-ID, DTMF-Fenster beim FM-Empfang und Tastatur-DTMF bei gedrückter PTT. |
-| Navigation | GPS-Positionsverarbeitung und manuell ausgelöste APRS-Positionsbake über das unterstützte C-BUS-Modem. |
+| Signalisierung | Funkgerätename nach PTT, numerische MDC1200-PTT-ID, DTMF-Empfang in FM, drei DTMF-Speicher und 1750-Hz-Ton. |
+| Navigation | GPS, APRS-Empfangsverlauf, manuelle und zuschaltbare automatische GPS-Baken auf Platinen mit C-BUS/CMX868. |
 | Windows-CPS | Kanal- und Zonenbearbeitung, Kalibrierungs-/NOR-Sicherungen, GPS/APRS-Dateieinstellungen, BIN-Prüfung und Flashen über den originalen Bootloader. |
 | Sprachen | Separate Firmware-BINs für RU, EN und DE. Die Sprache wird vor dem Flashen gewählt. CPS besitzt eine eigene Sprachauswahl. |
 
@@ -92,19 +92,19 @@ Der originale Modus „800 MHz“ beginnt bei **840 MHz**. Die Vorgabe wählt 85
 1. Die Originalfirmware beibehalten und die ursprüngliche `.880dmf`-/`.98pdmf`-Datei des eigenen Geräts sichern.
 2. Mit unserer CPS **Kalibrierung**, **4 MiB NOR** sowie **Einstellungs-/Kanalsektionen** lesen. Jeder Vorgang liest zweimal und vergleicht die Daten.
 3. Die vollständigen Sicherungsordner und eine passende originale Wiederherstellungsdatei an zwei Orten aufbewahren. Das öffentliche Paket enthält keine Herstellerfirmware.
-4. Die Platinenkompatibilität prüfen und anschließend in CPS ein persönliches R43.3-Image aus der geprüften NOR-Sicherung erstellen. Dafür wird kein Rust-Compiler benötigt.
+4. Die Platinenkompatibilität prüfen und anschließend in CPS ein persönliches R53-Image aus der geprüften NOR-Sicherung erstellen. Dafür wird kein Rust-Compiler benötigt.
 
 Die [Schritt-für-Schritt-Anleitung](docs/GETTING-STARTED.de.md) nennt die CPS-Schaltflächen, erwarteten Dateien, Prüfkriterien und den Rückweg. **Der 4-MiB-NOR-Dump enthält weder MCU-Firmware noch Bootloader.**
 
 ## Aktuelle Grenzen
 
-Für R42 stehen Gerätetests zur Namensübertragung und Speicherung über das Ausschalten hinweg, zu Anzeigezeiten, Empfang nach PTT, DTMF-Dekodierung und KW-Filterwechsel aus.
+An einem RT-880 wurden der Start von R53 RU, beide PTT-Tasten und der hörbare Relaisnachlauf bestätigt. Gerätetests für Zonenscan und APRS stehen aus.
 
 - Dual Watch hört A/B abwechselnd ab. Gleichzeitige Audiowiedergabe beider BK4819-Empfänger ist nicht implementiert.
 - Der KW-Wasserfall stimmt den einzigen Si4732 nacheinander ab und unterbricht dabei die Audiowiedergabe. Er ist keine FFT.
-- APRS sendet derzeit manuell. Eine APRS-Empfangsansicht, automatische Baken und das alternative GPIO-Modem sind noch nicht fertig.
+- APRS-Empfang, die manuelle und die zuschaltbare automatische Bake nutzen das unterstützte C-BUS/CMX868-Modem.
 - AM-Filter und Soft Mute sind vorhanden; allgemeine Sprachrauschunterdrückung NR/NB für den Haupt-BK4819 ist nicht implementiert.
-- Name, PTT-Namensschalter und Mikrofonverstärkung liegen im internen Journal. Andere Änderungen am Funkgerät bleiben bis zum Ausschalten im RAM. Die geflashte BIN legt die Anzeigesprache fest.
+- Das interne Journal speichert den Funkgerätenamen, den PTT-Namensschalter, die Mikrofonverstärkung und die gespeicherte A/B-Position. Die BIN legt die Anzeigesprache fest.
 
 ## Quellcode und Entwicklung
 
@@ -116,7 +116,7 @@ Für R42 stehen Gerätetests zur Namensübertragung und Speicherung über das Au
 | [`apps/handheld-image-sim/`](apps/handheld-image-sim/) | Bildschirmsimulator mit gemeinsamem Renderer. |
 | [`research/`](research/) | Hardwarebelege und Protokollanalysen. |
 
-[Build-Anleitung](BUILDING.md) · [Mitmachen](CONTRIBUTING.md) · [Projektübergabe nach R37](HANDOFF-R37.md) · [Anforderungen und Beobachtungen](FEATURES-NEXT-RU.txt) · [Funktionsvorschläge (Russisch)](docs/NEXT-FEATURES.ru.md) · [Private Eingabedaten](PRIVATE-INPUTS.md)
+[Build-Anleitung](BUILDING.md) · [Mitmachen](CONTRIBUTING.md) · [Projektübergabe nach R37](HANDOFF-R37.md) · [Anforderungen und Beobachtungen](FEATURES-NEXT-RU.txt) · [Firmware-Module (Russisch)](docs/FIRMWARE-MODULES.ru.md) · [Private Eingabedaten](PRIVATE-INPUTS.md)
 
 Persönliche Kalibrierungsblöcke, NOR-Dumps und Codeplugs gehören nicht ins Repository. Einige Prüfungen benötigen originale private Testdaten; Einzelheiten stehen in der Build-Anleitung. Eigener Projektcode und Dokumentation stehen unter der [MIT-Lizenz](LICENSE); fremde Dateien behalten ihre [eigenen Lizenzen und Herkunftsangaben](THIRD-PARTY-NOTICES.md).
 

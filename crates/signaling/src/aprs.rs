@@ -4,6 +4,16 @@
 
 pub const FRAME_CAPACITY: usize = 192;
 pub const WIRE_CAPACITY: usize = 288;
+
+const ADDRESS_LEN: usize = 7;
+const _: () = assert!(FRAME_CAPACITY >= 4 * ADDRESS_LEN + 22 + 32 + 2);
+const MAX_DIGIPEATER_ADDRESSES: usize = 8;
+const MAX_INFORMATION_LEN: usize = 256;
+const RX_FRAME_CAPACITY: usize =
+    (2 + MAX_DIGIPEATER_ADDRESSES) * ADDRESS_LEN + 2 + MAX_INFORMATION_LEN + 2;
+// Worst case: one stuffed zero every five data bits, plus the closing flag.
+const RX_WIRE_CAPACITY: usize = (RX_FRAME_CAPACITY * 8 + RX_FRAME_CAPACITY * 8 / 5 + 8).div_ceil(8);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     Address,
@@ -49,11 +59,11 @@ impl Address {
     pub const fn ssid(&self) -> u8 {
         self.ssid
     }
-    fn encode(&self, out: &mut [u8], last: bool, command: bool) {
-        for (dest, c) in out[..6].iter_mut().zip(self.call) {
+    fn encode(&self, out: &mut [u8; ADDRESS_LEN], command: bool) {
+        for (dest, c) in out.iter_mut().zip(self.call) {
             *dest = c << 1;
         }
-        out[6] = 0x60 | (self.ssid << 1) | u8::from(last) | if command { 0x80 } else { 0 };
+        out[6] = 0x60 | (self.ssid << 1) | if command { 0x80 } else { 0 };
     }
 }
 
@@ -120,53 +130,57 @@ impl Config {
             bytes: [0; FRAME_CAPACITY],
             len: 0,
         };
-        let destination = Address::new(b"APRS", 0)?;
-        let mut addresses = [None; 4];
-        addresses[0] = Some(destination);
-        addresses[1] = Some(self.source);
+        const DESTINATION: Address = Address {
+            call: *b"APRS  ",
+            ssid: 0,
+        };
+        let (addresses, _) = frame.bytes.as_chunks_mut::<ADDRESS_LEN>();
+        DESTINATION.encode(&mut addresses[0], true);
+        self.source.encode(&mut addresses[1], false);
         let mut count = 2;
         for path in self.paths.into_iter().flatten() {
-            addresses[count] = Some(path);
+            path.encode(&mut addresses[count], false);
             count += 1;
         }
-        for (i, address) in addresses[..count].iter().enumerate() {
-            address.unwrap().encode(
-                &mut frame.bytes[frame.len..frame.len + 7],
-                i + 1 == count,
-                i == 0,
-            );
-            frame.len += 7;
-        }
-        frame.push(0x03)?;
-        frame.push(0xf0)?;
-        frame.push(b'!')?;
-        coordinate(&mut frame, latitude_e7, false)?;
-        frame.push(self.symbol_table)?;
-        coordinate(&mut frame, longitude_e7, true)?;
-        frame.push(self.symbol)?;
+        addresses[count - 1][ADDRESS_LEN - 1] |= 1;
+        frame.len = count * ADDRESS_LEN;
+        // Header, position, comment and FCS are at most 84 bytes.
+        frame.push(0x03);
+        frame.push(0xf0);
+        frame.push(b'!');
+        coordinate(&mut frame, latitude_e7, false);
+        frame.push(self.symbol_table);
+        coordinate(&mut frame, longitude_e7, true);
+        frame.push(self.symbol);
         for c in &self.comment[..usize::from(self.comment_len).min(32)] {
-            frame.push(*c)?;
+            frame.push(*c);
         }
         let crc = fcs(&frame.bytes[..frame.len]);
-        frame.push(crc as u8)?;
-        frame.push((crc >> 8) as u8)?;
+        frame.push(crc as u8);
+        frame.push((crc >> 8) as u8);
         Ok(frame)
     }
 }
-fn coordinate(frame: &mut Frame, e7: i32, longitude: bool) -> Result<(), Error> {
-    let hundredth_minutes = (u64::from(e7.unsigned_abs()) * 6000 + 5_000_000) / 10_000_000;
+fn rounded_hundredth_minutes(degrees_e7: u32) -> u32 {
+    // Round degrees * 6000. Reducing the ratio to 3/5000 and splitting
+    // whole units from the remainder avoids overflow and a wide division.
+    3 * (degrees_e7 / 5000) + (3 * (degrees_e7 % 5000) + 2500) / 5000
+}
+
+fn coordinate(frame: &mut Frame, e7: i32, longitude: bool) {
+    let hundredth_minutes = rounded_hundredth_minutes(e7.unsigned_abs());
     let degree = hundredth_minutes / 6000;
     let minute = hundredth_minutes % 6000;
     if longitude {
-        frame.push(b'0' + (degree / 100) as u8)?;
+        frame.push(b'0' + (degree / 100) as u8);
     }
-    frame.push(b'0' + ((degree / 10) % 10) as u8)?;
-    frame.push(b'0' + (degree % 10) as u8)?;
-    frame.push(b'0' + (minute / 1000) as u8)?;
-    frame.push(b'0' + ((minute / 100) % 10) as u8)?;
-    frame.push(b'.')?;
-    frame.push(b'0' + ((minute / 10) % 10) as u8)?;
-    frame.push(b'0' + (minute % 10) as u8)?;
+    frame.push(b'0' + ((degree / 10) % 10) as u8);
+    frame.push(b'0' + (degree % 10) as u8);
+    frame.push(b'0' + (minute / 1000) as u8);
+    frame.push(b'0' + ((minute / 100) % 10) as u8);
+    frame.push(b'.');
+    frame.push(b'0' + ((minute / 10) % 10) as u8);
+    frame.push(b'0' + (minute % 10) as u8);
     frame.push(if longitude {
         if e7 < 0 {
             b'W'
@@ -177,7 +191,7 @@ fn coordinate(frame: &mut Frame, e7: i32, longitude: bool) -> Result<(), Error> 
         b'S'
     } else {
         b'N'
-    })
+    });
 }
 
 pub struct Frame {
@@ -185,13 +199,10 @@ pub struct Frame {
     pub len: usize,
 }
 impl Frame {
-    fn push(&mut self, byte: u8) -> Result<(), Error> {
-        if self.len >= FRAME_CAPACITY {
-            return Err(Error::Space);
-        }
+    #[inline(never)]
+    fn push(&mut self, byte: u8) {
         self.bytes[self.len] = byte;
         self.len += 1;
-        Ok(())
     }
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes[..self.len]
@@ -211,6 +222,115 @@ pub fn fcs(data: &[u8]) -> u16 {
         }
     }
     !crc
+}
+
+/// AX.25 UI packet with an APRS data type identifier and raw information bytes.
+pub struct ReceivedPacket<'a> {
+    source: [u8; 9],
+    source_len: usize,
+    information: &'a [u8],
+}
+impl ReceivedPacket<'_> {
+    pub fn source(&self) -> &[u8] {
+        &self.source[..self.source_len]
+    }
+
+    pub fn information(&self) -> &[u8] {
+        self.information
+    }
+}
+
+/// Parses an AX.25 frame (including FCS) already checked by `Decoder`.
+/// The APRS data type is identified here. Its body is kept byte-for-byte.
+pub fn received_packet(frame_with_fcs: &[u8]) -> Option<ReceivedPacket<'_>> {
+    let body = frame_with_fcs.get(..frame_with_fcs.len().checked_sub(2)?)?;
+    let destination = body.get(..ADDRESS_LEN)?;
+    if destination[6] & 1 != 0 {
+        return None;
+    }
+
+    let mut addresses = body[ADDRESS_LEN..].chunks_exact(ADDRESS_LEN);
+    let source_address = addresses.next()?;
+    let mut source_len = received_callsign_len(source_address)?;
+    let mut last_address = source_address;
+    let mut address_end = 2 * ADDRESS_LEN;
+    for _ in 0..MAX_DIGIPEATER_ADDRESSES {
+        if last_address[6] & 1 != 0 {
+            break;
+        }
+        last_address = addresses.next()?;
+        received_callsign_len(last_address)?;
+        address_end += ADDRESS_LEN;
+    }
+    if last_address[6] & 1 == 0 {
+        return None;
+    }
+
+    let [0x03, 0xf0, information @ ..] = body.get(address_end..)? else {
+        return None;
+    };
+    if information.len() > MAX_INFORMATION_LEN {
+        return None;
+    }
+    match *information.first()? {
+        // Early Mic-E encoded latitude and flags as shifted printable
+        // characters, including punctuation and lowercase.
+        0x1c | 0x1d | b'\'' | b'`' => {
+            if !destination[..6]
+                .iter()
+                .all(|&byte| byte & 1 == 0 && (b' '..=b'~').contains(&(byte >> 1)))
+            {
+                return None;
+            }
+        }
+        // APRS 1.0.1, chapter 5, including the obsolete grid locator and
+        // user-defined packets.
+        kind if b"!#$%)*,/:;<=>?@T[_{}".contains(&kind) => {
+            received_callsign_len(destination)?;
+        }
+        _ => return None,
+    }
+
+    let mut source = [0; 9];
+    for (decoded, encoded) in source[..source_len].iter_mut().zip(source_address) {
+        *decoded = encoded >> 1;
+    }
+    let ssid = (source_address[6] >> 1) & 0x0f;
+    if ssid != 0 {
+        source[source_len] = b'-';
+        source_len += 1;
+        if ssid >= 10 {
+            source[source_len] = b'1';
+            source_len += 1;
+        }
+        source[source_len] = b'0' + ssid % 10;
+        source_len += 1;
+    }
+    Some(ReceivedPacket {
+        source,
+        source_len,
+        information,
+    })
+}
+
+fn received_callsign_len(address: &[u8]) -> Option<usize> {
+    let mut len = 0;
+    let mut padding = false;
+    for &byte in &address[..6] {
+        if byte & 1 != 0 {
+            return None;
+        }
+        let character = byte >> 1;
+        if character == b' ' {
+            padding = true;
+        } else {
+            if padding || !(character.is_ascii_uppercase() || character.is_ascii_digit()) {
+                return None;
+            }
+            len += 1;
+        }
+    }
+    (len != 0).then_some(len)
 }
 
 pub struct Wire {
@@ -299,27 +419,32 @@ impl Encoder {
 /// Bounded streaming HDLC receiver for CMX868 synchronous NRZI bits. Returned
 /// frame includes FCS and is overwritten by the next completed frame.
 pub struct Decoder {
-    raw: [u8; WIRE_CAPACITY],
+    raw: [u8; RX_WIRE_CAPACITY],
     bits: usize,
     shift: u8,
     last_tone: bool,
     in_frame: bool,
-    frame: Frame,
+    frame: [u8; RX_FRAME_CAPACITY],
 }
 impl Decoder {
     pub const fn new() -> Self {
         Self {
-            raw: [0; WIRE_CAPACITY],
+            raw: [0; RX_WIRE_CAPACITY],
             bits: 0,
-            shift: 0,
+            shift: 0xff,
             last_tone: true,
             in_frame: false,
-            frame: Frame {
-                bytes: [0; FRAME_CAPACITY],
-                len: 0,
-            },
+            frame: [0; RX_FRAME_CAPACITY],
         }
     }
+    /// Discards partial HDLC state after a gap in the NRZI stream.
+    pub fn reset(&mut self) {
+        self.bits = 0;
+        self.shift = 0xff;
+        self.last_tone = true;
+        self.in_frame = false;
+    }
+
     pub fn push_byte(&mut self, byte: u8) -> Option<Result<&[u8], Error>> {
         let mut event = None;
         for shift in 0..8 {
@@ -328,7 +453,11 @@ impl Decoder {
             self.last_tone = tone;
             self.shift = (self.shift >> 1) | if bit { 0x80 } else { 0 };
             if self.in_frame {
-                if self.bits >= WIRE_CAPACITY * 8 {
+                if self.shift & 0xfe == 0xfe {
+                    self.in_frame = false;
+                    self.bits = 0;
+                    event.get_or_insert(Err(Error::Frame));
+                } else if self.bits >= RX_WIRE_CAPACITY * 8 {
                     self.in_frame = false;
                     self.bits = 0;
                     event = Some(Err(Error::Space));
@@ -351,10 +480,10 @@ impl Decoder {
                 self.bits = 0;
             }
         }
-        event.map(|result| result.map(|()| self.frame.as_bytes()))
+        event.map(|result| result.map(|len| &self.frame[..len]))
     }
-    fn finish(&mut self, bits: usize) -> Result<(), Error> {
-        self.frame.len = 0;
+    fn finish(&mut self, bits: usize) -> Result<usize, Error> {
+        let mut len = 0;
         let mut ones = 0;
         let mut octet = 0;
         let mut count = 0;
@@ -375,20 +504,20 @@ impl Decoder {
             }
             count += 1;
             if count == 8 {
-                self.frame.push(octet)?;
+                *self.frame.get_mut(len).ok_or(Error::Space)? = octet;
+                len += 1;
                 count = 0;
                 octet = 0;
             }
         }
-        if count != 0 || self.frame.len < 18 {
+        if count != 0 || ones == 5 || len < 18 {
             return Err(Error::Frame);
         }
-        let n = self.frame.len;
-        let expected = u16::from_le_bytes([self.frame.bytes[n - 2], self.frame.bytes[n - 1]]);
-        if fcs(&self.frame.bytes[..n - 2]) != expected {
+        let expected = u16::from_le_bytes([self.frame[len - 2], self.frame[len - 1]]);
+        if fcs(&self.frame[..len - 2]) != expected {
             return Err(Error::Checksum);
         }
-        Ok(())
+        Ok(len)
     }
 }
 impl Default for Decoder {
@@ -400,6 +529,192 @@ impl Default for Decoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    extern crate std;
+    use self::std::vec::Vec;
+
+    // Fixed NRZI vector generated by an independent bit serializer using the
+    // non-reflected 0x1021 CRC polynomial and explicit bit reversal.
+    const MIC_E_FRAME: &[u8] = &[
+        0xc8, 0x52, 0x4a, 0x42, 0xc8, 0x44, 0xe0, 0xae, 0x84, 0x68, 0x82, 0xa0, 0xa4, 0x7a, 0xae,
+        0x92, 0x88, 0x8a, 0x62, 0x40, 0xe3, 0x03, 0xf0, 0x1d, 0x1c, 0x53, 0x1f, 0x7e, 0x1c, 0x1c,
+        0x5b, 0x1d, 0x00, 0xff, 0x81, 0x20, 0x1e, 0x9e, 0x7d,
+    ];
+    const MIC_E_NRZI: &[u8] = &[
+        0x80, 0x12, 0x9b, 0x6c, 0x6b, 0xed, 0x96, 0x0a, 0xcf, 0xd6, 0x72, 0x2b, 0x35, 0xc9, 0x7c,
+        0xcf, 0x24, 0x2d, 0xd3, 0x74, 0x95, 0x0b, 0x54, 0xf5, 0x7b, 0x85, 0x6e, 0x7e, 0x05, 0x16,
+        0xea, 0xc5, 0x19, 0xaa, 0xfa, 0x41, 0xa5, 0x16, 0x14, 0xc4, 0x2f, 0x20, 0xe0,
+    ];
+
+    fn received_frame(paths: usize, information: &[u8]) -> Vec<u8> {
+        let mut frame = Vec::new();
+        frame.extend(b"APRS  ".iter().map(|&c| c << 1));
+        frame.push(0xe0);
+        frame.extend(b"N0ABC ".iter().map(|&c| c << 1));
+        frame.push(0x60 | u8::from(paths == 0));
+        for i in 0..paths {
+            frame.extend(b"WIDE1 ".iter().map(|&c| c << 1));
+            frame.push(0xe2 | u8::from(i + 1 == paths));
+        }
+        frame.extend([0x03, 0xf0]);
+        frame.extend(information);
+        frame.extend(fcs(&frame).to_le_bytes());
+        frame
+    }
+
+    fn flag(bits: &mut Vec<bool>) {
+        bits.extend([false, true, true, true, true, true, true, false]);
+    }
+
+    fn stuffed_bits(bits: &mut Vec<bool>, frame: &[u8]) {
+        let mut ones = 0;
+        for bit in frame
+            .iter()
+            .flat_map(|octet| (0..8).map(move |offset| octet & (1 << offset) != 0))
+        {
+            bits.push(bit);
+            if bit {
+                ones += 1;
+                if ones == 5 {
+                    bits.push(false);
+                    ones = 0;
+                }
+            } else {
+                ones = 0;
+            }
+        }
+    }
+
+    fn pack_nrzi(bits: &[bool]) -> Vec<u8> {
+        let mut tone = true;
+        bits.chunks(8)
+            .map(|chunk| {
+                chunk.iter().enumerate().fold(0, |byte, (i, &bit)| {
+                    tone ^= !bit;
+                    byte | (u8::from(tone) << i)
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn independent_mic_e_vector_preserves_binary_and_source_ssid() {
+        let mut decoder = Decoder::new();
+        let mut frames = 0;
+        for &byte in MIC_E_NRZI {
+            if let Some(event) = decoder.push_byte(byte) {
+                let frame = event.unwrap();
+                assert_eq!(frame, MIC_E_FRAME);
+                let packet = received_packet(frame).unwrap();
+                assert_eq!(packet.source(), b"WB4APR-13");
+                assert_eq!(packet.information(), &MIC_E_FRAME[23..37]);
+                frames += 1;
+            }
+        }
+        assert_eq!(frames, 1);
+    }
+
+    #[test]
+    fn validates_aprs_envelope_addresses_and_information_bounds() {
+        let info = b":N0CALL   :test";
+        let frame = received_frame(1, info);
+        assert_eq!(received_packet(&frame).unwrap().information(), info);
+        assert_eq!(received_packet(&frame).unwrap().source(), b"N0ABC");
+        let mut single_digit = frame.clone();
+        single_digit[13] |= 7 << 1;
+        assert_eq!(received_packet(&single_digit).unwrap().source(), b"N0ABC-7");
+
+        for (index, invalid) in [
+            (0, b'A' << 1 | 1), // Address characters have no extension bit.
+            (6, 0xe1),          // Destination cannot end the address field.
+            (7, b' ' << 1),     // No embedded or leading spaces in a callsign.
+            (13, 0x61),         // Source cannot end the path before its digipeater.
+            (14, b'?' << 1),    // Digipeater address must be a shifted callsign.
+            (20, 0xe2),         // Missing end of address field.
+            (21, 0x00),         // AX.25 I-frame instead of UI.
+            (22, 0xcf),         // NET/ROM instead of APRS.
+            (23, b'H'),         // Plain AX.25 text begins with an unknown DTI.
+        ] {
+            let mut bad = frame.clone();
+            bad[index] = invalid;
+            assert!(received_packet(&bad).is_none(), "field at byte {index}");
+        }
+        assert!(received_packet(&received_frame(0, b"")).is_none());
+        assert!(received_packet(&received_frame(9, info)).is_none());
+        assert!(received_packet(&received_frame(0, &[b'>'; 257])).is_none());
+        for n in 0..18 {
+            assert!(received_packet(&frame[..n]).is_none());
+        }
+    }
+
+    #[test]
+    fn bit_stuffing_at_max_lengths_and_resync_after_invalid_frames() {
+        let mut information = [0xff; 256];
+        information[0] = b'{';
+        let max_frame = received_frame(8, &information);
+        assert_eq!(max_frame.len(), 330);
+        let mut oversize = max_frame.clone();
+        oversize.push(0xff);
+        let mut bad_fcs = MIC_E_FRAME.to_vec();
+        bad_fcs[30] ^= 1;
+
+        let mut bits = Vec::from([true, false, true]);
+        flag(&mut bits);
+        stuffed_bits(&mut bits, &bad_fcs);
+        flag(&mut bits);
+        stuffed_bits(&mut bits, &oversize);
+        flag(&mut bits);
+        bits.extend([true; 15]);
+        flag(&mut bits);
+        bits.extend((0..RX_WIRE_CAPACITY * 8 + 1).map(|i| i % 2 == 0));
+        flag(&mut bits);
+        stuffed_bits(&mut bits, &max_frame);
+        flag(&mut bits);
+        stuffed_bits(&mut bits, MIC_E_FRAME);
+        flag(&mut bits);
+
+        let mut decoder = Decoder::new();
+        let mut errors = Vec::new();
+        let mut frames = Vec::new();
+        for byte in pack_nrzi(&bits) {
+            match decoder.push_byte(byte) {
+                Some(Ok(frame)) => frames.push(frame.to_vec()),
+                Some(Err(error)) => errors.push(error),
+                None => {}
+            }
+        }
+        assert_eq!(
+            errors,
+            [Error::Checksum, Error::Space, Error::Frame, Error::Space]
+        );
+        assert_eq!(frames, [max_frame, MIC_E_FRAME.to_vec()]);
+        assert_eq!(
+            received_packet(&frames[0]).unwrap().information(),
+            information
+        );
+    }
+
+    #[test]
+    fn gap_reset_discards_old_partial_frame() {
+        let mut decoder = Decoder::new();
+        for &byte in &MIC_E_NRZI[..15] {
+            assert!(decoder.push_byte(byte).is_none());
+        }
+        decoder.reset();
+        for &byte in &MIC_E_NRZI[15..] {
+            assert!(decoder.push_byte(byte).is_none());
+        }
+        decoder.reset();
+        let frames = MIC_E_NRZI
+            .iter()
+            .filter_map(|&byte| {
+                decoder
+                    .push_byte(byte)
+                    .map(|frame| frame.map(<[u8]>::to_vec))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(frames, [Ok(MIC_E_FRAME.to_vec())]);
+    }
+
     fn config() -> Config {
         Config {
             source: Address::new(b"N0CALL", 7).unwrap(),
@@ -469,5 +784,17 @@ mod tests {
         let mut frame = full.position(0, 0).unwrap();
         frame.len = FRAME_CAPACITY + 1;
         assert!(matches!(Wire::encode(&frame), Err(Error::Frame)));
+    }
+}
+#[test]
+fn coordinate_rounding_matches_the_wide_formula() {
+    for base in [0, 1, 9_999_999, 899_995_000, 1_799_995_000, 2_147_480_000] {
+        for offset in 0..5000 {
+            let degrees_e7 = base + offset;
+            assert_eq!(
+                u64::from(rounded_hundredth_minutes(degrees_e7)),
+                (u64::from(degrees_e7) * 6000 + 5_000_000) / 10_000_000
+            );
+        }
     }
 }

@@ -83,7 +83,7 @@ impl FlashStore {
     }
 
     /// Save a user-confirmed change. Call in foreground with RF quiescent and
-    /// enough watchdog margin for a bounded erase and at most eight word writes.
+    /// enough watchdog margin for a bounded erase and at most sixteen word writes.
     /// Each operation masks interrupts until the flash controller is idle.
     /// A stuck busy controller is left to the armed independent watchdog.
     /// If final verification fails after commit, a subsequent load can see

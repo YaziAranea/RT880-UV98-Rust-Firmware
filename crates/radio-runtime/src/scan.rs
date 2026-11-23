@@ -63,6 +63,55 @@ pub struct Status {
     pub error: Option<Error>,
 }
 
+/// Channel order for one priority-enabled zone scan. The timing scheduler
+/// still controls when a tuned channel may be left.
+pub struct ZoneOrder {
+    priority: u16,
+    ordinary_cursor: Option<u16>,
+    priority_due: bool,
+}
+
+impl ZoneOrder {
+    pub const fn new(priority: u16, ordinary_cursor: Option<u16>) -> Self {
+        Self {
+            priority,
+            ordinary_cursor,
+            priority_due: false,
+        }
+    }
+
+    /// Called for a dispatched channel step. The catalog lookup follows zone
+    /// order from the ordinary cursor and excludes skipped slots and the
+    /// eligible priority slot. An explicit skip tries that lookup first.
+    pub fn next(
+        &mut self,
+        current: Option<u16>,
+        skipped: &[u8; CHANNEL_COUNT / 8],
+        force_ordinary: bool,
+        next_ordinary: impl FnOnce(Option<u16>, Option<u16>) -> Option<u16>,
+    ) -> Option<u16> {
+        let index = usize::from(self.priority);
+        let eligible_priority = (index < CHANNEL_COUNT
+            && skipped[index / 8] & (1 << (index % 8)) == 0)
+            .then_some(self.priority);
+        let probe = eligible_priority.filter(|&channel| Some(channel) != current);
+        if self.priority_due && !force_ordinary {
+            if let Some(channel) = probe {
+                self.priority_due = false;
+                return Some(channel);
+            }
+        }
+
+        let ordinary = next_ordinary(self.ordinary_cursor, eligible_priority)
+            .filter(|&channel| channel != self.priority && Some(channel) != current);
+        self.priority_due = ordinary.is_some();
+        if ordinary.is_some() {
+            self.ordinary_cursor = ordinary;
+        }
+        ordinary.or(probe)
+    }
+}
+
 pub struct Scheduler {
     status: Status,
     counter: u64,
@@ -307,6 +356,167 @@ mod tests {
         assert!(scan
             .tune_ack(scan.status().ticket.unwrap(), now, State::Receiving)
             .unwrap());
+    }
+
+    fn next_in_zone(
+        order: &mut ZoneOrder,
+        members: &[u16],
+        current: Option<u16>,
+        skipped: &[u8; CHANNEL_COUNT / 8],
+        force_ordinary: bool,
+    ) -> Option<u16> {
+        order.next(current, skipped, force_ordinary, |anchor, excluded| {
+            let start = members
+                .iter()
+                .position(|&channel| Some(channel) == anchor)
+                .map_or(0, |position| position + 1);
+            members
+                .iter()
+                .copied()
+                .cycle()
+                .skip(start)
+                .take(members.len())
+                .find(|&channel| {
+                    let index = usize::from(channel);
+                    Some(channel) != excluded && skipped[index / 8] & (1 << (index % 8)) == 0
+                })
+        })
+    }
+
+    #[test]
+    fn priority_visits_preserve_ordinary_zone_order_and_wrap() {
+        let members = [4, 8, 3, 9];
+        let skipped = [0; CHANNEL_COUNT / 8];
+        let mut order = ZoneOrder::new(8, Some(9));
+        let mut current = Some(9);
+        for channel in [4, 8, 3, 8, 9, 8, 4] {
+            current = next_in_zone(&mut order, &members, current, &skipped, false);
+            assert_eq!(current, Some(channel));
+        }
+
+        let mut order = ZoneOrder::new(u16::MAX, None);
+        let mut current = None;
+        for channel in [4, 8, 3, 9, 4] {
+            current = next_in_zone(&mut order, &members, current, &skipped, false);
+            assert_eq!(current, Some(channel));
+        }
+    }
+
+    #[test]
+    fn skipping_an_ordinary_or_priority_channel_takes_precedence_over_the_next_probe() {
+        let members = [1, 2, 3, 7];
+        let mut skipped = [0; CHANNEL_COUNT / 8];
+        let mut order = ZoneOrder::new(7, None);
+        assert_eq!(
+            next_in_zone(&mut order, &members, None, &skipped, false),
+            Some(1)
+        );
+        skipped[0] |= 1 << 1;
+        assert_eq!(
+            next_in_zone(&mut order, &members, Some(1), &skipped, true),
+            Some(2)
+        );
+        assert_eq!(
+            next_in_zone(&mut order, &members, Some(2), &skipped, false),
+            Some(7)
+        );
+        skipped[0] |= 1 << 7;
+        assert_eq!(
+            next_in_zone(&mut order, &members, Some(7), &skipped, true),
+            Some(3)
+        );
+        assert_eq!(
+            next_in_zone(&mut order, &members, Some(3), &skipped, false),
+            Some(2)
+        );
+        assert_eq!(
+            next_in_zone(&mut order, &members, Some(2), &skipped, false),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn single_member_and_exhausted_zone_never_retune_the_current_channel() {
+        let mut skipped = [0; CHANNEL_COUNT / 8];
+        let mut order = ZoneOrder::new(7, None);
+        assert_eq!(
+            next_in_zone(&mut order, &[7], None, &skipped, false),
+            Some(7)
+        );
+        assert_eq!(
+            next_in_zone(&mut order, &[7], Some(7), &skipped, false),
+            None
+        );
+        skipped[0] |= 1 << 7;
+        assert_eq!(
+            next_in_zone(&mut order, &[7], Some(7), &skipped, true),
+            None
+        );
+
+        let mut order = ZoneOrder::new(7, Some(1));
+        assert_eq!(
+            next_in_zone(&mut order, &[1, 7], Some(1), &skipped, false),
+            None
+        );
+        skipped[0] = 1 << 1;
+        assert_eq!(
+            next_in_zone(&mut order, &[1, 7], Some(1), &skipped, true),
+            Some(7)
+        );
+        assert_eq!(
+            next_in_zone(&mut order, &[1, 7], Some(7), &skipped, false),
+            None
+        );
+    }
+
+    #[test]
+    fn priority_waits_for_the_normal_tune_ack_dwell_and_closed_audio() {
+        let members = [1, 2, 7];
+        let mut order = ZoneOrder::new(7, None);
+        let mut scan = Scheduler::new();
+        assert_eq!(scan.start(Target::Channels, 0), Ok(Action::NextChannel));
+        let current = next_in_zone(&mut order, &members, None, scan.skipped_channels(), false);
+        assert_eq!(current, Some(1));
+        let ordinary_ticket = scan.status().ticket.unwrap();
+
+        assert_eq!(scan.tick(200, false), Ok(Action::None));
+        assert_eq!(
+            scan.tune_ack(ordinary_ticket, 200, State::Configuring),
+            Ok(false)
+        );
+        ack(&mut scan, 200);
+        assert_eq!(scan.tick(200 + DWELL_MS - 1, false), Ok(Action::None));
+        assert_eq!(scan.tick(200 + DWELL_MS, true), Ok(Action::None));
+        assert_eq!(scan.tick(1_000, true), Ok(Action::None));
+        assert_eq!(scan.tick(1_001, false), Ok(Action::None));
+        assert_eq!(scan.tick(1_001 + RESUME_MS - 1, false), Ok(Action::None));
+        assert_eq!(
+            scan.tick_with_cursor_hold(1_001 + RESUME_MS, false, true),
+            Ok(Action::None)
+        );
+        assert_eq!(scan.tick(1_002 + RESUME_MS, false), Ok(Action::NextChannel));
+
+        let current = next_in_zone(
+            &mut order,
+            &members,
+            current,
+            scan.skipped_channels(),
+            false,
+        );
+        assert_eq!(current, Some(7));
+        assert_eq!(
+            scan.tune_ack(ordinary_ticket, 1_510, State::Receiving),
+            Ok(false)
+        );
+        ack(&mut scan, 1_510);
+        assert_eq!(scan.tick(1_510 + DWELL_MS - 1, false), Ok(Action::None));
+        assert_eq!(scan.tick(1_510 + DWELL_MS, true), Ok(Action::None));
+        assert_eq!(scan.tick(2_000, true), Ok(Action::None));
+        assert_eq!(scan.skip_current(2_001, current), Ok(Action::NextChannel));
+        assert_eq!(
+            next_in_zone(&mut order, &members, current, scan.skipped_channels(), true),
+            Some(2)
+        );
     }
 
     #[test]

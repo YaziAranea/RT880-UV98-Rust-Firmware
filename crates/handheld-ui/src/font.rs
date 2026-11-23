@@ -1,15 +1,42 @@
 // Original 5x7 glyphs. Each row uses bits 4..0, left to right.
 // Lowercase labels are displayed in uppercase to keep a legible small font.
 pub fn glyph(ch: char) -> [u8; 7] {
-    let ch = match ch {
-        'a'..='z' => ch.to_ascii_uppercase(),
-        'а'..='я' => char::from_u32(ch as u32 - 32).unwrap_or('?'),
-        'ё' => 'Ё',
-        'ä' => 'Ä',
-        'ö' => 'Ö',
-        'ü' => 'Ü',
-        other => other,
-    };
+    match ch {
+        ' '..='Z' => ASCII[(ch as u8 - b' ') as usize],
+        'a'..='z' => ASCII[(ch as u8 - b'a' + b'A' - b' ') as usize],
+        'А'..='я' => CYRILLIC[((ch as u32 - 'А' as u32) % 32) as usize],
+        'Ё' | 'ё' => bitmap('Ё'),
+        'Ä' | 'ä' => bitmap('Ä'),
+        'Ö' | 'ö' => bitmap('Ö'),
+        'Ü' | 'ü' => bitmap('Ü'),
+        'ß' => bitmap('ß'),
+        '_' => bitmap('_'),
+        '−' => bitmap('-'),
+        '↑' => bitmap('↑'),
+        '↓' => bitmap('↓'),
+        '←' => bitmap('←'),
+        '→' => bitmap('→'),
+        '·' => bitmap('·'),
+        _ => bitmap('?'),
+    }
+}
+
+// Use the glyph definitions at build time to lay out the two consecutive
+// ranges in Flash. Each draw is an indexed load of a seven-byte bitmap.
+const ASCII: [[u8; 7]; (b'Z' - b' ' + 1) as usize] = range(' ');
+const CYRILLIC: [[u8; 7]; 32] = range('А');
+
+const fn range<const N: usize>(first: char) -> [[u8; 7]; N] {
+    let mut table = [[0; 7]; N];
+    let mut index = 0;
+    while index < N {
+        table[index] = bitmap(char::from_u32(first as u32 + index as u32).unwrap());
+        index += 1;
+    }
+    table
+}
+
+const fn bitmap(ch: char) -> [u8; 7] {
     match ch {
         'Ä' => [10, 0, 14, 17, 31, 17, 17],
         'Ö' => [10, 0, 14, 17, 17, 17, 14],

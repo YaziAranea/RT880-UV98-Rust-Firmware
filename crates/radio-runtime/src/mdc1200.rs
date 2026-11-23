@@ -741,7 +741,7 @@ mod tests {
             lost_control: false,
         });
         radio.state = State::Transmitting;
-        radio.tx_started = Some(0);
+        radio.tx_timer = Some(crate::TxTimer::new(0, TX_TIMEOUT_MS));
         radio.io.registers[0x30] = 0xc1fe;
         radio.io.registers[0x33] = 0xa518;
         radio.io.registers[0x36] = 0x5cff;

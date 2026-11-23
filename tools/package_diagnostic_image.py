@@ -10,6 +10,7 @@ import zipfile
 
 import check_elf
 from export_diagnostic_image import VERSION, export
+from flash_budget import MINIMUM, measure
 from pack_ui_locales import LANGUAGES, verify_image
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -210,6 +211,13 @@ def validate_inputs(folder, root, profile="rx"):
     if verification.get("firmware_features", []) != expected_features:
         raise ValueError("Build feature evidence differs from the selected candidate profile")
 
+    flash_budget = None
+    if channel_tx:
+        flash_budget = measure(expected_layout, firmware_language, profile)
+        if flash_budget["status"] != "passed":
+            raise ValueError(f"Flash budget below minimum: {flash_budget['remaining_flash_bytes']} "
+                             f"bytes before settings journal, required {MINIMUM}")
+
     if not (root / "DIAGNOSTIC-IMAGE-RU.txt").read_text(encoding="utf-8-sig").startswith(f"UV98 Rust {VERSION}"):
         raise ValueError("Diagnostic README version is stale")
     calibration = root / "crates/calibration/tests/fixtures/uv98-plus-stock-1.16.bin"
@@ -240,6 +248,7 @@ def validate_inputs(folder, root, profile="rx"):
                                                               ["FM_TX_CHANNEL_VFO"] if channel_tx else
                                                               ["PA5_MANUAL_PCM_RX_ONLY"] if profile == "pa5-audio" else []),
             "linked_release_policy": policy,
+            "flash_budget": flash_budget,
             "source_main_sha256": digest(source),
             "source_firmware_manifest_sha256": digest(firmware_manifest),
             "validation_scope": "linked release declaration, feature evidence/declarations and source assertions; not full TX reachability proof",

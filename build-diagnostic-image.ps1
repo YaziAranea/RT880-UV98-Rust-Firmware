@@ -55,11 +55,13 @@ try {
     $sysroot = & rustc --print sysroot
     if ($LASTEXITCODE -ne 0) { throw 'rustc sysroot unavailable' }
     if ($hostTriple -eq 'x86_64-pc-windows-gnullvm') {
-        $env:CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER = Join-Path $sysroot 'lib/rustlib/x86_64-pc-windows-gnullvm/bin/rust-lld.exe'
+        $rustHostBin = Join-Path $sysroot "lib/rustlib/$hostTriple/bin"
+        $env:CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER = Join-Path $rustHostBin 'rust-lld.exe'
+        $env:PATH = $rustHostBin + ';' + $env:PATH
     }
     $runner = if (Get-Command rtk -ErrorAction SilentlyContinue) { 'rtk' } else { 'cargo' }
     [string[]]$prefix = if ($runner -eq 'rtk') { @('cargo') } else { @() }
-    $packages = @('uv98-settings-store', 'uv98-signaling', 'uv98-gps-at32', 'uv98-spectrum', 'uv98-gps-nmea', 'uv98-radio-runtime', 'uv98-rf-sequence', 'uv98-sidekeys-at32', 'uv98-handheld-ui', 'uv98-handheld-app', 'uv98-handheld-image-sim', 'uv98-boot-log', 'uv98-diag-startup', 'uv98-diag-quiesce', 'uv98-diag-app',
+    $packages = @('uv98-settings-store', 'uv98-smart-beacon', 'uv98-signaling', 'uv98-gps-at32', 'uv98-spectrum', 'uv98-gps-nmea', 'uv98-radio-runtime', 'uv98-rf-sequence', 'uv98-sidekeys-at32', 'uv98-handheld-ui-state', 'uv98-handheld-ui', 'uv98-handheld-app', 'uv98-handheld-image-sim', 'uv98-boot-log', 'uv98-diag-startup', 'uv98-diag-quiesce', 'uv98-diag-app',
         'uv98-board-pins', 'uv98-rf-at32', 'uv98-diagnostic', 'uv98-display',
         'uv98-keys', 'uv98-keyscan-at32', 'uv98-rf-bus', 'uv98-nor-read',
         'uv98-board-at32', 'uv98-lcd-at32', 'uv98-clock-profile', 'uv98-board-diagnostic',
@@ -70,7 +72,7 @@ try {
     Invoke-Checked 'python' @('tools/check_oracles.py')
     Invoke-Checked 'python' @('tools/check_board_oracles.py')
     Invoke-Checked $runner ($prefix + @('test', '--locked', '--offline', '--target', $hostTriple) + $packageArgs)
-    foreach ($test in @('test_check_elf.py', 'test_check_settings_journal.py', 'test_export_diagnostic_image.py', 'test_package_diagnostic_image.py')) {
+    foreach ($test in @('test_check_elf.py', 'test_check_settings_journal.py', 'test_check_flash_budget.py', 'test_build_release.py', 'test_export_diagnostic_image.py', 'test_package_diagnostic_image.py')) {
         Invoke-Checked 'python' @('-m', 'unittest', 'discover', '-s', 'tools', '-p', $test, '-v')
     }
     Invoke-Checked 'python' @('-m', 'unittest', 'discover', '-s', 'research/recovery', '-p', 'test_image_preflight.py', '-q')
@@ -90,8 +92,22 @@ try {
     $firmwareFeatures += "locale-$firmwareLanguage"
     $featureArgs = @('--features', ($firmwareFeatures -join ','))
     Invoke-Checked $runner ($prefix + @('build', '--locked', '--offline', '--release', '--target', 'thumbv7em-none-eabi', '-p', 'uv98-diag-firmware') + $featureArgs)
+    $linkedElf = 'target/thumbv7em-none-eabi/release/uv98-diag-firmware'
+    $budgetProfile = if ($ChannelTx) { 'channel-tx' }
+        elseif ($UpperExoTxTrial) { 'upper-exo-trial' }
+        elseif ($Pa5Audio) { 'pa5-audio' }
+        else { 'rx' }
     $imageDirectory = Join-Path $destination 'image'
-    Invoke-Checked 'python' @('tools/export_diagnostic_image.py', 'target/thumbv7em-none-eabi/release/uv98-diag-firmware', $imageDirectory)
+    $stagedElf = Join-Path $destination 'uv98-diag-firmware.staged.elf'
+    try {
+        Copy-Item -LiteralPath $linkedElf -Destination $stagedElf
+        Invoke-Checked 'python' @('tools/check_flash_budget.py', $stagedElf,
+            '--language', $firmwareLanguage, '--profile', $budgetProfile,
+            '--report', (Join-Path $destination 'flash-budget.json'))
+        Invoke-Checked 'python' @('tools/export_diagnostic_image.py', $stagedElf, $imageDirectory)
+    } finally {
+        if (Test-Path -LiteralPath $stagedElf) { Remove-Item -LiteralPath $stagedElf }
+    }
     Invoke-Checked 'python' @('tools/pack_ui_locales.py', '--check', '--image', (Join-Path $imageDirectory 'UV98-diag-0.1.8.bin'), '--language', $firmwareLanguage)
     Invoke-Checked 'python' @('tools/check_diag_preinit.py', (Join-Path $imageDirectory 'UV98-diag-0.1.8.elf'), '--report', (Join-Path $imageDirectory 'early-machine-code-check.json'))
     [string[]]$journalArgs = @('tools/check_settings_journal.py',

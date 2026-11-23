@@ -21,6 +21,7 @@ pub mod shortwave;
 pub mod shortwave_scope;
 pub mod spectrum_flow;
 pub mod sweep;
+pub mod tone_search;
 pub mod tx_policy;
 pub mod tx_trial;
 pub mod watch;
@@ -28,6 +29,35 @@ pub mod watch;
 pub const CONFIG_TIMEOUT_MS: u32 = 3000;
 pub const RECEIVE_SETTLE_MS: u32 = 10;
 pub const TX_TIMEOUT_MS: u32 = 30_000;
+
+/// TX configuration, voice, and end signaling share this deadline.
+#[derive(Clone, Copy)]
+pub struct TxTimer {
+    start_ms: u32,
+    limit_ms: u32,
+}
+
+impl TxTimer {
+    fn new(start_ms: u32, requested_ms: u32) -> Self {
+        Self {
+            start_ms,
+            limit_ms: requested_ms.min(TX_TIMEOUT_MS),
+        }
+    }
+
+    pub const fn start_ms(self) -> u32 {
+        self.start_ms
+    }
+
+    pub fn remaining_ms(self, now: u32) -> u32 {
+        self.limit_ms
+            .saturating_sub(now.wrapping_sub(self.start_ms))
+    }
+
+    pub fn remaining_seconds(self, now: u32) -> u8 {
+        self.remaining_ms(now).div_ceil(1000) as u8
+    }
+}
 
 // Beken BK4819 Application Note v1.0, §12. Bit 1 enables the TX DSP.
 const MIC_ADC: u16 = 1 << 2;
@@ -62,6 +92,7 @@ pub enum State {
 enum Target {
     Cold,
     Receive,
+    ToneSearch,
     Transmit,
 }
 #[derive(Debug, PartialEq, Eq)]
@@ -139,7 +170,7 @@ pub struct Runtime<I: Io> {
     last_now: Option<u32>,
     wait: Option<(u32, u32)>,
     finishing: bool,
-    tx_started: Option<u32>,
+    tx_timer: Option<TxTimer>,
     audio_open: bool,
     am_agc: sequence::am_agc::State,
     am_gain_word: Option<u16>,
@@ -167,7 +198,7 @@ impl<I: Io> Runtime<I> {
             last_now: None,
             wait: None,
             finishing: false,
-            tx_started: None,
+            tx_timer: None,
             audio_open: false,
             am_agc: sequence::am_agc::State::new(),
             am_gain_word: None,
@@ -190,6 +221,11 @@ impl<I: Io> Runtime<I> {
     }
     pub fn audio_open(&self) -> bool {
         self.audio_open
+    }
+
+    /// Sample the receiver's physical squelch flag without changing audio or IRQs.
+    pub fn carrier_present(&mut self) -> Result<bool, Fault<I::Error>> {
+        Ok(self.state == State::Receiving && self.read(0x0c)? & 2 != 0)
     }
     /// Foreground light policy changes only the already-owned PA4/PA9 pins.
     /// A GPIO fault follows the same RF shutdown path as other control faults.
@@ -313,7 +349,7 @@ impl<I: Io> Runtime<I> {
         self.plan = None;
         self.wait = None;
         self.finishing = false;
-        self.tx_started = None;
+        self.tx_timer = None;
         errors
     }
     fn fail(&mut self, reason: Error<I::Error>) -> Fault<I::Error> {
@@ -443,11 +479,6 @@ impl<I: Io> Runtime<I> {
         self.started = now;
         self.wait = None;
         self.finishing = false;
-        self.tx_started = if target == Target::Transmit {
-            Some(now)
-        } else {
-            None
-        };
         Ok(())
     }
     pub fn cold_start(
@@ -466,16 +497,78 @@ impl<I: Io> Runtime<I> {
         request: RxRequest,
         now: u32,
     ) -> Result<(), Fault<I::Error>> {
+        self.receive_inner(calibration, request, now, false)
+    }
+
+    pub fn receive_tone_search(
+        &mut self,
+        calibration: &Calibration<'_>,
+        request: RxRequest,
+        now: u32,
+    ) -> Result<(), Fault<I::Error>> {
+        self.receive_inner(calibration, request, now, true)
+    }
+
+    fn receive_inner(
+        &mut self,
+        calibration: &Calibration<'_>,
+        request: RxRequest,
+        now: u32,
+        tone_search: bool,
+    ) -> Result<(), Fault<I::Error>> {
         if !self.initialized {
             return Err(self.reject(Error::NotInitialized));
         }
-        let plan =
-            sequence::receive(calibration, request).map_err(|e| self.reject(Error::Request(e)))?;
+        let plan = if tone_search {
+            sequence::receive_tone_search(calibration, request)
+        } else {
+            sequence::receive(calibration, request)
+        }
+        .map_err(|e| self.reject(Error::Request(e)))?;
         self.am_agc = sequence::am_agc::State::new();
         self.am_gain_word = None;
         self.am_gain_at = None;
         self.am_carrier_at = None;
-        self.start(plan, Target::Receive, now)
+        self.start(
+            plan,
+            if tone_search {
+                Target::ToneSearch
+            } else {
+                Target::Receive
+            },
+            now,
+        )
+    }
+
+    /// Decode only the scan registers, between two actual carrier samples.
+    #[cfg_attr(target_arch = "arm", inline(never))]
+    pub fn read_rx_tone(&mut self) -> Result<tone_search::Observation, Fault<I::Error>> {
+        use tone_search::Observation;
+        if self.state != State::Receiving || self.target != Target::ToneSearch {
+            return Err(self.reject(Error::State));
+        }
+        if self.read(0x0c)? & 2 == 0 {
+            return Ok(Observation::NoCarrier);
+        }
+        let high = self.read(0x69)?;
+        let dcs = if high & 0xc000 == 0 {
+            let low = self.read(0x6a)?;
+            (self.read(0x69)? == high)
+                .then(|| tone_search::decode_dcs(high, low))
+                .flatten()
+        } else {
+            None
+        };
+        let tone = if dcs.is_some() {
+            dcs
+        } else {
+            tone_search::decode_ctcss(self.read(0x68)?)
+        };
+        Ok(if self.read(0x0c)? & 2 == 0 {
+            Observation::NoCarrier
+        } else {
+            tone.map_or(Observation::NoTone, Observation::Tone)
+        })
     }
     /// A fresh PTT edge, channel permission and calibration identity must be
     /// checked by the caller. tick additionally requires physical hold each time.
@@ -499,6 +592,18 @@ impl<I: Io> Runtime<I> {
         held: bool,
         config: mdc1200::Config,
     ) -> Result<(), Fault<I::Error>> {
+        self.transmit_with_mdc_limit(calibration, request, now, held, config, TX_TIMEOUT_MS)
+    }
+
+    pub fn transmit_with_mdc_limit(
+        &mut self,
+        calibration: &Calibration<'_>,
+        request: TxRequest,
+        now: u32,
+        held: bool,
+        config: mdc1200::Config,
+        timeout_ms: u32,
+    ) -> Result<(), Fault<I::Error>> {
         if !self.initialized {
             return Err(self.reject(Error::NotInitialized));
         }
@@ -508,7 +613,13 @@ impl<I: Io> Runtime<I> {
         let plan =
             sequence::transmit_with_microphone(calibration, request, config.begin().is_none())
                 .map_err(|e| self.reject(Error::Request(e)))?;
-        self.start(plan, Target::Transmit, now)
+        self.start(plan, Target::Transmit, now)?;
+        self.tx_timer = Some(TxTimer::new(now, timeout_ms));
+        Ok(())
+    }
+
+    pub fn tx_timer(&self) -> Option<TxTimer> {
+        self.tx_timer
     }
     pub fn stop(&mut self) -> Result<(), Fault<I::Error>> {
         if self.state == State::Failed {
@@ -545,8 +656,8 @@ impl<I: Io> Runtime<I> {
         let before = self.state;
         if self.tx_active_or_starting() {
             let expired = self
-                .tx_started
-                .is_some_and(|start| now.wrapping_sub(start) >= TX_TIMEOUT_MS);
+                .tx_timer
+                .is_none_or(|timer| timer.remaining_ms(now) == 0);
             if !physical_tx_held || expired {
                 self.stop()?;
                 return Ok(Poll {
@@ -582,7 +693,7 @@ impl<I: Io> Runtime<I> {
                         self.initialized = true;
                         State::Off
                     }
-                    Target::Receive => State::Receiving,
+                    Target::Receive | Target::ToneSearch => State::Receiving,
                     Target::Transmit => State::Transmitting,
                 };
             } else if let Some(step) = self
@@ -619,10 +730,12 @@ impl<I: Io> Runtime<I> {
                 self.finishing = true;
                 self.wait = Some((
                     now,
-                    if self.target == Target::Receive {
-                        RECEIVE_SETTLE_MS
-                    } else {
-                        0
+                    match self.target {
+                        Target::Receive => RECEIVE_SETTLE_MS,
+                        // An intentional restart briefly closes raw squelch.
+                        // Ignore the settling interval before observing carrier.
+                        Target::ToneSearch => 70,
+                        _ => 0,
                     },
                 ));
             }

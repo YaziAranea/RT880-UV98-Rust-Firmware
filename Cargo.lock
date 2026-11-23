@@ -2840,6 +2840,7 @@ dependencies = [
  "uv98-settings-store",
  "uv98-sidekeys-at32",
  "uv98-signaling",
+ "uv98-smart-beacon",
  "uv98-spectrum",
 ]
 
@@ -2958,9 +2959,19 @@ dependencies = [
  "uv98-band-plan",
  "uv98-codeplug",
  "uv98-display",
+ "uv98-handheld-ui-state",
  "uv98-keys",
  "uv98-signaling",
  "uv98-spectrum",
+]
+
+[[package]]
+name = "uv98-handheld-ui-state"
+version = "0.1.0"
+dependencies = [
+ "uv98-codeplug",
+ "uv98-keys",
+ "uv98-signaling",
 ]
 
 [[package]]
@@ -3010,10 +3021,12 @@ dependencies = [
  "uv98-calibration",
  "uv98-codeplug",
  "uv98-diag-quiesce",
+ "uv98-gps-nmea",
  "uv98-handheld-ui",
  "uv98-keys",
  "uv98-rf-sequence",
  "uv98-signaling",
+ "uv98-smart-beacon",
  "uv98-spectrum",
 ]
 
@@ -3099,6 +3112,13 @@ name = "uv98-signaling"
 version = "0.1.0"
 dependencies = [
  "uv98-board-pins",
+]
+
+[[package]]
+name = "uv98-smart-beacon"
+version = "0.1.0"
+dependencies = [
+ "uv98-gps-nmea",
 ]
 
 [[package]]

@@ -172,6 +172,72 @@ fn ready() -> (Runtime<Mock>, u32) {
     assert_eq!(r.state(), State::Receiving);
     (r, now)
 }
+
+#[test]
+fn rx_tone_search_arms_the_detector_with_tx_off_and_restores_the_rx_tone() {
+    let (mut radio, now) = ready();
+    let request = RxRequest {
+        tone: 0x1455,
+        level: 0,
+        ..rx()
+    };
+    radio.io.events.clear();
+    radio.receive_tone_search(&cal(), request, now).unwrap();
+    assert!(matches!(
+        radio.read_rx_tone().unwrap_err().reason,
+        Error::State
+    ));
+    // Rejected access during configuration is a failed session. Restart on a fresh radio.
+    let (mut radio, mut now) = ready();
+    radio.io.events.clear();
+    radio.receive_tone_search(&cal(), request, now).unwrap();
+    pump(&mut radio, &mut now, false);
+    let detector = radio
+        .io
+        .events
+        .iter()
+        .position(|e| *e == Event::Write(0x51, 0x0300))
+        .unwrap();
+    let link = radio
+        .io
+        .events
+        .iter()
+        .position(|e| *e == Event::Write(0x30, 0xbff1))
+        .unwrap();
+    assert!(detector < link);
+    assert!(!radio.io.events.iter().any(|e| matches!(
+        e, Event::Write(0x30, word) if word & 0x000e != 0
+    )));
+    assert!(!radio.io.events.iter().any(|e| matches!(
+        e, Event::Write(0x36, word) if *word != 0x007f
+    )));
+    radio.io.words[0x69] = 0x8000;
+    radio.io.words[0x68] = 1590;
+    assert_eq!(
+        radio.read_rx_tone().unwrap(),
+        tone_search::Observation::NoCarrier
+    );
+    radio.io.words[0x0c] = 2;
+    assert_eq!(
+        radio.read_rx_tone().unwrap(),
+        tone_search::Observation::Tone(0x1302)
+    );
+    radio.io.words[0x69] = 0x0763;
+    radio.io.words[0x6a] = 0x0813;
+    assert_eq!(
+        radio.read_rx_tone().unwrap(),
+        tone_search::Observation::Tone(0x2013)
+    );
+    radio.stop().unwrap();
+    radio.receive(&cal(), request, now).unwrap();
+    pump(&mut radio, &mut now, false);
+    assert_eq!(radio.io.words[0x51], 0x9041);
+    assert_eq!(radio.io.words[0x07], (0x455 * 413 / 200) as u16);
+    assert!(matches!(
+        radio.read_rx_tone().unwrap_err().reason,
+        Error::State
+    ));
+}
 fn assert_off(r: &Runtime<Mock>) {
     assert_eq!(r.io.words[0x33] & 0x0c, 0);
     assert_eq!(r.io.words[0x36], 0x007f);
@@ -771,6 +837,60 @@ fn timeout_equality_unkeys_and_needs_explicit_new_start() {
         State::Off
     );
 }
+#[test]
+fn operator_timer_counts_down_and_unkeys_at_the_selected_limit() {
+    for (requested, limit) in [
+        (10_000, 10_000),
+        (20_000, 20_000),
+        (30_000, 30_000),
+        (60_000, 30_000),
+    ] {
+        let (mut r, mut now) = ready();
+        let start = now;
+        r.transmit_with_mdc_limit(
+            &cal(),
+            tx(),
+            now,
+            true,
+            mdc1200::Config::default(),
+            requested,
+        )
+        .unwrap();
+        let timer = r.tx_timer().unwrap();
+        assert_eq!(timer.remaining_seconds(start), (limit / 1000) as u8);
+        assert_eq!(
+            timer.remaining_seconds(start + 1000),
+            (limit / 1000 - 1) as u8
+        );
+        assert_eq!(timer.remaining_ms(start.wrapping_sub(1)), 0);
+        pump(&mut r, &mut now, true);
+        let before = start + limit - 1;
+        assert_eq!(timer.remaining_seconds(before), 1);
+        assert_eq!(r.tick(before, true).unwrap().state, State::Transmitting);
+        assert_eq!(timer.remaining_seconds(before + 1), 0);
+        let stopped = r.tick(before + 1, true).unwrap();
+        assert!(stopped.tx_ended && stopped.tx_timed_out);
+        assert_off(&r);
+        assert!(r.tx_timer().is_none());
+        assert_eq!(r.tick(before + 2, true).unwrap().state, State::Off);
+    }
+}
+
+#[test]
+fn operator_expiry_precedes_any_pending_tx_enable() {
+    let (mut r, now) = ready();
+    r.transmit_with_mdc_limit(&cal(), tx(), now, true, mdc1200::Config::default(), 10_000)
+        .unwrap();
+    let before = r.io.events.len();
+    let poll = r.tick(now + 10_000, true).unwrap();
+    assert!(poll.tx_ended && poll.tx_timed_out);
+    assert_eq!(
+        &r.io.events[before..before + OFF_REQUESTS.len()],
+        &OFF_REQUESTS
+    );
+    assert_off(&r);
+}
+
 #[test]
 fn every_io_failure_is_terminal_and_attempts_all_off_requests() {
     for point in 1..100 {
@@ -1619,7 +1739,12 @@ fn cold_start_and_tx_deadlines_use_wrapping_monotonic_time() {
 
 #[test]
 fn timeout_and_release_precede_pending_enable_even_after_slow_polling() {
-    for target in [Target::Cold, Target::Receive, Target::Transmit] {
+    for target in [
+        Target::Cold,
+        Target::Receive,
+        Target::ToneSearch,
+        Target::Transmit,
+    ] {
         let (mut runtime, now) = if target == Target::Cold {
             (Runtime::new(Mock::new()), 0)
         } else {
@@ -1628,6 +1753,7 @@ fn timeout_and_release_precede_pending_enable_even_after_slow_polling() {
         match target {
             Target::Cold => runtime.cold_start(&cal(), now).unwrap(),
             Target::Receive => runtime.receive(&cal(), rx(), now).unwrap(),
+            Target::ToneSearch => runtime.receive_tone_search(&cal(), rx(), now).unwrap(),
             Target::Transmit => runtime.transmit(&cal(), tx(), now, true).unwrap(),
         }
         runtime.tick(now + CONFIG_TIMEOUT_MS - 1, true).unwrap();

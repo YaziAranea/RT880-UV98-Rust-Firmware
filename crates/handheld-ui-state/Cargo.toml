@@ -1,0 +1,18 @@
+[package]
+name = "uv98-handheld-ui-state"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+locale-ru = []
+locale-en = []
+locale-de = []
+locale-all = []
+# Renderer unit tests switch languages even in single-locale configurations.
+renderer-tests = []
+
+[dependencies]
+uv98-codeplug = { path = "../codeplug" }
+uv98-keys = { path = "../keys" }
+uv98-signaling = { path = "../signaling" }

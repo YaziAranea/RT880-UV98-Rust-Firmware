@@ -1,6 +1,77 @@
 use super::*;
 
 #[test]
+fn manual_tx_status_repaints_only_the_confirmed_slots_meter_labels() {
+    let capture = Rc::new(RefCell::new(CapturedFrame::new()));
+    let panel = Panel {
+        capture: Some(capture.clone()),
+        ..Panel::default()
+    };
+    let windows = panel.windows.clone();
+    let mut app = App::new(
+        Memory::new(),
+        panel,
+        NoDelay,
+        Timing::new(30, 600).unwrap(),
+        PRESERVED_CALIBRATION_SHA256,
+    );
+    app.start(0).unwrap();
+    let reads = app.nor.reads;
+    let rx = RadioView {
+        state: render::RadioState::Receiving,
+        ..RadioView::OFF
+    };
+    app.set_radio_view(rx).unwrap();
+    assert_matches_complete_frame(&mut app, &capture);
+    let rx_frame = capture.borrow().pixels.clone();
+    app.set_tx_status(Some(30), Some(250)).unwrap();
+    assert!(!app.render_pending());
+
+    for slot in [Slot::A, Slot::B] {
+        app.set_radio_view(RadioView {
+            state: render::RadioState::Transmitting,
+            tx_slot: Some(slot),
+            power: Some(1),
+            ..RadioView::OFF
+        })
+        .unwrap();
+        assert_matches_complete_frame(&mut app, &capture);
+        let no_status = capture.borrow().pixels.clone();
+        let (start, end) = render::home_tx_status_rows(slot);
+        let width = render::WIDTH;
+        let mut previous = no_status.clone();
+        for (seconds, sag) in [(Some(30), None), (Some(29), Some(250)), (None, Some(250))] {
+            windows.borrow_mut().clear();
+            app.set_tx_status(seconds, sag).unwrap();
+            while app.render_pending() {
+                app.render_step(4).unwrap();
+            }
+            assert_eq!(*windows.borrow(), [(start, start + 4), (start + 4, end)]);
+            let pixels = capture.borrow().pixels.clone();
+            assert_ne!(pixels, previous);
+            assert_eq!(
+                pixels[..start as usize * width],
+                previous[..start as usize * width]
+            );
+            assert_eq!(
+                pixels[end as usize * width..],
+                previous[end as usize * width..]
+            );
+            assert_matches_complete_frame(&mut app, &capture);
+            app.set_tx_status(seconds, sag).unwrap();
+            assert!(!app.render_pending());
+            previous = pixels;
+        }
+        assert_eq!(previous, no_status);
+        app.set_tx_status(Some(5), Some(200)).unwrap();
+        app.set_radio_view(rx).unwrap();
+        assert_matches_complete_frame(&mut app, &capture);
+        assert_eq!(capture.borrow().pixels, rx_frame);
+    }
+    assert_eq!(app.nor.reads, reads);
+}
+
+#[test]
 fn menu_batch_can_drain_both_filled_rows_without_extra_foreground_passes() {
     fn navigate(budget: u16) -> (u16, usize, Vec<u16>) {
         let capture = Rc::new(RefCell::new(CapturedFrame::new()));

@@ -16,6 +16,12 @@ satellite solutions. There is no cross-sentence metadata merge. Dates retain the
 two-digit year; no century or date for GGA is inferred. Coordinates round to e7;
 HDOP rounds to hundredths and is not an accuracy measurement.
 
+`motion_snapshot(now_ms, max_age_ms)` returns the position, optional speed in
+hundredths of a knot and optional true course in hundredths of a degree from
+one fresh RMC sentence. Valid GGA does not change this sample. A no-fix report
+or a new RMC marked estimated, manual or simulated clears it. Course 360° maps
+to 0°. Time and date fields may be absent.
+
 Time uses wrapping u32 milliseconds and intervals below2^31. Backwards sentence
 timestamps are rejected. Choose an expiry appropriate to the actual update rate.
 

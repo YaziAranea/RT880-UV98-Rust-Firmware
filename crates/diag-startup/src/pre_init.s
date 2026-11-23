@@ -15,18 +15,26 @@
     str r1, [r0]
 .endm
 
-/* Terminal-only checks/bitbang. No stack, BL, RAM, or callee-saved register.
- * r12 carries only a shifted24-bit RF word and is cleared before UART setup.
+/* RF-off checks/bitbang. No stack, BL, RAM, or callee-saved register.
+ * r12 carries the shared path tag. r3 shifts 24 RF bits plus a stop bit.
  * The500-iteration phase loop supplies >=500core cycles (>=10us at <=50MHz).
  * Actual pin timing/voltage and RF-chip acceptance remain unmeasured.
  */
 .macro diag_rf_require address, mask, expected, bad=.Ldiag_terminal_report
     diag_load r0, \address
-    ldr r1, [r0]
+    diag_rf_require_field 0, \mask, \expected, \bad
+.endm
+
+.macro diag_rf_require_field offset, mask, expected, bad
+    ldr r1, [r0, #\offset]
     diag_load r2, \mask
+.if \expected == 0
+    tst r1, r2
+.else
     and r1, r1, r2
     diag_load r2, \expected
     cmp r1, r2
+.endif
     bne.w \bad
 .endm
 
@@ -42,11 +50,12 @@
 .endm
 
 .macro diag_rf_output_present port, mask, high, fields, mode, drive, bad=.Ldiag_terminal_report
-    diag_rf_require (\port + 0x14), \mask, \high, \bad
-    diag_rf_require \port, \fields, \mode, \bad
-    diag_rf_require (\port + 4), \mask, 0, \bad
-    diag_rf_require (\port + 8), \fields, \drive, \bad
-    diag_rf_require (\port + 12), \fields, 0, \bad
+    diag_load r0, \port
+    diag_rf_require_field 0x14, \mask, \high, \bad
+    diag_rf_require_field 0, \fields, \mode, \bad
+    diag_rf_require_field 4, \mask, 0, \bad
+    diag_rf_require_field 8, \fields, \drive, \bad
+    diag_rf_require_field 12, \fields, 0, \bad
 .endm
 
 .macro diag_rf_phase
@@ -56,7 +65,20 @@
     bne .Lrf_delay\@
 .endm
 
-.macro diag_rf_write frame, cs_port, cs_pin, sck_port, sck_pin, data_pin
+.pushsection .rodata.diag_rf_frames, "a", %progbits
+.balign 4
+.Ldiag_rf_frames:
+    /* Encoded words for registers 33, 36, 30 and 37 in wire order. */
+    .word 0x33000080, 0x36007f80, 0x30000080, 0x371d0080
+.popsection
+
+.macro diag_rf_write_off_frames cs_port, cs_pin, sck_port, sck_pin, data_pin
+.Lrf_frame\@:
+    movw r0, #:lower16:.Ldiag_rf_frames
+    movt r0, #:upper16:.Ldiag_rf_frames
+    /* Bits 2-3 of r12 hold the table offset; bits 0-1 hold the path tag. */
+    bic.w r1, r12, #3
+    ldr r3, [r0, r1]
     /* SCK low before selecting, then address/high/low bytes MSB-first. */
     diag_load r0, \sck_port
     movw r1, #\sck_pin
@@ -64,15 +86,13 @@
     diag_load r0, \cs_port
     movw r1, #\cs_pin
     str r1, [r0, #0x28]
-    diag_load r12, (\frame << 8)
-    movs r3, #24
 .Lrf_bit\@:
     diag_load r0, \sck_port
     movw r1, #\sck_pin
     str r1, [r0, #0x28]
     diag_load r0, 0x40020800
     movw r1, #\data_pin
-    lsls.w r12, r12, #1
+    lsls r3, r3, #1
     bcc .Lrf_zero\@
     str r1, [r0, #0x18]
     b .Lrf_setup\@
@@ -84,12 +104,17 @@
     movw r1, #\sck_pin
     str r1, [r0, #0x18]
     diag_rf_phase
-    subs r3, #1
+    /* The stop bit reaches bit 31 just after the 24th data bit. */
+    cmp.w r3, #0x80000000
     bne .Lrf_bit\@
     diag_load r0, \cs_port
     movw r1, #\cs_pin
     str r1, [r0, #0x18]
     diag_rf_phase
+    add.w r12, r12, #4
+    tst.w r12, #16
+    beq .Lrf_frame\@
+    bic.w r12, r12, #16
 .endm
 
 /* Physically exercised by UART observer 0.1.2 on PID 0x700a3246. These
@@ -229,12 +254,8 @@
     diag_rf_output_present 0x40020800, 0x0200, 0, 0x000c0000, 0x00040000, 0x00080000, \bad
     /* BK4802A register33 includes V/U PA bits3/2; MCU gates alone cannot
      * disable them. These are write requests, not RF readback or RF-off proof. */
-    diag_rf_write 0x330000, 0x40020000, 0x100, 0x40021400, 0x40, 0x200
-    diag_rf_write 0x36007f, 0x40020000, 0x100, 0x40021400, 0x40, 0x200
-    diag_rf_write 0x300000, 0x40020000, 0x100, 0x40021400, 0x40, 0x200
-    diag_rf_write 0x371d00, 0x40020000, 0x100, 0x40021400, 0x40, 0x200
+    diag_rf_write_off_frames 0x40020000, 0x100, 0x40021400, 0x40, 0x200
     dsb
-    mov.w r12, #0
 .endm
 
 
@@ -248,13 +269,9 @@
     diag_output 0x40020800, 0x0140, 0, 0x0140, 0x00033000, 0x00011000, 0x00022000, 0, 1, \bad
     dsb
     diag_rf_output_present 0x40020800, 0x01c0, 0x0080, 0x0003f000, 0x00015000, 0x0002a000, \bad
-    diag_rf_write 0x330000, 0x40020800, 0x80, 0x40020800, 0x100, 0x40
-    diag_rf_write 0x36007f, 0x40020800, 0x80, 0x40020800, 0x100, 0x40
-    diag_rf_write 0x300000, 0x40020800, 0x80, 0x40020800, 0x100, 0x40
-    diag_rf_write 0x371d00, 0x40020800, 0x80, 0x40020800, 0x100, 0x40
+    diag_rf_write_off_frames 0x40020800, 0x80, 0x40020800, 0x100, 0x40
     dsb
     diag_rf_output_present 0x40020800, 0x01c0, 0x0180, 0x0003f000, 0x00015000, 0x0002a000, \bad
-    mov.w r12, #0
 .endm
 
 .section .text.__pre_init, "ax", %progbits
@@ -299,7 +316,8 @@ __pre_init:
     diag_modify 0x40023820, 0, 0x0000c000
     dsb
     isb
-    diag_hick8_bootstrap .Ldiag_pre_init_fail
+    b.w __diag_hick8_shared
+.Ldiag_startup_hick_ready:
     /* A watchdog resets the MCU, not necessarily the RF chip. Before ANY UART
      * byte, make the same guarded shutdown attempt at normalized HICK8. The
      * original detailed guards below still diagnose every rejected profile.
@@ -334,22 +352,21 @@ __pre_init:
     diag_modify 0x40023830, 0, 0x27
     diag_rf_require 0x40023830, 0x27, 0x27, .Ldiag_early_rf_failure
     dsb
-    diag_rf_a_off .Ldiag_early_a_failed
-    diag_rf_b_off .Ldiag_early_rf_failure
-    b.w .Ldiag_early_rf_done
-.Ldiag_early_a_failed:
-    diag_rf_b_off .Ldiag_early_rf_failure
+    mov.w r12, #0
+    b.w __diag_rf_off_shared
 .Ldiag_early_rf_failure:
     /* A partially configured/guard-rejected off attempt must never proceed
      * into ordinary main, even if inherited pin fields happened to look good. */
     mov.w r12, #0
-    diag_uart_init
+    b.w __diag_uart_init_shared
+.Ldiag_early_rf_failure_uart:
     diag_frame 0x00000300, 0, 0x00000108, 0, 0, 0, 0
     diag_frame 0xe100000a, 1, 0x4002001c, 1, 0x4002081c, 1, 0x4002141c
     b.w .Ldiag_pre_init_fail
 .Ldiag_early_rf_done:
-    mov.w r12, #0
-    diag_uart_init
+    mov.w r12, #0x10000
+    b.w __diag_uart_init_shared
+.Ldiag_early_rf_done_uart:
     /* First frame is constant and follows the guarded RF-off attempt. */
     diag_frame 0x00000300, 0, 0x00000108, 0, 0, 0, 0
     diag_frame 0x00000301, 4, 0, 3, 0, 5, 0
@@ -583,20 +600,83 @@ __diag_terminal_fail_stop:
     cmp r1, #0x27
     bne.w .Ldiag_terminal_report
     dsb
-    diag_rf_a_off .Ldiag_terminal_rf_b
-.Ldiag_terminal_rf_b:
-    diag_rf_b_off .Ldiag_terminal_report
+    mov.w r12, #1
+    b.w __diag_rf_off_shared
 .Ldiag_terminal_report:
+    mov.w r12, #0
     /* RF-low attempts precede terminal clock/UART work. Abandoned SPI must
      * not continue across the frequency change even if a pin guard failed. */
     diag_modify 0x40023840, 0x0000c000, 0
     diag_modify 0x40023820, 0, 0x0000c000
     dsb
-    diag_hick8_bootstrap .Ldiag_pre_init_fail
-    diag_uart_init
+    mov.w r12, #1
+    b.w __diag_hick8_shared
+.Ldiag_terminal_hick_ready:
+    mov.w r12, #0x20000
+    b.w __diag_uart_init_shared
+.Ldiag_terminal_report_uart:
     diag_frame 0xe1ff0000, 3, 0, 1, 0xe000ed28, 1, 0xe000ed2c
     b.w .Ldiag_pre_init_fail
 .size __diag_terminal_fail_stop, . - __diag_terminal_fail_stop
+
+/* Both callers have passed their own identity, clock and GPIO-clock guards.
+ * Keep LR intact. r12 bit 0 identifies the terminal path, bit 1 records a
+ * rejected chip. Always attempt B after A, even when A failed a pin guard.
+ * Each continuation clears the tag before using the UART macros. */
+.section .text.__diag_rf_off_shared, "ax", %progbits
+.p2align 2
+.global __diag_rf_off_shared
+.type __diag_rf_off_shared, %function
+.thumb_func
+__diag_rf_off_shared:
+    diag_rf_a_off .Ldiag_shared_a_failed
+.Ldiag_shared_try_b:
+    diag_rf_b_off .Ldiag_shared_b_failed
+    b .Ldiag_shared_continue
+.Ldiag_shared_a_failed:
+    orr.w r12, r12, #2
+    b.w .Ldiag_shared_try_b
+.Ldiag_shared_b_failed:
+    orr.w r12, r12, #2
+.Ldiag_shared_continue:
+    tst.w r12, #1
+    bne.w .Ldiag_terminal_report
+    tst.w r12, #2
+    bne.w .Ldiag_early_rf_failure
+    b.w .Ldiag_early_rf_done
+.size __diag_rf_off_shared, . - __diag_rf_off_shared
+
+/* r12[17:16] selects the path after UART initialization. Only the UART
+ * ready bit is carried into the existing frame formatters. */
+.section .text.__diag_uart_init_shared, "ax", %progbits
+.p2align 2
+.global __diag_uart_init_shared
+.type __diag_uart_init_shared, %function
+.thumb_func
+__diag_uart_init_shared:
+    diag_uart_init
+    ubfx r0, r12, #16, #2
+    bic.w r12, r12, #0x30000
+    cmp r0, #1
+    beq.w .Ldiag_early_rf_done_uart
+    cmp r0, #2
+    beq.w .Ldiag_terminal_report_uart
+    b.w .Ldiag_early_rf_failure_uart
+.size __diag_uart_init_shared, . - __diag_uart_init_shared
+
+/* The same bounded clock normalization runs before UART in both paths.
+ * The original LR is still intact; r12=1 identifies the terminal path. */
+.section .text.__diag_hick8_shared, "ax", %progbits
+.p2align 2
+.global __diag_hick8_shared
+.type __diag_hick8_shared, %function
+.thumb_func
+__diag_hick8_shared:
+    diag_hick8_bootstrap .Ldiag_pre_init_fail
+    tst.w r12, #1
+    bne.w .Ldiag_terminal_hick_ready
+    b.w .Ldiag_startup_hick_ready
+.size __diag_hick8_shared, . - __diag_hick8_shared
 .ltorg
 .purgem diag_modify
 .purgem diag_output
@@ -604,9 +684,10 @@ __diag_terminal_fail_stop:
 .purgem diag_settle
 .purgem diag_hick8_bootstrap
 .purgem diag_rf_require
+.purgem diag_rf_require_field
 .purgem diag_rf_unlocked
 .purgem diag_rf_output_present
 .purgem diag_rf_phase
-.purgem diag_rf_write
+.purgem diag_rf_write_off_frames
 .purgem diag_rf_b_off
 .purgem diag_rf_a_off

@@ -1,10 +1,10 @@
-# Building R40 and CPS 0.7.0 from source
+# Building R53 and CPS 0.8.0 from source
 
 These commands build files on the computer; they do not open a COM port or flash a radio. For installation without a compiler, use the [release package and CPS guide](docs/GETTING-STARTED.en.md).
 
 The public checkout can build the ARM firmware, Windows CPS and the host-test subset below **without personal calibration or NOR files**. The complete historical verification pipeline still requires the owner's original private fixtures; it is a separate workflow.
 
-Build R40 from the matching firmware source revision. R40 keeps the released CPS 0.7.0 executable. Its source is tagged [`cps-v0.7.0`](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/tree/cps-v0.7.0).
+For R53, build from the matching tag. The release reuses CPS 0.8.0 from R43.3. [CPS 0.8.0 source](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/tree/r41/apps/cps).
 
 ## Toolchain
 
@@ -27,24 +27,15 @@ $env:CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER = Join-Path $taskRustSysroot 
 
 ## Public ARM build
 
-Build and export each language before the next build replaces the linked file.
-Run from the repository root with new output directories.
+Build all three standard channel-TX images from a clean checkout. Fetch the locked dependencies once as shown above. Then run:
 
 ```powershell
-foreach ($locale in @('ru', 'en', 'de')) {
-    $imageDir = "validation/r40-public-$locale/image"
-    cargo build --locked --release --target thumbv7em-none-eabi -p uv98-diag-firmware --features "channel-tx,locale-$locale"
-    if ($LASTEXITCODE -ne 0) { throw "Build failed for $locale" }
-    python tools/export_diagnostic_image.py target/thumbv7em-none-eabi/release/uv98-diag-firmware $imageDir
-    if ($LASTEXITCODE -ne 0) { throw "Export failed for $locale" }
-    python tools/pack_ui_locales.py --check --image "$imageDir/UV98-diag-0.1.8.bin" --language $locale
-    if ($LASTEXITCODE -ne 0) { throw "Catalog check failed for $locale" }
-    python tools/check_diag_preinit.py "$imageDir/UV98-diag-0.1.8.elf" --report "$imageDir/early-machine-code-check.json"
-    if ($LASTEXITCODE -ne 0) { throw "Linked startup check failed for $locale" }
-    python tools/check_device_profile.py "$imageDir/UV98-diag-0.1.8.elf" --report "$imageDir/device-profile-check.json"
-    if ($LASTEXITCODE -ne 0) { throw "Device-profile check failed for $locale" }
-}
+python tools/build_release.py validation/r53-public
 ```
+
+The command compiles RU, EN and DE offline, verifies the linked language and TX profile, checks startup and device calibration metadata, and writes a new directory when all three images pass. Each language has its own `image/` directory and `flash-budget.json`. The top-level `flash-budget.json` contains all three measurements and hashes. Use a new path for each build.
+
+The minimum reserve is 4096 bytes before the settings journal. Each standard image is compared with the same language of the previous reference release. Positive cost means the change used Flash. The reserve uses the physical end of the last file-backed load in the ELF, including initializers for RAM. See the [module workflow and reference update](docs/FIRMWARE-MODULES.ru.md).
 
 Each directory contains the ELF, BIN and `image-layout.json`. The exporter keeps the internal basenames `UV98-diag-0.1.8.elf` and `UV98-diag-0.1.8.bin`. The 251904-byte BIN covers the application window above the bootloader and excludes external NOR. Identify each image by its SHA256 from the layout report. The catalog check confirms the exact selected catalog in the BIN.
 
@@ -54,17 +45,18 @@ Use one locale feature per build. Rust selects Russian by default without an exp
 
 Linked checks examine startup, exception code and the device profile in the actual ELF. RF behaviour, pin levels and maximum stack use require device measurements.
 
-**A self-built BIN is not automatically accepted by the released CPS.** CPS validates images against its release catalog. Development builds need a matching reviewed catalog and packaging pipeline. To prepare a personal image in CPS, use the recognized template for the desired language and its accompanying catalog.
+CPS 0.8.0 can open compatible application BINs with a calibration profile directly. Verify build provenance and board compatibility before preparing a personal image. The public firmware ZIP includes a matching catalog with SHA-256 checksums for the file and transfer stream.
 
 ## Host checks without private fixtures
 
 ```powershell
-cargo test --locked --lib -p uv98-handheld-ui -p uv98-signaling -p uv98-gps-nmea -p uv98-spectrum -p uv98-keys -p uv98-display
+cargo test --locked -p uv98-smart-beacon
+cargo test --locked --lib -p uv98-handheld-ui-state -p uv98-handheld-ui -p uv98-signaling -p uv98-gps-nmea -p uv98-spectrum -p uv98-keys -p uv98-display
 ```
 
 This is a defined public subset, not a claim that all workspace tests are fixture-free. Do not run `cargo test --workspace` expecting the private golden tests to pass in a clean public checkout.
 
-## Windows CPS 0.7.0 without private fixtures
+## Windows CPS 0.8.0 without private fixtures
 
 For the tested Windows gnullvm host, first prepare the local OpenGL import library, then build the application:
 
@@ -85,10 +77,10 @@ The executable is `target/x86_64-pc-windows-gnullvm/release/uv98-cps.exe`. If th
 For a maintainer who already holds those originals:
 
 ```powershell
-./build-diagnostic-image.ps1 -ChannelTx -Language ru -NorBackup 'D:/private-radio-backup/storage-address-space.bin' -OutputDirectory 'D:/radio-builds/uv98-r40-ru'
+./build-diagnostic-image.ps1 -ChannelTx -Language ru -NorBackup 'D:/private-radio-backup/storage-address-space.bin' -OutputDirectory 'D:/radio-builds/uv98-r53-ru'
 ```
 
-Use real local paths and a new output directory for each language. Select `-Language en` or `-Language de` for the other variants. This workflow additionally needs `pyserial` for boot-log test tools, but does not access the radio. Do not invent, zero-fill or substitute a fixture to make the tests pass. This workflow records host and linked-image verification. R40 hardware checks remain separate.
+Use real local paths and a new output directory for each language. Select `-Language en` or `-Language de` for the other variants. This workflow additionally needs `pyserial` for boot-log test tools, but does not access the radio. Do not invent, zero-fill or substitute a fixture to make the tests pass. This workflow records host and linked-image verification. R53 hardware checks remain separate.
 
 ## Public packaging
 
@@ -100,7 +92,7 @@ Keep a compatible CPS catalog with each flashable BIN. The public kit excludes m
 
 The firmware feature `verbose-runtime` enables key snapshots (0x132), extra
 RX/register snapshots (0x174/0x175), and timing/profiling frames (0x172/0x176).
-R40 builds in this guide leave it off. LCD meters,
+R53 builds in this guide leave it off. LCD meters,
 normal RX observations, RF events, PTT/TOT guards and fault records remain active.
 This flag is for diagnostic compositions; combining every feature with
 `channel-tx` is not qualified to fit. Keep the linker memory bounds unchanged.

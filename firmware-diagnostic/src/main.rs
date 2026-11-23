@@ -7,10 +7,14 @@
 //! both physical PTTs using the investigated board's isolated key ladder.
 //! A successful register check does not establish physical board/RF safety.
 
+mod aprs_rx;
 #[cfg(feature = "pa5-audio")]
 mod audio_capture;
 mod beacon;
+#[cfg(not(feature = "pa5-audio"))]
+mod position_save;
 mod reply;
+mod scan_flow;
 #[path = "shortwave.rs"]
 mod shortwave_bus;
 mod signaling;
@@ -38,7 +42,7 @@ use uv98_display::DisplayBus;
 use uv98_handheld_app::{App, InputSample, SpectrumSnapshot, PRESERVED_CALIBRATION_SHA256};
 use uv98_handheld_ui::{
     controller::{
-        CrossbandProbe, Request, ScanState, Screen, ShortwaveStatus, Slot, View,
+        CrossbandProbe, Request, RxToneSource, ScanState, Screen, ShortwaveStatus, Slot, View,
         SPECTRUM_INTERVALS, STEP_10HZ,
     },
     render,
@@ -46,10 +50,11 @@ use uv98_handheld_ui::{
 };
 use uv98_nor_read::Bus;
 use uv98_radio_runtime::{
-    crossband, lighting, policy, ptt, scan, scope, spectrum_flow, tx_policy, tx_trial, Runtime,
-    State as RfState,
+    crossband, lighting, policy, ptt, scope, spectrum_flow, tone_search, tx_policy, tx_trial,
+    Runtime, State as RfState, TxTimer,
 };
 use uv98_rf_sequence::Modulation;
+use uv98_smart_beacon::SmartBeacon;
 use uv98_spectrum::compact as spectrum;
 
 // Default remains RX-only; each published image declares one exact profile.
@@ -218,10 +223,35 @@ fn require<T, E>(result: Result<T, E>, fault: u32) -> T {
     }
 }
 
+// Keep one clock conversion and terminal error path for the foreground.
+// Callers still sample at each RF, input, and rendering deadline.
+#[inline(never)]
+fn sample_time(time: &mut CycleMillis) -> u32 {
+    require(time.sample(DWT::cycle_count()), 0xE016)
+}
+
 fn feed() {
     // SAFETY: used only after successful startup in one masked-IRQ context;
     // no other owner can reconfigure either watchdog. Reload never starts it.
     require(unsafe { startup::feed_watchdog() }, 0xE001);
+}
+
+fn service_aprs_rx<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
+    app: &mut App<N, L, D>,
+    receiver: &mut aprs_rx::Receiver,
+    beacon: &mut beacon::Beacon<uv98_signaling::cmx868::hardware::CBus>,
+    now: u32,
+    open: bool,
+    frequency: Option<u32>,
+) -> Result<(), uv98_handheld_app::Error<N::Error, L::Error>> {
+    let was_listening = receiver.listening();
+    if let Some(packet) = receiver.service(beacon.idle_modem(), now, open, frequency) {
+        app.push_aprs_packet(packet.source(), packet.information())?;
+    }
+    if was_listening != receiver.listening() {
+        app.set_aprs_rx_available(receiver.listening())?;
+    }
+    Ok(())
 }
 
 struct Timing(CycleDelay);
@@ -290,11 +320,11 @@ fn tx_permitted<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
     }
 }
 
-fn tx_hold_within_limit(start: u32, now: u32) -> bool {
+fn tx_hold_within_limit(timer: TxTimer, now: u32) -> bool {
     if cfg!(feature = "channel-tx") {
-        tx_policy::hold_within_limit(start, now)
+        tx_policy::hold_within_limit(timer.start_ms(), now) && timer.remaining_ms(now) != 0
     } else {
-        tx_trial::hold_within_limit(start, now)
+        tx_trial::hold_within_limit(timer.start_ms(), now)
     }
 }
 
@@ -310,6 +340,21 @@ fn radio_settings<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
     })
 }
 
+#[cfg(not(feature = "pa5-audio"))]
+#[inline(never)]
+fn apply_saved_name<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
+    app: &mut App<N, L, D>,
+    settings: &mut uv98_settings_store::Settings,
+    stock_microphone_gain: u8,
+) {
+    let name = uv98_signaling::radio_name::RadioName::from_payload(settings.name);
+    app.apply_radio_name_settings(name, settings.roger_enabled);
+    app.apply_microphone_gain(settings.microphone_gain.unwrap_or(stock_microphone_gain));
+    settings.microphone_gain = Some(app.status().view.microphone_gain);
+    // Keep unsupported stock encodings untouched in external NOR.
+    settings.name = name.map_or([0xff; 16], |name| name.payload());
+}
+
 fn profile<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
     app: &App<N, L, D>,
     settings: &[policy::Overrides; 2],
@@ -318,6 +363,7 @@ fn profile<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
     let view = app.status().view;
     let index = if view.active_slot == Slot::A { 0 } else { 1 };
     policy::profile(view, app.selected_channel(), cfg, settings[index])
+        .map(|profile| profile.with_rx_tone_override(app.rx_tone_override(view)))
 }
 
 /// Project the requested slot without changing the editing/RX selection.
@@ -335,7 +381,8 @@ fn profile_for_slot<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
         app.peer_radio_selection()
     };
     let cfg = radio_settings(app).ok_or(policy::Error::Settings)?;
-    let profile = policy::profile(target, channel, cfg, settings[usize::from(slot == Slot::B)])?;
+    let profile = policy::profile(target, channel, cfg, settings[usize::from(slot == Slot::B)])?
+        .with_rx_tone_override(app.rx_tone_override(target));
     Ok((target, profile))
 }
 
@@ -346,7 +393,9 @@ fn crossband_session<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
 ) -> Option<crossband::Session> {
     let (view, channel) = app.peer_radio_selection();
     let index = if view.active_slot == Slot::A { 0 } else { 1 };
-    let outgoing = policy::profile(view, channel, radio_settings(app)?, settings[index]).ok()?;
+    let outgoing = policy::profile(view, channel, radio_settings(app)?, settings[index])
+        .ok()?
+        .with_rx_tone_override(app.rx_tone_override(view));
     if view.active_slot == Slot::B {
         crossband::Session::arm(incoming, outgoing, Slot::A)
     } else {
@@ -470,37 +519,6 @@ fn spectrum_window(
     let intervals = u32::from(*SPECTRUM_INTERVALS.get(usize::from(view.spectrum_span_index))?);
     let span = step.checked_mul(intervals)?;
     uv98_spectrum::Window::centered(center_10hz, span, step).ok()
-}
-
-fn scan_action<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
-    app: &mut App<N, L, D>,
-    scanner: &scan::Scheduler,
-    action: scan::Action,
-) -> Result<bool, uv98_handheld_app::Error<N::Error, L::Error>> {
-    match action {
-        scan::Action::NextChannel => {
-            if let Some(index) = app.next_scan_channel(scanner.skipped_channels()) {
-                app.select_scan_channel(index)?;
-                Ok(true)
-            } else {
-                if app.status().view.scan == ScanState::Requested {
-                    app.reject_radio_request(Request::StartScan)?;
-                } else {
-                    app.acknowledge_scan_stopped()?;
-                }
-                Ok(false)
-            }
-        }
-        scan::Action::TuneFrequency(frequency) => {
-            app.select_scan_frequency(frequency)?;
-            Ok(true)
-        }
-        scan::Action::Stop => {
-            app.acknowledge_scan_stopped()?;
-            Ok(false)
-        }
-        scan::Action::None => Ok(false),
-    }
 }
 
 // Keep inherited supported watchdogs fed during long foreground screen/read
@@ -807,7 +825,8 @@ fn main() -> ! {
     };
     let mut gps = unsafe { uv98_gps_at32::Gps::new(gps_pins) };
     let mut aprs_raw = [0xffu8; 198];
-    let aprs_config = if app.read_auxiliary_config(3120, &mut aprs_raw) {
+    let read_aprs_config = app.read_auxiliary_config(3120, &mut aprs_raw);
+    let aprs_config = if read_aprs_config {
         uv98_signaling::aprs::Config::from_stock_tail(&aprs_raw).ok()
     } else {
         None
@@ -816,6 +835,8 @@ fn main() -> ! {
         app.set_aprs_identity(*config.source.callsign(), config.source.ssid());
     }
     let mut beacon = unsafe { beacon::Beacon::new(modem_pins, aprs_config, aprs_raw[193].min(7)) };
+    let mut smart = SmartBeacon::new();
+    let mut packet_rx = aprs_rx::Receiver::new(if read_aprs_config { aprs_raw[194] } else { 0 });
     let mut gps_configuration = (false, 1u8);
     let mut gps_ui_at = 0u32;
     // Preinit disabled and cleared every NVIC line. Only the installed USART2
@@ -883,28 +904,15 @@ fn main() -> ! {
             name: stock_name,
             roger_enabled: stock_roger[0] == 3,
             microphone_gain: Some(app.status().view.microphone_gain),
+            positions: None,
         })
     };
     #[cfg(not(feature = "pa5-audio"))]
     {
-        app.apply_radio_name_settings(
-            uv98_signaling::radio_name::RadioName::from_payload(saved_name_settings.name),
-            saved_name_settings.roger_enabled,
-        );
-        app.apply_microphone_gain(
-            saved_name_settings
-                .microphone_gain
-                .unwrap_or(stock_microphone_gain),
-        );
-        saved_name_settings.microphone_gain = Some(app.status().view.microphone_gain);
-        // Unsupported stock encodings remain untouched in NOR, and are not
-        // accidentally persisted as a change by the ASCII editor at boot.
-        saved_name_settings.name = app
-            .status()
-            .view
-            .radio_name_settings()
-            .0
-            .map_or([0xff; 16], |name| name.payload());
+        apply_saved_name(&mut app, &mut saved_name_settings, stock_microphone_gain);
+        if let Some(positions) = saved_name_settings.positions {
+            checked(&mut log, app.restore_positions(positions), 0xE032);
+        }
     }
     #[cfg(feature = "pa5-audio")]
     app.apply_radio_name_settings(
@@ -915,7 +923,9 @@ fn main() -> ! {
         primary,
         radio_control,
     ));
-    let now = require(time.sample(DWT::cycle_count()), 0xE016);
+    let now = sample_time(&mut time);
+    #[cfg(not(feature = "pa5-audio"))]
+    let mut position_save = position_save::PositionSave::new(app.positions(), now);
     let calibration = match app.calibration_view() {
         Some(c) => c,
         None => stop(0xE050),
@@ -936,7 +946,7 @@ fn main() -> ! {
     let mut settings = [policy::Overrides::default(); 2];
     let mut lights = lighting::Lights::new(now);
     let mut current = None;
-    let mut scanner = scan::Scheduler::new();
+    let mut scanner = scan_flow::Scanner::new();
     let mut scope = scope::Scope::new();
     // Set only by an explicit span/step change while a sweep is active. The
     // restart waits for the acknowledged RX restoration instead of retuning an
@@ -954,7 +964,6 @@ fn main() -> ! {
     let mut publish_spectrum_final = false;
     let mut spectrum_published_at = now;
     let mut tx_slot = None;
-    let mut tx_started_at = None;
     let mut tx_authorization: Option<tx_policy::Authorization> = None;
     let mut ptt_guard = ptt::Guard::new();
     let mut relay_session = None;
@@ -963,6 +972,9 @@ fn main() -> ! {
     let mut dual_watch = None;
     let mut relay_active = false;
     let mut last_signal = None;
+    let mut css = tone_search::Search::default();
+    let mut css_receive = false;
+    let mut css_rearm = false;
     let mut reply_window = reply::ReplyWindow::Idle;
     let mut signal_at = now;
     let mut meter_floor = uv98_handheld_ui::meter::NoiseFloor::default();
@@ -980,6 +992,7 @@ fn main() -> ! {
     let mut idle = Timing::new();
     let mut adc_previous = None;
     let mut battery = uv98_sidekeys_at32::BatteryMonitor::default();
+    let mut battery_sag = uv98_sidekeys_at32::BatterySag::default();
     let mut battery_at = now.wrapping_sub(250);
     let mut ui_aux = uv98_handheld_ui::input::AuxFilter::default();
     app.enable_fast_matrix_input();
@@ -989,6 +1002,7 @@ fn main() -> ! {
     let mut tx_tones = signaling::TransmitTones::new();
     let mut tx_key_latched = false;
     let mut uncertain_tx_since: Option<u32> = None;
+    let mut programmed_uncertain_since: Option<u32> = None;
     let mut max_loop_cycles = 0;
     let mut max_render_cycles = 0;
     let mut render_rows = 0;
@@ -1020,7 +1034,7 @@ fn main() -> ! {
             .as_ref()
             .ok()
             .map(|s| (s.matrix_raw(), s.ptt_pressed()));
-        let input_at = require(time.sample(DWT::cycle_count()), 0xE016);
+        let input_at = sample_time(&mut time);
         // A keypad contact can change between forward/reverse scans. During
         // established voice TX, retain only fresh physical PTT for <=32 ms.
         // Never arm from this fallback or turn uncertain data into a DTMF key.
@@ -1040,10 +1054,12 @@ fn main() -> ! {
             uncertain_tx_since = None;
         }
         let matrix = raw.map(|(matrix, _)| matrix);
-        let dtmf_key = matrix
-            .and_then(signaling::keypad)
-            .filter(|_| app.status().view.dtmf_enabled && radio.state() == RfState::Transmitting);
-        if dtmf_key.is_some() {
+        let view = app.status().view;
+        let tx_key = matrix.and_then(signaling::keypad).filter(|key| {
+            radio.state() == RfState::Transmitting
+                && (view.dtmf_enabled || *key == signaling::TxKey::Toneburst)
+        });
+        if tx_key.is_some() {
             tx_key_latched = true;
         }
         if matrix == Some(0) && uncertain_tx_since.is_none() {
@@ -1054,7 +1070,7 @@ fn main() -> ! {
         let raw_ptt = ptt::Input {
             upper,
             lower,
-            clean: raw.is_some_and(|(m, _)| m == 0 || dtmf_key.is_some())
+            clean: raw.is_some_and(|(m, _)| m == 0 || tx_key.is_some())
                 && (ptt::side_idle(adc.raw) || lower),
         };
         if relay_active && (upper || lower) {
@@ -1062,12 +1078,15 @@ fn main() -> ! {
             relay_active = false;
         }
         let receive_tool_blocks_tx = matches!(
-            app.status().view.screen,
-            Screen::Shortwave | Screen::Crossband
+            view.screen,
+            Screen::Shortwave
+                | Screen::Crossband
+                | Screen::RxToneSearch
+                | Screen::DtmfMemory
+                | Screen::AprsRx
         ) || tuner_repower_at.is_some();
         let tx_context_blocked = scanner.active() || scope.active() || receive_tool_blocks_tx;
         let physical_source_held = ptt_guard.observe(raw_ptt, tx_context_blocked);
-        let view = app.status().view;
         if gps_configuration != (view.gps_enabled, view.gps_baud) {
             gps.configure(view.gps_enabled, view.gps_baud);
             gps_configuration = (view.gps_enabled, view.gps_baud);
@@ -1097,13 +1116,14 @@ fn main() -> ! {
             current.map(|p| (view, p))
         };
         let guarded_profile = guarded_target.map(|(_, profile)| profile);
-        let now = require(time.sample(DWT::cycle_count()), 0xE016);
+        let now = sample_time(&mut time);
+        let tx_timer = tx_slot.and(radio.tx_timer());
         // Stop on raw release/chord/source handoff before UI/NOR work.
         let physical_held = LIVE_TX
             && physical_source_held
             && tx_slot.is_some()
             && tx_slot == view.ptt_slot
-            && tx_started_at.is_some_and(|start| tx_hold_within_limit(start, now))
+            && tx_timer.is_some_and(|timer| tx_hold_within_limit(timer, now))
             && !view.locked
             && guarded_target.is_some_and(|(target, p)| {
                 tx_permitted(&app, target, p, raw_ptt)
@@ -1114,18 +1134,57 @@ fn main() -> ! {
         let mut tail_view = view;
         tail_view.ptt_down = false;
         tail_view.ptt_slot = None;
-        let allow_tail = LIVE_TX
+        let tail_permitted = LIVE_TX
             && !tx_context_blocked
-            && !upper
-            && !lower
-            && matrix == Some(0)
-            && uncertain_tx_since.is_none()
-            && ptt::side_idle(adc.raw)
-            && tx_started_at.is_some_and(|start| tx_hold_within_limit(start, now))
+            && tx_timer.is_some_and(|timer| tx_hold_within_limit(timer, now))
             && guarded_target.is_some_and(|(target, profile)| {
                 tx_authorization
                     .is_some_and(|a| a.tail_configuration_valid_target(tail_view, target, profile))
             });
+        let allow_tail = tail_permitted
+            && !upper
+            && !lower
+            && matrix == Some(0)
+            && uncertain_tx_since.is_none()
+            && ptt::side_idle(adc.raw);
+        // An automatic session belongs to the operator-selected simplex channel.
+        // Re-evaluate ownership before every RF tick, even during modem startup.
+        let auto_channel_ready = cfg!(feature = "channel-tx")
+            && view.screen == Screen::Aprs
+            && !view.locked
+            && !upper
+            && !lower
+            && !scanner.active()
+            && !scope.active()
+            && !relay_active
+            && second_rx.is_none()
+            && tuner_session.is_none()
+            && !reply_window.active()
+            && guarded_profile.as_ref().is_some_and(beacon::auto_channel);
+        let motion = if auto_channel_ready {
+            gps.motion_fix(now)
+        } else {
+            None
+        };
+        let arm_available = motion.is_some()
+            && (beacon.active()
+                || (radio.state() == RfState::Receiving && current == guarded_profile));
+        checked(&mut log, app.set_aprs_auto_available(arm_available), 0xE032);
+        let auto_target = (view.aprs_auto_armed && auto_channel_ready).then(|| {
+            (
+                view.active_slot,
+                view.mode,
+                view.channel,
+                view.zone,
+                guarded_profile.map(|p| p.frequency),
+            )
+        });
+        let auto_allowed = smart.update_arm(auto_target);
+        if view.aprs_auto_armed && !auto_allowed {
+            checked(&mut log, app.disarm_aprs_auto(), 0xE032);
+        }
+        let auto_packet_valid = smart.packet_valid(now, motion);
+        let mut ptt_at_keying = false;
         let calibration = app.calibration_view().unwrap_or_else(|| stop(0xE050));
         let beacon_held = checked(
             &mut log,
@@ -1134,15 +1193,35 @@ fn main() -> ! {
                 &calibration,
                 now,
                 guarded_profile,
-                view.screen == Screen::Aprs,
+                view.screen == Screen::Aprs && auto_packet_valid,
                 upper,
                 lower,
                 ptt::side_idle(adc.raw),
-                matrix,
+                if smart.pending() {
+                    key_sample.as_ref().ok().map(|s| s.matrix_raw())
+                } else {
+                    matrix
+                },
+                || {
+                    let side_now = side.sample().ok();
+                    let keys_now = keys.guard_scan().ok();
+                    ptt_at_keying = side_now.as_ref().is_some_and(|a| ptt::lower_pressed(a.raw))
+                        || keys_now.as_ref().is_some_and(|s| s.ptt_pressed());
+                    side_now.is_some_and(|a| ptt::side_idle(a.raw))
+                        && keys_now.is_some_and(|s| s.matrix_clear() && !s.ptt_pressed())
+                },
             ),
             0xE066,
         );
+        if ptt_at_keying {
+            checked(&mut log, app.disarm_aprs_auto(), 0xE032);
+            smart.update_arm(None);
+        }
         if beacon.take_finished() {
+            smart.complete(
+                now,
+                beacon.status() == uv98_handheld_ui::controller::AprsStatus::Sent,
+            );
             current = None;
             last_signal = None;
         }
@@ -1151,45 +1230,100 @@ fn main() -> ! {
         let tx_held = if beacon.active() {
             beacon_held
         } else {
-            let fresh_first = radio.mdc_progress().is_some()
+            let modem_active = radio.mdc_progress().is_some();
+            let programmed = !modem_active
+                && radio.state() == RfState::Transmitting
+                && uncertain_tx_since.is_none()
+                && tx_tones.programmed_pending(tx_key);
+            if !programmed && uncertain_tx_since.is_none() {
+                programmed_uncertain_since = None;
+            }
+            let fresh_first = programmed
+                || modem_active
                 || (radio.state() == RfState::Transmitting && allow_tail);
-            let mut tx_sample = |fresh: bool| {
+            let mut tx_sample = |fresh: bool, programmed: bool, admitted_tail: bool| {
                 let mut signal_voice = physical_held;
-                let mut signal_tail = allow_tail;
+                let mut signal_tail = admitted_tail;
+                let mut key = tx_key;
+                let mut matrix_stable = uncertain_tx_since.is_none();
                 if fresh {
-                    // Each modem operation, including the arm write, needs
-                    // a sample newer than the previous operation.
+                    // A programmed tone or modem operation needs a fresh
+                    // physical guard before it can change the RF signal.
                     let fresh_adc = checked(&mut log, side.sample(), 0xE055);
-                    let guard = keys.guard_scan();
+                    let (fresh_upper, clean_matrix) = if programmed && tx_key.is_some() {
+                        match keys.scan_idle_or_full() {
+                            Ok(scan) => {
+                                programmed_uncertain_since = None;
+                                let matrix = scan.matrix_raw();
+                                key = signaling::keypad(matrix);
+                                (scan.ptt_pressed(), matrix == 0 || key == tx_key)
+                            }
+                            Err(uv98_keyscan_at32::Error::UnstableMatrix { .. }) => {
+                                matrix_stable = false;
+                                let at = sample_time(&mut time);
+                                let since = *programmed_uncertain_since.get_or_insert(at);
+                                match keys.guard_scan() {
+                                    Ok(guard) if at.wrapping_sub(since) < 32 => {
+                                        (guard.ptt_pressed(), true)
+                                    }
+                                    _ => (false, false),
+                                }
+                            }
+                            Err(_) => (false, false),
+                        }
+                    } else {
+                        let guard = keys.guard_scan();
+                        let clear = guard.as_ref().is_ok_and(|s| s.matrix_clear());
+                        if programmed && clear {
+                            programmed_uncertain_since = None;
+                        }
+                        (guard.as_ref().is_ok_and(|s| s.ptt_pressed()), clear)
+                    };
                     let input = ptt::Input {
-                        upper: guard.as_ref().is_ok_and(|s| s.ptt_pressed()),
+                        upper: fresh_upper,
                         lower: LOWER_PTT_ENABLED && ptt::lower_pressed(fresh_adc.raw),
-                        clean: guard.as_ref().is_ok_and(|s| s.matrix_clear())
+                        clean: clean_matrix
                             && (ptt::side_idle(fresh_adc.raw)
                                 || (LOWER_PTT_ENABLED && ptt::lower_pressed(fresh_adc.raw))),
                     };
                     let same_source = ptt_guard.observe(input, tx_context_blocked);
                     signal_voice &= same_source && input.clean;
+                    if programmed {
+                        signal_tail = tail_permitted
+                            && (admitted_tail || physical_held)
+                            && matrix_stable
+                            && key.is_none();
+                    }
                     signal_tail &= input.clean
                         && !input.upper
                         && !input.lower
                         && ptt::side_idle(fresh_adc.raw);
                 }
-                let now = require(time.sample(DWT::cycle_count()), 0xE016);
-                let within_limit =
-                    tx_started_at.is_some_and(|start| tx_hold_within_limit(start, now));
-                signaling::Sample {
-                    now,
-                    voice_held: signal_voice && within_limit,
-                    allow_tail: signal_tail && within_limit,
-                }
+                let now = sample_time(&mut time);
+                let within_limit = tx_timer.is_some_and(|timer| tx_hold_within_limit(timer, now));
+                (
+                    signaling::Sample {
+                        now,
+                        voice_held: signal_voice && within_limit,
+                        allow_tail: signal_tail && within_limit,
+                    },
+                    key,
+                    matrix_stable,
+                )
             };
-            let first = tx_sample(fresh_first);
+            let (first, key, matrix_stable) = tx_sample(fresh_first, programmed, allow_tail);
+            // A release observed by the newer programmed-key check may start
+            // an end burst. Carry that permission through its fresh slices.
+            let admitted_tail = first.allow_tail;
             let slice_at = DWT::cycle_count();
             let result = tx_tones.step_pass(
                 &mut radio,
                 first,
-                dtmf_key,
+                signaling::ToneInput {
+                    key,
+                    memory: app.dtmf_memory(),
+                    matrix_stable,
+                },
                 signaling::mdc_config(view, tx_slot.unwrap_or(view.active_slot)),
                 view.roger_name(),
                 || {
@@ -1197,19 +1331,20 @@ fn main() -> ! {
                         return None;
                     }
                     feed();
-                    Some(tx_sample(true))
+                    Some(tx_sample(true, false, admitted_tail).0)
                 },
             );
             checked(&mut log, result, 0xE065)
         };
         // Foreground signaling may perform bounded SPI work. Re-evaluate TOT
         // against elapsed time rather than the timestamp before that work.
-        let now = require(time.sample(DWT::cycle_count()), 0xE016);
+        let now = sample_time(&mut time);
+        tx_tones.applied_at(now);
         let mut tx_ended = checked(&mut log, radio.tick(now, tx_held), 0xE056).tx_ended;
         // Keep the short TX configuration slice and fresh guard per operation.
         let burst_started = DWT::cycle_count();
         for _ in 0..7 {
-            let now = require(time.sample(DWT::cycle_count()), 0xE016);
+            let now = sample_time(&mut time);
             if beacon.active()
                 || !radio.tx_active_or_starting()
                 || !radio.configuration_step_ready(now)
@@ -1228,7 +1363,7 @@ fn main() -> ! {
                         || (LOWER_PTT_ENABLED && ptt::lower_pressed(fresh_adc.raw))),
             };
             let same_source = ptt_guard.observe(input, tx_context_blocked);
-            let now = require(time.sample(DWT::cycle_count()), 0xE016);
+            let now = sample_time(&mut time);
             let guarded_target = if cfg!(feature = "channel-tx") {
                 profile_for_slot(&app, &settings, tx_slot.unwrap_or(view.active_slot)).ok()
             } else {
@@ -1238,7 +1373,7 @@ fn main() -> ! {
                 && same_source
                 && tx_slot.is_some()
                 && tx_slot == view.ptt_slot
-                && tx_started_at.is_some_and(|start| tx_hold_within_limit(start, now))
+                && tx_timer.is_some_and(|timer| tx_hold_within_limit(timer, now))
                 && !view.locked
                 && guarded_target.is_some_and(|(target, p)| {
                     tx_permitted(&app, target, p, input)
@@ -1246,13 +1381,15 @@ fn main() -> ! {
                             || tx_authorization
                                 .is_some_and(|a| a.still_held_target(view, target, p, input)))
                 });
-            let now = require(time.sample(DWT::cycle_count()), 0xE016);
+            let now = sample_time(&mut time);
             tx_ended = checked(&mut log, radio.tick(now, held), 0xE056).tx_ended;
         }
         if tx_ended {
             ptt_guard.disarm();
+            if tx_slot.is_some() {
+                battery_sag.end_tx();
+            }
             tx_slot = None;
-            tx_started_at = None;
             tx_authorization = None;
             current = None;
             last_signal = None;
@@ -1268,7 +1405,7 @@ fn main() -> ! {
                     if let Some(rx) = profile.receive {
                         let calibration = app.calibration_view().unwrap_or_else(|| stop(0xE050));
                         if uv98_rf_sequence::receive(&calibration, rx).is_ok() {
-                            let now = require(time.sample(DWT::cycle_count()), 0xE016);
+                            let now = sample_time(&mut time);
                             checked(&mut log, radio.receive(&calibration, rx, now), 0xE058);
                             current = Some(profile);
                             reply_window = reply::ReplyWindow::Tuning;
@@ -1288,7 +1425,7 @@ fn main() -> ! {
                     return None;
                 }
                 feed();
-                Some(require(time.sample(DWT::cycle_count()), 0xE016))
+                Some(sample_time(&mut time))
             });
             checked(&mut log, advanced, 0xE056);
         }
@@ -1298,7 +1435,7 @@ fn main() -> ! {
             && ptt::side_idle(adc.raw);
         let mut observed_release_rx = false;
         if reply_window.active() {
-            let now = require(time.sample(DWT::cycle_count()), 0xE016);
+            let now = sample_time(&mut time);
             if reply_window.sample_due(now, radio.state() == RfState::Receiving) && quiet_input {
                 if let Some(p) = current {
                     let tone = p.receive.map_or(0, |rx| rx.tone);
@@ -1320,6 +1457,7 @@ fn main() -> ! {
         if !radio.tx_active_or_starting()
             && !beacon.active()
             && !reply_window.active()
+            && view.screen != Screen::AprsRx
             && adc_previous != Some((adc_code, upper))
         {
             event(
@@ -1358,7 +1496,7 @@ fn main() -> ! {
             }
             None => InputSample::Unstable,
         };
-        let now = require(time.sample(DWT::cycle_count()), 0xE016);
+        let now = sample_time(&mut time);
         // Any physical side-key activity cancels a sweep. PTT cannot turn this
         // cancellation into transmission; the guard requires a later release
         // and a new eligible edge on the normal channel screen. Side activity
@@ -1391,14 +1529,17 @@ fn main() -> ! {
 
         #[cfg(not(feature = "pa5-audio"))]
         {
-            let (name, enabled) = app.status().view.radio_name_settings();
-            let desired = uv98_settings_store::Settings {
+            let view = app.status().view;
+            let (name, enabled) = view.radio_name_settings();
+            let mut desired = uv98_settings_store::Settings {
                 name: name.map_or([0xff; 16], |name| name.payload()),
                 roger_enabled: enabled,
-                microphone_gain: Some(app.status().view.microphone_gain),
+                microphone_gain: Some(view.microphone_gain),
+                positions: saved_name_settings.positions,
             };
-            if desired != saved_name_settings
-                && radio.initialized()
+            let explicit = desired != saved_name_settings;
+            let save_allowed = radio.initialized()
+                && view.screen != Screen::AprsRx
                 && matches!(radio.state(), RfState::Receiving | RfState::Off)
                 && raw.is_some_and(|(_, pressed)| !pressed)
                 && !lower
@@ -1411,8 +1552,41 @@ fn main() -> ! {
                 && tuner_session.is_none()
                 && update.request.is_none()
                 && !update.cancel_temporary
-                && !update.ptt_tx_requested
-            {
+                && !update.ptt_tx_requested;
+            let signal_open = last_signal.is_some_and(|s| s.audio_open || s.status_0c & 2 != 0);
+            let quiet_home = name_store.is_some()
+                && quiet_input
+                && update.pressed.is_none()
+                && !started_release_rx
+                && !css_receive
+                && view.screen == Screen::Home
+                && view.entry.is_none()
+                && view.cb.is_none()
+                && view.scan == ScanState::Stopped
+                && !radio.tx_active_or_starting()
+                && !signal_open;
+            let positions = position_save.observe(quiet_home.then(|| app.positions()), now);
+            if let Some(positions) = positions {
+                desired.positions = Some(positions);
+            }
+            let quiet_radio = radio.state() == RfState::Off
+                || (last_signal.is_some() && !signal_open && now.wrapping_sub(signal_at) < 100);
+            if save_allowed && (explicit || (quiet_radio && positions.is_some())) {
+                if !explicit {
+                    // Recheck physical input immediately before an automatic
+                    // write, as a sector erase can outlast a short PTT press.
+                    let keys_clear = keys
+                        .guard_scan()
+                        .is_ok_and(|sample| sample.matrix_clear() && !sample.ptt_pressed());
+                    let fresh = checked(&mut log, side.sample(), 0xE055);
+                    if !keys_clear
+                        || !ptt::side_idle(fresh.raw)
+                        || checked(&mut log, radio.carrier_present(), 0xE05A)
+                    {
+                        position_save.observe(None, now);
+                        continue;
+                    }
+                }
                 // Saving never overlaps RF transmission or a shared bus owner.
                 // Stop includes readback of PA/gate registers. Resume RX on the
                 // next foreground pass, with a fresh clock and input sample.
@@ -1420,9 +1594,8 @@ fn main() -> ! {
                     checked(&mut log, radio.stop(), 0xE057);
                 }
                 feed();
-                let confirmed = name_store
-                    .as_mut()
-                    .is_some_and(|store| store.save(desired).is_ok());
+                let saved = name_store.as_mut().map(|store| store.save(desired));
+                let confirmed = matches!(saved, Some(Ok(())));
                 feed();
                 if confirmed {
                     saved_name_settings = desired;
@@ -1432,26 +1605,19 @@ fn main() -> ! {
                     if let Some(Ok(Some(stored))) = name_store.as_mut().map(|store| store.load()) {
                         saved_name_settings = stored;
                     }
-                    app.apply_radio_name_settings(
-                        uv98_signaling::radio_name::RadioName::from_payload(
-                            saved_name_settings.name,
-                        ),
-                        saved_name_settings.roger_enabled,
-                    );
-                    app.apply_microphone_gain(
-                        saved_name_settings
-                            .microphone_gain
-                            .unwrap_or(stock_microphone_gain),
-                    );
-                    saved_name_settings.microphone_gain = Some(app.status().view.microphone_gain);
-                    saved_name_settings.name = app
-                        .status()
-                        .view
-                        .radio_name_settings()
-                        .0
-                        .map_or([0xff; 16], |name| name.payload());
+                    if matches!(saved, Some(Err(uv98_settings_store::Error::Protection))) {
+                        name_store = None;
+                    }
                 }
-                checked(&mut log, app.report_name_save(confirmed), 0xE032);
+                if positions.is_some() {
+                    position_save.attempted(now, saved_name_settings.positions);
+                }
+                if explicit && !confirmed {
+                    apply_saved_name(&mut app, &mut saved_name_settings, stock_microphone_gain);
+                }
+                if explicit {
+                    checked(&mut log, app.report_name_save(confirmed), 0xE032);
+                }
                 current = None;
                 last_signal = None;
                 continue;
@@ -1506,8 +1672,7 @@ fn main() -> ! {
         } else {
             1
         };
-        let mut forced_retune = false;
-        let mut action = scan::Action::None;
+        let mut action = scan_flow::Action::None;
         if update.cancel_temporary {
             settings[index].monitor = false;
             // EXIT/PTT cancels any queued restart even if the in-flight restore
@@ -1522,12 +1687,26 @@ fn main() -> ! {
                 scope.event(now, spectrum::Event::Stop);
             }
             if scanner.active() {
-                action = scanner.cancel();
-                checked(&mut log, app.cancel_scan(), 0xE032);
-                checked(&mut log, app.acknowledge_scan_stopped(), 0xE032);
+                action = checked(&mut log, scanner.cancel(&mut app), 0xE032);
             }
         }
-        if let Some(request) = update.request {
+        // Physical input and a manual MENU action take precedence. Sample busy
+        // before starting the modem; the beacon checks for 200 ms again at TX.
+        let auto_fix = if smart.armed()
+            && !beacon.active()
+            && quiet_input
+            && app.status().view.aprs_auto_armed
+            && update.request.is_none()
+            && radio.state() == RfState::Receiving
+            && current == guarded_profile
+        {
+            smart
+                .due(now, motion)
+                .filter(|_| !checked(&mut log, radio.carrier_present(), 0xE05A))
+        } else {
+            None
+        };
+        if let Some(request) = update.request.or(auto_fix.map(|_| Request::SendAprs)) {
             if matches!(
                 request,
                 Request::SetPower(_)
@@ -1537,9 +1716,7 @@ fn main() -> ! {
                     | Request::RestartSpectrum
             ) && scanner.active()
             {
-                scanner.cancel();
-                checked(&mut log, app.cancel_scan(), 0xE032);
-                checked(&mut log, app.acknowledge_scan_stopped(), 0xE032);
+                checked(&mut log, scanner.cancel(&mut app), 0xE032);
             }
             match request {
                 Request::StartSpectrum => {
@@ -1816,11 +1993,18 @@ fn main() -> ! {
                         if let Some(profile) = profile(&app, &settings).ok() {
                             let calibration =
                                 app.calibration_view().unwrap_or_else(|| stop(0xE050));
-                            let fix = gps
-                                .fix(now)
-                                .map(|fix| (fix.position.latitude_e7, fix.position.longitude_e7));
+                            let position = auto_fix
+                                .map(|f| f.position)
+                                .or_else(|| gps.fix(now).map(|f| f.position));
                             if radio.state() == RfState::Receiving && current == Some(profile) {
-                                beacon.request(&calibration, profile, fix, now);
+                                let accepted = beacon.request(
+                                    &calibration,
+                                    profile,
+                                    position.map(|p| (p.latitude_e7, p.longitude_e7)),
+                                    now,
+                                    auto_fix.is_some(),
+                                );
+                                smart.request_attempted(now, auto_fix, accepted);
                             }
                             checked(&mut log, app.set_aprs_status(beacon.status()), 0xE032);
                             ptt_guard.disarm();
@@ -1866,49 +2050,28 @@ fn main() -> ! {
                     });
                 }
                 Request::StartScan => {
-                    let now = require(time.sample(DWT::cycle_count()), 0xE016);
-                    action = match policy::scan_target(app.status().view)
-                        .ok()
-                        .and_then(|target| scanner.start(target, now).ok())
-                    {
-                        Some(action) => action,
-                        None => {
-                            checked(&mut log, app.reject_radio_request(request), 0xE032);
-                            scan::Action::None
-                        }
-                    };
+                    let now = sample_time(&mut time);
+                    action = checked(&mut log, scanner.start(&mut app, now), 0xE032);
                 }
                 Request::StopScan => {
-                    action = scanner.cancel();
-                    checked(&mut log, app.acknowledge_scan_stopped(), 0xE032);
+                    action = checked(&mut log, scanner.stop(&mut app), 0xE032);
                 }
                 // Apply after the raw PTT and cancellation checks below.
                 Request::SkipScanTarget => {}
+                Request::StartRxToneSearch { .. } | Request::ApplyRxToneOverride { .. } => {}
             }
         }
-        if scanner.active()
-            && (upper
-                || !ptt::side_idle(adc.raw)
-                || matches!(
-                    app.status().view.scan,
-                    ScanState::Stopped | ScanState::Stopping
-                ))
-        {
-            action = scanner.cancel();
-            checked(&mut log, app.cancel_scan(), 0xE032);
-            checked(&mut log, app.acknowledge_scan_stopped(), 0xE032);
-        } else if update.request == Some(Request::SkipScanTarget) && scanner.paused() {
-            let now = require(time.sample(DWT::cycle_count()), 0xE016);
-            action = scanner
-                .skip_current(now, app.status().view.channel)
-                .unwrap_or(scan::Action::Stop);
-        }
-        if action != scan::Action::None {
-            forced_retune = checked(&mut log, scan_action(&mut app, &scanner, action), 0xE032);
-            if !forced_retune && action != scan::Action::Stop {
-                scanner.cancel();
-            }
-        }
+        let forced_retune = checked(
+            &mut log,
+            scanner.finish_input(
+                &mut app,
+                action,
+                upper || !ptt::side_idle(adc.raw),
+                update.request == Some(Request::SkipScanTarget),
+                || sample_time(&mut time),
+            ),
+            0xE032,
+        );
         if scope.active() {
             let calibration = match app.calibration_view() {
                 Some(c) => c,
@@ -1921,9 +2084,7 @@ fn main() -> ! {
             );
             let completion = checked(
                 &mut log,
-                scope.step(&mut radio, &calibration, || {
-                    require(time.sample(DWT::cycle_count()), 0xE016)
-                }),
+                scope.step(&mut radio, &calibration, || sample_time(&mut time)),
                 0xE05E,
             );
             if let scope::Completion::Restored { request, reason } = completion {
@@ -1936,7 +2097,7 @@ fn main() -> ! {
                 }
                 match action {
                     SpectrumAction::BeginListen => {
-                        let at = require(time.sample(DWT::cycle_count()), 0xE016);
+                        let at = sample_time(&mut time);
                         if scope.begin_listen(at) {
                             // A cancel may already have arrived while the bin
                             // restore was in flight; the listen-end pass below
@@ -2029,7 +2190,7 @@ fn main() -> ! {
                                                 &calibration,
                                                 request,
                                                 window,
-                                                require(time.sample(DWT::cycle_count()), 0xE016),
+                                                sample_time(&mut time),
                                             )
                                             .is_ok(),
                                         None => false,
@@ -2069,7 +2230,7 @@ fn main() -> ! {
             }
         }
         if scope.listening() || scope.listen_restoring() {
-            let at = require(time.sample(DWT::cycle_count()), 0xE016);
+            let at = sample_time(&mut time);
             if scope.listen_expired(at) && listen_after.is_none() {
                 checked(&mut log, app.set_spectrum_listening(false), 0xE032);
                 listen_after = Some(true);
@@ -2130,7 +2291,7 @@ fn main() -> ! {
                 }
             }
         }
-        let now = require(time.sample(DWT::cycle_count()), 0xE016);
+        let now = sample_time(&mut time);
         if (scope.active() || publish_spectrum_final)
             && now.wrapping_sub(spectrum_published_at) >= 125
         {
@@ -2209,7 +2370,29 @@ fn main() -> ! {
         }
         let operator_profile = profile(&app, &settings).ok();
         let view = app.status().view;
-        let watch_pair = if view.dual_watch
+        let mut css_view = view.rx_tone_search;
+        if css_view.is_some_and(|search| {
+            scanner.active()
+                || scope.active()
+                || RxToneSource::for_view(view) != Some(search.source)
+                || radio.tx_active_or_starting()
+                || !radio.initialized()
+                || beacon.active()
+                || reply_window.active()
+                || !operator_profile.and_then(|p| p.receive).is_some_and(|rx| {
+                    rx.modulation == Modulation::Fm
+                        && ((css_receive && !policy::receive_changed(current, operator_profile))
+                            || app.calibration_view().is_some_and(|calibration| {
+                                uv98_rf_sequence::receive_tone_search(&calibration, rx).is_ok()
+                            }))
+                })
+        }) {
+            checked(&mut log, app.reject_rx_tone_search(), 0xE032);
+            css_view = None;
+        }
+        let css_open = css_view.is_some();
+        let watch_pair = if !css_open
+            && view.dual_watch
             && view.screen == Screen::Home
             && view.entry.is_none()
             && view.scan == ScanState::Stopped
@@ -2223,8 +2406,9 @@ fn main() -> ! {
                 .and_then(|primary| {
                     let (peer, channel) = app.peer_radio_selection();
                     let i = usize::from(peer.active_slot == Slot::B);
-                    let other =
-                        policy::profile(peer, channel, radio_settings(&app)?, settings[i]).ok()?;
+                    let other = policy::profile(peer, channel, radio_settings(&app)?, settings[i])
+                        .ok()?
+                        .with_rx_tone_override(app.rx_tone_override(peer));
                     (uv98_radio_runtime::watch::eligible(other)
                         && primary.frequency != other.frequency)
                         .then_some((view.active_slot, primary, other))
@@ -2248,7 +2432,7 @@ fn main() -> ! {
             .map(crossband::Session::listening_profile)
             .or(watch_receive.map(|(_, rx)| rx))
             .or(operator_profile);
-        let now = require(time.sample(DWT::cycle_count()), 0xE016);
+        let now = sample_time(&mut time);
         let tuner_view = app.status().view;
         let tuner_open = tuner_view.screen == Screen::Shortwave;
         let tuner_mode = tuner_view.shortwave_mode;
@@ -2444,8 +2628,15 @@ fn main() -> ! {
             if current != wanted {
                 telemetry_samples = 4;
             }
+            let was_css_receive = css_receive;
+            let receive_changed = policy::receive_changed(current, wanted);
+            if !css_open || !was_css_receive || receive_changed || forced_retune {
+                css = tone_search::Search::default();
+            }
             let retune = forced_retune
-                || policy::receive_changed(current, wanted)
+                || css_open != was_css_receive
+                || css_rearm
+                || receive_changed
                 || (tx_ended && !started_release_rx);
             if retune && relay_active {
                 stop_relay(&mut radio, &mut secondary);
@@ -2460,6 +2651,8 @@ fn main() -> ! {
             }
             current = wanted;
             if retune {
+                css_receive = false;
+                css_rearm = false;
                 if radio.state() != RfState::Off {
                     checked(&mut log, radio.stop(), 0xE057);
                 }
@@ -2472,7 +2665,15 @@ fn main() -> ! {
                     };
                     // Validate before entering the executor; unsupported numeric
                     // records show unavailable, never continue the previous RF.
-                    if uv98_rf_sequence::receive(&calibration, rx).is_ok() {
+                    if css_open {
+                        checked(
+                            &mut log,
+                            radio.receive_tone_search(&calibration, rx, now),
+                            0xE058,
+                        );
+                        css.armed(now);
+                        css_receive = true;
+                    } else if uv98_rf_sequence::receive(&calibration, rx).is_ok() {
                         checked(&mut log, radio.receive(&calibration, rx, now), 0xE058);
                     }
                 }
@@ -2481,6 +2682,8 @@ fn main() -> ! {
                 .ptt_slot
                 .and_then(|slot| profile_for_slot(&app, &settings, slot).ok());
             if LIVE_TX
+                && !css_open
+                && !was_css_receive
                 && app.status().view.screen != Screen::Crossband
                 && requested_tx.is_some_and(|(target, p)| tx_permitted(&app, target, p, raw_ptt))
                 && ptt_guard.allow_edge()
@@ -2513,19 +2716,25 @@ fn main() -> ! {
                         && ptt_guard.arm(launch_ptt)
                     {
                         checked(&mut log, radio.stop(), 0xE057);
+                        let started_at = sample_time(&mut time);
                         checked(
                             &mut log,
-                            radio.transmit_with_mdc(
+                            radio.transmit_with_mdc_limit(
                                 &calibration,
                                 tx,
-                                now,
+                                started_at,
                                 true,
                                 signaling::mdc_config(target, slot),
+                                if cfg!(feature = "channel-tx") {
+                                    target.tx_timeout.milliseconds()
+                                } else {
+                                    tx_trial::MAX_HELD_MS
+                                },
                             ),
                             0xE059,
                         );
                         tx_slot = Some(slot);
-                        tx_started_at = Some(now);
+                        battery_sag.begin_tx(started_at);
                         tx_authorization = tx_policy::authorize_target(
                             &app.status().view,
                             &target,
@@ -2542,16 +2751,54 @@ fn main() -> ! {
         if update.ptt_tx_requested && !radio.tx_active_or_starting() {
             checked(&mut log, app.reject_tx(), 0xE032);
         }
-        let now = require(time.sample(DWT::cycle_count()), 0xE016);
+        let now = sample_time(&mut time);
+        let aprs_open = view.screen == Screen::AprsRx;
+        let aprs_frequency = if aprs_open
+            && radio.state() == RfState::Receiving
+            && current == operator_profile
+            && !scanner.active()
+            && !scope.active()
+            && !relay_active
+            && !beacon.active()
+        {
+            current
+                .and_then(|p| p.receive)
+                .filter(|rx| rx.modulation == Modulation::Fm)
+                .map(|rx| rx.frequency_10hz)
+        } else {
+            None
+        };
+        let had_aprs_audio = packet_rx.needs_audio();
+        checked(
+            &mut log,
+            service_aprs_rx(
+                &mut app,
+                &mut packet_rx,
+                &mut beacon,
+                now,
+                aprs_open,
+                aprs_frequency,
+            ),
+            0xE032,
+        );
         if radio.state() == RfState::Receiving
             && (!scope.active() || scope.listening())
             && !observed_release_rx
-            && now.wrapping_sub(signal_at) >= 1
+            && (had_aprs_audio != packet_rx.needs_audio()
+                || now.wrapping_sub(signal_at) >= if packet_rx.needs_audio() { 50 } else { 1 })
         {
             if let Some(p) = current {
                 last_signal = Some(checked(
                     &mut log,
-                    if p.audio.modulation == Modulation::Fm
+                    if packet_rx.needs_audio() {
+                        let mut audio = p.audio;
+                        audio.monitor = true;
+                        radio.observe(audio, 0)
+                    } else if css_receive {
+                        let mut audio = p.audio;
+                        audio.squelch = audio.squelch.max(1);
+                        radio.observe(audio, 0)
+                    } else if p.audio.modulation == Modulation::Fm
                         && !scope.active()
                         && !tuner_open
                         && !crossband_open
@@ -2570,6 +2817,26 @@ fn main() -> ! {
                     0xE05A,
                 ));
                 signal_at = now;
+                if css_receive && css_view.is_some_and(|search| search.result_raw.is_none()) {
+                    let carrier = last_signal.is_some_and(|s| s.status_0c & 2 != 0);
+                    if !carrier {
+                        css.carrier_lost();
+                    }
+                    if css.ready(now) {
+                        let observation = if carrier {
+                            checked(&mut log, radio.read_rx_tone(), 0xE05A)
+                        } else {
+                            tone_search::Observation::NoCarrier
+                        };
+                        match css.observe(now, observation) {
+                            tone_search::Action::Continue => {}
+                            tone_search::Action::Rearm => css_rearm = true,
+                            tone_search::Action::Found(raw) => {
+                                checked(&mut log, app.set_rx_tone_search_result(Some(raw)), 0xE032);
+                            }
+                        }
+                    }
+                }
             }
         }
         let mut watch_rx = None;
@@ -2633,10 +2900,7 @@ fn main() -> ! {
                                     apply_secondary_plan(&mut secondary, &plan),
                                     Ok(true)
                                 ) {
-                                    second_rx = Some((
-                                        rx,
-                                        require(time.sample(DWT::cycle_count()), 0xE016),
-                                    ));
+                                    second_rx = Some((rx, sample_time(&mut time)));
                                     CrossbandProbe::Measuring {
                                         a_rx: primary.frequency_10hz,
                                         b_rx: rx.frequency_10hz,
@@ -2775,7 +3039,7 @@ fn main() -> ! {
                                 ),
                                 0xE065,
                             );
-                            let rechecked_at = require(time.sample(DWT::cycle_count()), 0xE016);
+                            let rechecked_at = sample_time(&mut time);
                             last_signal = Some(fresh);
                             signal_at = rechecked_at;
                             let carrier = relay_carrier(fresh);
@@ -2838,6 +3102,7 @@ fn main() -> ! {
         // Optional developer snapshots. Normal RX observation, LCD meters,
         // PTT/TOT guards and fault records remain unconditional.
         if cfg!(feature = "verbose-runtime")
+            && !aprs_open
             && radio.state() == RfState::Receiving
             && (!scope.active() || scope.listening())
             && telemetry_samples > 0
@@ -2885,50 +3150,20 @@ fn main() -> ! {
             }
         }
         if scanner.active() && !scope.active() {
-            let now = require(time.sample(DWT::cycle_count()), 0xE016);
-            if let Some(ticket) = scanner.status().ticket {
-                match scanner.tune_ack(ticket, now, radio.state()) {
-                    Ok(true) => {
-                        checked(&mut log, app.acknowledge_scan_started(), 0xE032);
-                    }
-                    Ok(false) => {}
-                    Err(_) => {
-                        scanner.cancel();
-                        checked(&mut log, app.cancel_scan(), 0xE032);
-                        checked(&mut log, app.acknowledge_scan_stopped(), 0xE032);
-                        checked(
-                            &mut log,
-                            app.reject_radio_request(Request::StartScan),
-                            0xE032,
-                        );
-                    }
-                }
-            }
-            match scanner.tick_with_cursor_hold(
-                now,
-                last_signal.is_some_and(|s| s.audio_open),
-                app.scan_cursor_held(),
+            let now = sample_time(&mut time);
+            if checked(
+                &mut log,
+                scanner.advance(
+                    &mut app,
+                    now,
+                    radio.state(),
+                    last_signal.is_some_and(|s| s.audio_open),
+                ),
+                0xE032,
             ) {
-                Ok(scan::Action::None) => {}
-                Ok(action) => {
-                    if checked(&mut log, scan_action(&mut app, &scanner, action), 0xE032) {
-                        checked(&mut log, radio.stop(), 0xE057);
-                        current = None;
-                        last_signal = None;
-                    } else {
-                        scanner.cancel();
-                    }
-                }
-                Err(_) => {
-                    scanner.cancel();
-                    checked(&mut log, app.cancel_scan(), 0xE032);
-                    checked(&mut log, app.acknowledge_scan_stopped(), 0xE032);
-                    checked(
-                        &mut log,
-                        app.reject_radio_request(Request::StartScan),
-                        0xE032,
-                    );
-                }
+                checked(&mut log, radio.stop(), 0xE057);
+                current = None;
+                last_signal = None;
             }
             checked(&mut log, app.set_scan_paused(scanner.paused()), 0xE032);
         }
@@ -3044,6 +3279,9 @@ fn main() -> ! {
             );
         }
         checked(&mut log, app.set_radio_view(report), 0xE032);
+        if beacon.active() || relay_active {
+            battery_sag.end_tx();
+        }
         // Three bounded ADC conversions; the side-key channel is restored
         // before returning. Physical release/TOT work has already run this loop.
         if now.wrapping_sub(battery_at) >= 250
@@ -3056,8 +3294,36 @@ fn main() -> ! {
                 app.set_battery_voltage(battery.observe(raw_battery)),
                 0xE032,
             );
+            if report.tx_slot.is_some() {
+                battery_sag.observe_tx(raw_battery);
+            } else if report.state == RadioState::Receiving
+                && view.screen == Screen::Home
+                && !scanner.active()
+                && !scope.active()
+                && !crossband_open
+                && now.wrapping_sub(signal_at) < 100
+                && last_signal.is_some_and(|signal| !signal.squelch_open && !signal.audio_open)
+            {
+                battery_sag.observe_resting(now, raw_battery);
+            }
             battery_at = now;
         }
+        let remaining_seconds = if cfg!(feature = "channel-tx") {
+            report
+                .tx_slot
+                .and(radio.tx_timer())
+                .map(|timer| timer.remaining_seconds(now))
+        } else {
+            None
+        };
+        checked(
+            &mut log,
+            app.set_tx_status(
+                remaining_seconds,
+                remaining_seconds.and(battery_sag.millivolts()),
+            ),
+            0xE032,
+        );
         if raw.is_some_and(|(matrix, ptt)| matrix != 0 || ptt) || adc_code != 0xff {
             lights.activity(now);
         }
@@ -3067,6 +3333,23 @@ fn main() -> ! {
             radio.set_backlights(display_light, key_light),
             0xE05D,
         );
+        // The CMX868 holds one 6.67 ms byte. Service it on both sides of
+        // ordinary radio work and use one LCD row per pass on the RX page.
+        if packet_rx.listening() {
+            let at = sample_time(&mut time);
+            checked(
+                &mut log,
+                service_aprs_rx(
+                    &mut app,
+                    &mut packet_rx,
+                    &mut beacon,
+                    at,
+                    aprs_open,
+                    aprs_frequency,
+                ),
+                0xE032,
+            );
+        }
         let render_start = DWT::cycle_count();
         if cfg!(feature = "verbose-runtime") && app.render_pending() && redraw_since.is_none() {
             redraw_since = Some(now);
@@ -3074,7 +3357,7 @@ fn main() -> ! {
         // Keep physical PTT/TOT polling short during TX and while a PTT is
         // down. The cap covers every window, including narrow outline edges.
         // Cycle admission does not interrupt an in-flight transfer.
-        let (row_budget, admission_cycles) = if beacon.active() {
+        let (row_budget, admission_cycles) = if beacon.active() || aprs_open {
             (1, LCD_BATCH_ADMISSION_CYCLES)
         } else if radio.tx_active_or_starting() || relay_active || upper || lower {
             (2, LCD_BATCH_ADMISSION_CYCLES)
@@ -3137,7 +3420,7 @@ fn main() -> ! {
             }),
             0xE032,
         );
-        let now = require(time.sample(DWT::cycle_count()), 0xE016);
+        let now = sample_time(&mut time);
         if cfg!(feature = "verbose-runtime") {
             max_render_cycles =
                 max_render_cycles.max(DWT::cycle_count().wrapping_sub(render_start));
@@ -3156,7 +3439,7 @@ fn main() -> ! {
             }
         }
         #[cfg(feature = "pa5-audio")]
-        {
+        if !aprs_open {
             // Manual RX-only audio export has a separate finite frame budget.
             audio_capture.export_step(&mut log);
             app.set_audio_capture(audio_capture.view());
@@ -3165,6 +3448,7 @@ fn main() -> ! {
         // At most one optional developer frame in a quiet loop. Fault frames still
         // take the direct checked/stop path irrespective of these conditions.
         if cfg!(feature = "verbose-runtime")
+            && !aprs_open
             && drawn.rows == 0
             && !drawn.pending
             && raw == Some((0, false))

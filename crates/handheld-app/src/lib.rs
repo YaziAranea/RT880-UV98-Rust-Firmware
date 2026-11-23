@@ -4,18 +4,20 @@
 
 use sha2::{Digest, Sha256};
 use uv98_codeplug::{
-    channels::{Channel, CHANNEL_COUNT, CHANNEL_LEN},
+    channels::{Channel, Tone, CHANNEL_COUNT, CHANNEL_LEN},
     zones::{Zone, MEMBER_COUNT, RECORD_LEN, ZONE_COUNT},
 };
 pub use uv98_diag_app::{StartStage, PRESERVED_CALIBRATION_SHA256};
 use uv98_diagnostic::{Diagnostic, LoadError, Snapshot, CHANNELS_ADDRESS};
 use uv98_display::{Delay, Display, DisplayBus};
 use uv98_handheld_ui::{
-    controller::{self, Change, Controller, LightMode, Mode, Request, Screen, Slot, View},
+    controller::{
+        self, Change, Controller, LightMode, Mode, Request, RxToneSource, Screen, Slot, View,
+    },
     input::{InputEvent, InputTracker, Sample},
     render::{
-        self, ChannelView, Model, PeerView, RadioView, SpectrumError, SpectrumState, SpectrumView,
-        ZoneView,
+        self, ChannelView, ManualTxStatus, Model, PeerView, RadioView, SpectrumError,
+        SpectrumState, SpectrumView, ZoneView,
     },
 };
 use uv98_keys::{Key, Timing};
@@ -240,6 +242,7 @@ pub struct App<N, L, D> {
     zone_window_len: usize,
     peer_record: Option<Record>,
     config: Option<RadioConfig>,
+    rx_tones: [Option<(RxToneSource, u16)>; 2],
     controller: Controller,
     input: InputTracker,
     expected_sha256: [u8; 32],
@@ -263,6 +266,7 @@ pub struct App<N, L, D> {
     radio: RadioView,
     render_radio: RadioView,
     last_radio: RadioView,
+    manual_tx: Option<ManualTxStatus>,
     battery_mv: Option<u16>,
     spectrum: Option<SpectrumSnapshot>,
     waterfall: render::Waterfall,
@@ -304,6 +308,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             zone_window_len: 0,
             peer_record: None,
             config: None,
+            rx_tones: [None; 2],
             controller,
             input: InputTracker::new(timing),
             expected_sha256,
@@ -334,6 +339,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             radio: RadioView::OFF,
             render_radio: RadioView::OFF,
             last_radio: RadioView::OFF,
+            manual_tx: None,
             battery_mv: None,
             spectrum: None,
             waterfall: render::Waterfall::new(),
@@ -367,6 +373,65 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             return None;
         }
         self.snapshot().map(|snapshot| snapshot.channel)
+    }
+
+    pub fn positions(&self) -> [u32; 2] {
+        self.controller.positions()
+    }
+
+    pub fn dtmf_memory(&self) -> &[u8] {
+        self.controller.dtmf_memory()
+    }
+
+    #[cold]
+    #[cfg_attr(target_arch = "arm", inline(never))]
+    pub fn restore_positions(
+        &mut self,
+        mut words: [u32; 2],
+    ) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.state != State::Ready {
+            return Err(Error::State);
+        }
+        let active = if words[0] & controller::POSITION_ACTIVE_B != 0 {
+            Slot::B
+        } else {
+            Slot::A
+        };
+        words[0] &= !controller::POSITION_ACTIVE_B;
+        for slot in [active.other(), active] {
+            let mut change = self
+                .controller
+                .restore_position(slot, words[usize::from(slot == Slot::B)]);
+            if !change.slot_changed && !change.zone_changed {
+                let fixed = self.controller.reconcile_channels(&self.bitmap);
+                change.channel_changed |= fixed.channel_changed;
+                change.redraw |= fixed.redraw;
+            }
+            self.apply_change(change, None)?;
+        }
+        Ok(())
+    }
+
+    pub fn rx_tone_override(&self, view: View) -> Option<u16> {
+        let (source, raw) = self.rx_tones[usize::from(view.active_slot == Slot::B)]?;
+        (RxToneSource::for_view(view) == Some(source)).then_some(raw)
+    }
+
+    #[cfg_attr(target_arch = "arm", inline(never))]
+    pub fn set_rx_tone_search_result(
+        &mut self,
+        result: Option<u16>,
+    ) -> Result<(), Error<N::Error, L::Error>> {
+        if self.controller.set_rx_tone_search_result(result) {
+            self.redraw_ready()?;
+        }
+        Ok(())
+    }
+
+    #[cfg_attr(target_arch = "arm", inline(never))]
+    pub fn reject_rx_tone_search(&mut self) -> Result<(), Error<N::Error, L::Error>> {
+        self.controller.reject_rx_tone_search();
+        self.redraw_ready()
     }
 
     pub fn peer_radio_selection(&self) -> (controller::View, Option<Channel<'_>>) {
@@ -478,6 +543,58 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         }
         Ok(())
     }
+    pub fn set_aprs_auto_available(
+        &mut self,
+        available: bool,
+    ) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.view.aprs_auto_available != available {
+            self.controller.set_aprs_auto_available(available);
+            self.status.view = self.controller.view();
+            if self.status.view.screen == Screen::Aprs {
+                self.redraw_ready()?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Clear the operator opt-in after a backend refusal or source change.
+    pub fn disarm_aprs_auto(&mut self) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.view.aprs_auto_armed {
+            self.controller.disarm_aprs_auto();
+            self.status.view = self.controller.view();
+            self.redraw_ready()?;
+        }
+        Ok(())
+    }
+
+    pub fn set_aprs_rx_available(
+        &mut self,
+        available: bool,
+    ) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.view.aprs_rx_available != available {
+            self.controller.set_aprs_rx_available(available);
+            self.status.view = self.controller.view();
+            if self.status.view.screen == Screen::AprsRx {
+                self.redraw_ready()?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Add a decoded AX.25 UI packet to the volatile APRS history.
+    pub fn push_aprs_packet(
+        &mut self,
+        source: &[u8],
+        information: &[u8],
+    ) -> Result<(), Error<N::Error, L::Error>> {
+        self.controller.push_aprs_packet(source, information);
+        self.status.view = self.controller.view();
+        if self.status.view.screen == Screen::AprsRx {
+            self.redraw_ready()?;
+        }
+        Ok(())
+    }
+
     pub fn shortwave_scope_sample(
         &mut self,
         first_hz: u32,
@@ -774,12 +891,33 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
     /// Apply RAM-only exclusions for one scan without changing the catalog or
     /// its zone order. The ordinary bounded channel traversal can wrap once.
     pub fn next_scan_channel(&self, skipped: &[u8; 128]) -> Option<u16> {
+        self.next_scan_channel_after(self.status.view.channel, skipped, None)
+    }
+
+    /// A priority visit is temporarily outside the ordinary zone traversal.
+    pub fn next_scan_channel_after(
+        &self,
+        cursor: Option<u16>,
+        skipped: &[u8; 128],
+        priority: Option<u16>,
+    ) -> Option<u16> {
         if self.status.state != State::Ready {
             return None;
         }
-        let eligible = core::array::from_fn(|index| self.bitmap[index] & !skipped[index]);
-        self.controller
-            .ordered_channel(&eligible, self.status.view.channel, true)
+        let mut eligible = core::array::from_fn(|index| self.bitmap[index] & !skipped[index]);
+        if let Some(priority) = priority {
+            if let Some(byte) = eligible.get_mut(usize::from(priority) / 8) {
+                *byte &= !(1 << (priority % 8));
+            }
+        }
+        self.controller.ordered_channel(&eligible, cursor, true)
+    }
+
+    pub fn scan_zone_priority(&self) -> Option<u16> {
+        if self.status.state != State::Ready {
+            return None;
+        }
+        self.controller.scan_zone_priority(&self.bitmap)
     }
     pub fn set_radio_view(&mut self, radio: RadioView) -> Result<(), Error<N::Error, L::Error>> {
         if self.status.state != State::Ready {
@@ -793,8 +931,43 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         if self.radio == radio {
             return Ok(());
         }
+        let old_slot = self.radio.transmitting_slot();
+        if old_slot != radio.transmitting_slot() {
+            self.update_tx_status(old_slot, None);
+        }
         self.radio = radio;
         self.redraw_ready()
+    }
+
+    /// Publish telemetry for the confirmed manual PTT session.
+    pub fn set_tx_status(
+        &mut self,
+        remaining_seconds: Option<u8>,
+        sag_mv: Option<u16>,
+    ) -> Result<(), Error<N::Error, L::Error>> {
+        if self.status.state != State::Ready {
+            return Err(Error::State);
+        }
+        let slot = self.radio.transmitting_slot();
+        let status = slot
+            .and(remaining_seconds)
+            .map(|remaining_seconds| ManualTxStatus {
+                remaining_seconds,
+                sag_mv,
+            });
+        self.update_tx_status(slot, status);
+        Ok(())
+    }
+
+    fn update_tx_status(&mut self, slot: Option<Slot>, status: Option<ManualTxStatus>) {
+        if self.manual_tx == status {
+            return;
+        }
+        self.manual_tx = status;
+        if let Some(slot) = slot.filter(|_| self.status.view.screen == Screen::Home) {
+            let (start, end) = render::home_tx_status_rows(slot);
+            self.pending_rows.mark(start, end);
+        }
     }
 
     /// Select the locale for a synthetic host preview.
@@ -1114,6 +1287,17 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             // A newly requested grid cannot display a previous session's bins.
             self.spectrum = None;
             self.waterfall = render::Waterfall::new();
+        }
+        if let Some(Request::ApplyRxToneOverride { source, tone_raw }) = change.request {
+            let view = self.controller.view();
+            if RxToneSource::for_view(view) == Some(source)
+                && matches!(
+                    Tone::decode(tone_raw),
+                    Some(Tone::Ctcss { .. } | Tone::Dcs { .. })
+                )
+            {
+                self.rx_tones[usize::from(view.active_slot == Slot::B)] = Some((source, tone_raw));
+            }
         }
         if change.zone_changed || change.slot_changed {
             self.load_current_zone()?;
@@ -1665,7 +1849,9 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             rx_10hz: s.channel.rx_frequency_code(),
             tx_10hz: s.channel.tx_frequency_code(),
             active: s.channel.is_active(),
-            rx_tone_raw: s.channel.rx_tone_raw(),
+            rx_tone_raw: self
+                .rx_tone_override(self.status.view)
+                .unwrap_or_else(|| s.channel.rx_tone_raw()),
             tx_tone_raw: s.channel.tx_tone_raw(),
             bandwidth_raw: s.channel.bandwidth_raw(),
             power_raw: s.channel.power_raw(),
@@ -1699,6 +1885,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             ptt_pressed: self.status.view.ptt_down,
             input_ready: self.status.input_ready,
             radio: self.radio,
+            manual_tx: self.manual_tx,
             battery_mv: self.battery_mv,
             zone_name: self
                 .status
@@ -1715,16 +1902,14 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             spectrum_error: self.spectrum_error,
             shortwave_scope: Some(&self.shortwave_scope),
         };
-        let damage = render::dirty_ranges(&model, self.last_rendered)
-            .map_err(|e| Error::Render(render::RenderError::Model(e)))?;
-        let radio_damage = render::radio_dirty_ranges(&model, self.last_radio)
-            .map_err(|e| Error::Render(render::RenderError::Model(e)))?;
-        let spectrum_damage = render::spectrum_dirty_ranges(
+        let damage = render::plan_damage(
             &model,
+            self.last_rendered.as_ref(),
+            self.last_radio,
             self.last_spectrum.as_ref().map(SpectrumSnapshot::view),
         )
         .map_err(|e| Error::Render(render::RenderError::Model(e)))?;
-        for &(start, end) in damage.ranges() {
+        for &(start, end) in damage.controller.ranges() {
             self.pending_rows.mark(start, end);
         }
         if screen == Screen::Menu
@@ -1749,19 +1934,19 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             // next. New input replaces the ordering, retaining all damage.
             self.menu_priority = [(11, 18), render::menu_item_rows(view.menu_index), previous];
         }
-        for &(start, end) in spectrum_damage.ranges() {
+        for &(start, end) in damage.spectrum.ranges() {
             self.pending_rows.mark(start, end);
         }
-        self.pending_outlines |= radio_damage.home_outline_edges();
+        self.pending_outlines |= damage.radio.home_outline_edges();
         if defer_telemetry {
-            for &(start, end) in radio_damage.ranges() {
+            for &(start, end) in damage.radio.ranges() {
                 self.deferred_radio_rows.mark(start, end);
             }
         } else {
             // Control changes and visible signaling are never deferred.
             self.render_radio = self.radio;
             self.pending_rows.merge_take(&mut self.deferred_radio_rows);
-            for &(start, end) in radio_damage.ranges() {
+            for &(start, end) in damage.radio.ranges() {
                 self.pending_rows.mark(start, end);
             }
         }
@@ -1836,7 +2021,9 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             rx_10hz: s.channel.rx_frequency_code(),
             tx_10hz: s.channel.tx_frequency_code(),
             active: s.channel.is_active(),
-            rx_tone_raw: s.channel.rx_tone_raw(),
+            rx_tone_raw: self
+                .rx_tone_override(self.status.view)
+                .unwrap_or_else(|| s.channel.rx_tone_raw()),
             tx_tone_raw: s.channel.tx_tone_raw(),
             bandwidth_raw: s.channel.bandwidth_raw(),
             power_raw: s.channel.power_raw(),
@@ -1876,6 +2063,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             ptt_pressed: self.status.view.ptt_down,
             input_ready: self.status.input_ready,
             radio: self.render_radio,
+            manual_tx: self.manual_tx,
             battery_mv: self.battery_mv,
             zone_name: self
                 .status
@@ -2000,6 +2188,9 @@ pub const fn key_code(key: Key) -> u32 {
         Key::Aux18 => 19,
     }
 }
+
+#[cfg(test)]
+extern crate self as uv98_handheld_app;
 
 #[cfg(test)]
 mod tests;

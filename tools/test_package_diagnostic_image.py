@@ -8,7 +8,9 @@ import tempfile
 import unittest
 import zipfile
 
+from flash_budget import BASELINE, read_baseline
 import check_elf
+from check_settings_journal import JOURNAL_START
 from export_diagnostic_image import VERSION, export
 import package_diagnostic_image as packaging
 from test_check_elf import diagnostic_fixture
@@ -257,6 +259,25 @@ class PackageTests(unittest.TestCase):
         self.assertIn("not full TX reachability proof", runtime["validation_scope"])
         self.assertNotIn("CH002", runtime["candidate_scope"])
 
+    def test_channel_gate_recomputes_headroom_and_rejects_package_before_creating_outputs(self):
+        self.prepare_channel()
+        for remaining in (4096, 4095):
+            elf = bytearray(policy_fixture(packaging.CHANNEL_TX_POLICY))
+            struct.pack_into("<I", elf, 116 + 12, JOURNAL_START - remaining - 4)
+            self.build(elf)
+            if remaining == 4096:
+                report = packaging.validate_inputs(self.folder, self.root, "channel-tx")["flash_budget"]
+                self.assertEqual(report["remaining_flash_bytes"], remaining)
+                self.assertEqual(report["status"], "passed")
+                self.assertNotIn("flash_cost_vs_baseline_bytes", report)
+                json_write(self.folder / "flash-budget.json", report)
+            else:
+                with self.assertRaisesRegex(ValueError, "4095 bytes before settings journal"):
+                    packaging.package(self.folder, self.root, "channel-tx")
+                self.assertFalse((self.folder / "manifest.json").exists())
+                self.assertFalse((self.folder / "source.zip").exists())
+                self.assertFalse(Path(str(self.folder) + ".zip").exists())
+
     def test_each_profile_rejects_other_compiled_tags_and_feature_sets(self):
         self.channel_source()
         self.source.write_text(self.source.read_text() +
@@ -351,8 +372,8 @@ class PackageTests(unittest.TestCase):
         ) + "\n"
         self.manifest.write_text(valid)
 
-        def build_with_catalogs(*codes):
-            elf = bytearray(policy_fixture())
+        def build_with_catalogs(*codes, policy=packaging.RX_CANDIDATE_POLICY):
+            elf = bytearray(policy_fixture(policy))
             catalog_data = b"".join(catalogs[code] for code in codes)
             elf.extend(catalog_data)
             struct.pack_into("<H", elf, 44, 5)
@@ -386,6 +407,16 @@ class PackageTests(unittest.TestCase):
         self.manifest.write_text(valid.replace('["uv98-handheld-ui/locale-de"]', '["channel-tx"]'))
         with self.assertRaisesRegex(ValueError, "locale feature declarations"):
             packaging.validate_inputs(self.folder, self.root)
+
+        self.channel_source()
+        self.manifest.write_text(valid)
+        build_with_catalogs("en", policy=packaging.CHANNEL_TX_POLICY)
+        self.mutate_json("verification.json", firmware_language="en",
+                         firmware_features=[packaging.CHANNEL_TX_FEATURE, "locale-en"])
+        budget = packaging.validate_inputs(self.folder, self.root, "channel-tx")["flash_budget"]
+        reference = read_baseline(BASELINE)["remaining_flash_bytes"]["en"]
+        self.assertEqual(budget["baseline_remaining_flash_bytes"], reference)
+        self.assertEqual(budget["flash_cost_vs_baseline_bytes"], reference - budget["remaining_flash_bytes"])
 
     def test_channel_package_retains_no_overwrite_and_private_calibration_exclusion(self):
         self.prepare_channel()

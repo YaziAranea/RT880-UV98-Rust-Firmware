@@ -1,0 +1,9 @@
+[package]
+name = "uv98-smart-beacon"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Automatic APRS beacon scheduling and request lifecycle"
+
+[dependencies]
+uv98-gps-nmea = { path = "../gps-nmea" }

@@ -360,6 +360,7 @@ fn coordinate(value: i32, positive: &str, negative: &str) -> Text {
 pub(super) fn utility_page(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     let view = model.view;
     match view.screen {
+        Screen::AprsRx => aprs_rx_page(row, out, &view),
         Screen::Gps => {
             centered(
                 row,
@@ -455,8 +456,73 @@ pub(super) fn utility_page(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
             centered(row, out, 127, 1, target.as_str(), color::ACCENT);
             centered(row, out, 165, 2, label, color::TEXT);
             centered(row, out, 207, 1, help, color::MUTED);
-            centered(row, out, 250, 1, "\x1f109", color::ACCENT);
+            let (auto, ink) = if view.aprs_auto_armed {
+                if view.aprs_auto_available {
+                    ("\x1f189", color::GOOD)
+                } else {
+                    ("\x1f18A", color::WARNING)
+                }
+            } else if !view.aprs_auto_available {
+                ("\x1f18B", color::MUTED)
+            } else if view.can_arm_aprs_auto() {
+                ("* \x1f188", color::ACCENT)
+            } else {
+                ("\x1f188", color::MUTED)
+            };
+            centered(row, out, 250, 1, auto, ink);
         }
         _ => {}
+    }
+}
+
+fn aprs_rx_page(row: u16, out: &mut Row<'_>, view: &View) {
+    let (label, ink) = if view.aprs_rx_available {
+        ("\x1f184", color::GOOD)
+    } else {
+        ("\x1f185", color::MUTED)
+    };
+    centered(row, out, 69, 2, label, ink);
+
+    if view.aprs_rx_count == 0 {
+        centered(row, out, 162, 2, "\x1f186", color::MUTED);
+        return;
+    }
+    rect(row, out, 12, 109, 216, 128, color::PANEL);
+    if (124..131).contains(&row) {
+        let mut position = Text::new();
+        let _ = write!(
+            position,
+            "{} / {}",
+            view.aprs_rx_index + 1,
+            view.aprs_rx_count
+        );
+        centered(row, out, 124, 1, position.as_str(), color::MUTED);
+    }
+    if (145..159).contains(&row) {
+        centered(
+            row,
+            out,
+            145,
+            2,
+            view.aprs_rx_packet.source(),
+            color::ACCENT,
+        );
+    }
+    if (177..231).contains(&row) {
+        let information = view.aprs_rx_packet.information();
+        for (i, line) in information.as_bytes().chunks(16).enumerate() {
+            text(
+                row,
+                out,
+                20,
+                177 + 20 * i as u16,
+                2,
+                core::str::from_utf8(line).unwrap_or(""),
+                color::TEXT,
+            );
+        }
+    }
+    if view.aprs_rx_count > 1 {
+        centered(row, out, 256, 1, "\x1f187", color::MUTED);
     }
 }

@@ -3,7 +3,8 @@
     not(all(feature = "hardware", target_arch = "arm")),
     forbid(unsafe_code)
 )]
-//! Two-page journal for explicitly saved station name, Roger setting and microphone gain.
+//! Two-page journal for explicitly saved station name, Roger setting,
+//! microphone gain and opaque A/B position words.
 //! It uses reserved internal flash. External NOR is outside its address space.
 //! A full firmware update clears the journal.
 
@@ -19,6 +20,9 @@ pub struct Settings {
     pub roger_enabled: bool,
     /// None preserves a legacy record's factory microphone setting.
     pub microphone_gain: Option<u8>,
+    /// Optional opaque per-slot firmware positions, stored in an adjacent
+    /// extension so the legacy 32-byte primary record stays byte-compatible.
+    pub positions: Option<[u32; 2]>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

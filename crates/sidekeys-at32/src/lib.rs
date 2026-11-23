@@ -12,7 +12,7 @@ pub mod engine;
 #[cfg(feature = "hardware")]
 pub mod hardware;
 
-pub use battery::BatteryMonitor;
+pub use battery::{BatteryMonitor, BatterySag};
 pub use capture::{CaptureStats, CaptureTiming, RX_AUDIO_HZ, RX_AUDIO_SAMPLES};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

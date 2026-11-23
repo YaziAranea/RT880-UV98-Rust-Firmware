@@ -171,6 +171,11 @@ impl Gps {
             None
         }
     }
+    pub fn motion_fix(&self, now_ms: u32) -> Option<nmea::MotionFix> {
+        self.parser
+            .motion_snapshot(now_ms, 5_000)
+            .filter(|_| self.enabled)
+    }
     pub fn last_report(&self) -> Option<nmea::Report> {
         self.parser.last_report()
     }

@@ -548,7 +548,15 @@ def check(path):
     require([i.op_str for i in uart_code if i.mnemonic == "bx"] == ["r3"], "UART continuation ABI differs")
     require(not any(i.mnemonic == "bx" and i.op_str != "lr" for i in instructions),
             "pre_init has an unexpected indirect branch")
-    pre_decode = instructions + uart_code
+    # Earlier images expanded these operations directly in each caller.
+    # Only the exact audited stackless helpers can be reached by both paths.
+    shared_code = []
+    for name in ("__diag_rf_off_shared", "__diag_uart_init_shared", "__diag_hick8_shared"):
+        if name in symbols:
+            _, code = disassemble(image, symbols[name])
+            require(not any(i.mnemonic == "bx" for i in code), f"{name} must use direct branches")
+            shared_code.extend(code)
+    pre_decode = instructions + uart_code + shared_code
     cases = [
         ("supported_pid43_four_irq_banks", {}, True, 4, False, False),
         ("supported_pid46_one_irq_bank", {PID: 0x700A3246, ICTR: 0}, True, 1, False, False),
@@ -670,7 +678,7 @@ def check(path):
     terminal_name = "__diag_terminal_fail_stop"
     require(terminal_name in symbols, "missing ASM terminal export")
     terminal_start, terminal = disassemble(image, symbols[terminal_name])
-    terminal_decode = terminal + shared_stop + uart_code
+    terminal_decode = terminal + shared_stop + uart_code + shared_code
     terminal_cases = [
         ("terminal_supported_thread", {}, 0, True, False),
         ("terminal_supported_hardfault", {}, 3, True, False),

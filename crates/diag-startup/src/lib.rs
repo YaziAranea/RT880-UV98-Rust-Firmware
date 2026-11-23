@@ -234,19 +234,12 @@ fn output(
         u32::from(mask),
         if open_drain { u32::from(mask) } else { 0 },
     );
-    modify(io, port + PULL, two_bit_fields(mask, 3), 0);
-    modify(
-        io,
-        port + ODRVR,
-        two_bit_fields(mask, 3),
-        two_bit_fields(mask, 2),
-    );
-    modify(
-        io,
-        port + CFGR,
-        two_bit_fields(mask, 3),
-        two_bit_fields(mask, 1),
-    );
+    let output_mode = two_bit_fields(mask, 1);
+    let stronger_drive = output_mode << 1;
+    let field_mask = output_mode | stronger_drive;
+    modify(io, port + PULL, field_mask, 0);
+    modify(io, port + ODRVR, field_mask, stronger_drive);
+    modify(io, port + CFGR, field_mask, output_mode);
     Ok(())
 }
 
@@ -280,12 +273,7 @@ pub fn low_requests_present(io: &mut impl RegisterIo) -> bool {
         return false;
     }
     for (port, mask) in [(GPIOC, 0x8030u16), (GPIOB, 0x0800), (GPIOF, 0x0100)] {
-        if io.read32(port + ODT) & u32::from(mask) != 0
-            || io.read32(port + CFGR) & two_bit_fields(mask, 3) != two_bit_fields(mask, 1)
-            || io.read32(port + OMODE) & u32::from(mask) != 0
-            || io.read32(port + PULL) & two_bit_fields(mask, 3) != 0
-            || io.read32(port + ODRVR) & two_bit_fields(mask, 3) != two_bit_fields(mask, 2)
-        {
+        if !output_present(io, port, mask, 0) {
             return false;
         }
     }
@@ -293,11 +281,14 @@ pub fn low_requests_present(io: &mut impl RegisterIo) -> bool {
 }
 
 fn output_present(io: &mut impl RegisterIo, port: u32, mask: u16, high: u16) -> bool {
+    let output_mode = two_bit_fields(mask, 1);
+    let stronger_drive = output_mode << 1;
+    let field_mask = output_mode | stronger_drive;
     io.read32(port + ODT) & u32::from(mask) == u32::from(high)
-        && io.read32(port + CFGR) & two_bit_fields(mask, 3) == two_bit_fields(mask, 1)
+        && io.read32(port + CFGR) & field_mask == output_mode
         && io.read32(port + OMODE) & u32::from(mask) == 0
-        && io.read32(port + PULL) & two_bit_fields(mask, 3) == 0
-        && io.read32(port + ODRVR) & two_bit_fields(mask, 3) == two_bit_fields(mask, 2)
+        && io.read32(port + PULL) & field_mask == 0
+        && io.read32(port + ODRVR) & field_mask == stronger_drive
 }
 
 /// Terminal, identity-gated RF shutdown REQUESTS, never electrical RF proof.
@@ -398,6 +389,7 @@ pub fn feed_watchdog(io: &mut impl RegisterIo) -> Result<(), Error> {
     Ok(())
 }
 
+#[inline(never)]
 fn watchdog_poll(
     io: &mut impl RegisterIo,
     address: u32,

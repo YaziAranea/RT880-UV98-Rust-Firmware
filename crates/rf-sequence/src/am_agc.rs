@@ -51,10 +51,10 @@ impl State {
         let mut hold = self.hold.saturating_sub(1);
         if delta > 0 {
             if delta >= 10 {
-                let target = i16::from(TABLE[usize::from(index)].1) - delta + 8;
+                let target = i16::from(GAINS[usize::from(index)]) - delta + 8;
                 while index > 1 {
                     index -= 1;
-                    if i16::from(TABLE[usize::from(index)].1) <= target {
+                    if i16::from(GAINS[usize::from(index)]) <= target {
                         break;
                     }
                 }
@@ -71,7 +71,8 @@ impl State {
         if hold == 0 {
             index = index.saturating_add(1).min(96);
         }
-        let (register13, gain) = TABLE[usize::from(index)];
+        let register13 = REGISTERS[usize::from(index)];
+        let gain = GAINS[usize::from(index)];
         Ok(Update {
             state: State {
                 index,
@@ -189,3 +190,25 @@ pub const TABLE: [(u16, i8); 97] = [
     (0x03df, -2),
     (0x03ff, 0),
 ];
+
+// A tuple takes four bytes on ARM because its register word is aligned.
+// Derive both packed columns at compile time from the same stock table.
+const REGISTERS: [u16; TABLE.len()] = {
+    let mut words = [0; TABLE.len()];
+    let mut i = 0;
+    while i < TABLE.len() {
+        words[i] = TABLE[i].0;
+        i += 1;
+    }
+    words
+};
+
+const GAINS: [i8; TABLE.len()] = {
+    let mut gains = [0; TABLE.len()];
+    let mut i = 0;
+    while i < TABLE.len() {
+        gains[i] = TABLE[i].1;
+        i += 1;
+    }
+    gains
+};

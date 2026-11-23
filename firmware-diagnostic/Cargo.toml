@@ -55,6 +55,7 @@ uv98-handheld-ui = { path = "../crates/handheld-ui" }
 uv98-codeplug = { path = "../crates/codeplug" }
 
 uv98-signaling = { path = "../crates/signaling", features = ["hardware"] }
+uv98-smart-beacon = { path = "../crates/smart-beacon" }
 uv98-gps-at32 = { path = "../crates/gps-at32", features = ["hardware"] }
 
 uv98-calibration = { path = "../crates/calibration" }

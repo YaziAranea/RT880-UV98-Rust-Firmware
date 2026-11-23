@@ -21,8 +21,13 @@ LANGUAGES = ("ru", "en", "de")
 def audit_sources(rows):
     """Catch untranslated literals and invalid IDs in production screen code."""
     lexer = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"', re.S)
-    for filename in ["controller.rs", "render.rs", "utility.rs"]:
-        source = (DIRECTORY.parent / "src" / filename).read_text(encoding="utf-8")
+    sources = [
+        ROOT / "crates/handheld-ui-state/src/controller.rs",
+        *sorted((DIRECTORY.parent / "src").rglob("*.rs")),
+    ]
+    for path in sources:
+        filename = path.name
+        source = path.read_text(encoding="utf-8")
         masked = lexer.sub(lambda match: " " * len(match.group()), source)
         test_spans = []
         start = 0

@@ -3,7 +3,7 @@ mod reply;
 #[path = "../../../firmware-diagnostic/src/signaling.rs"]
 mod signaling;
 
-use signaling::{mdc_config, Sample, TransmitTones};
+use signaling::{mdc_config, Sample, ToneInput, TransmitTones, TxKey};
 use std::{cell::RefCell, convert::Infallible, rc::Rc};
 use uv98_calibration::Calibration;
 use uv98_handheld_ui::controller::{Controller, MdcSettings, RadioName, Slot};
@@ -16,6 +16,14 @@ use uv98_rf_sequence::{TxRequest, Width};
 const MIC_ADC: u16 = 4;
 const TX_DSP: u16 = 2;
 const TX_DONE: u16 = 0x8000;
+
+fn tone_input(key: Option<TxKey>, memory: &[u8]) -> ToneInput<'_> {
+    ToneInput {
+        key,
+        memory,
+        matrix_stable: true,
+    }
+}
 
 struct Chip {
     registers: [u16; 128],
@@ -127,6 +135,10 @@ impl Harness {
     }
 
     fn keyed_with_tone(mode: u8, tone: u16) -> Self {
+        Self::keyed_with_limit(mode, tone, TX_TIMEOUT_MS)
+    }
+
+    fn keyed_with_limit(mode: u8, tone: u16, timeout_ms: u32) -> Self {
         let bus = Bus::new();
         let mut h = Self {
             radio: Runtime::new(bus.clone()),
@@ -143,7 +155,7 @@ impl Harness {
         h.radio.cold_start(&cal, h.now).unwrap();
         h.complete_configuration(false, State::Off);
         h.radio
-            .transmit_with_mdc(
+            .transmit_with_mdc_limit(
                 &cal,
                 TxRequest {
                     frequency_10hz: 14_550_000,
@@ -157,6 +169,7 @@ impl Harness {
                 h.now,
                 true,
                 h.config,
+                timeout_ms,
             )
             .unwrap();
         h.complete_configuration(true, State::Transmitting);
@@ -175,19 +188,37 @@ impl Harness {
     }
 
     fn tick(&mut self, elapsed: u32, held: bool, allow_tail: bool, key: Option<u8>) -> Poll {
+        self.tick_tones(
+            elapsed,
+            held,
+            allow_tail,
+            tone_input(key.map(TxKey::Dtmf), &[]),
+        )
+    }
+
+    fn tick_tones(
+        &mut self,
+        elapsed: u32,
+        held: bool,
+        allow_tail: bool,
+        tones: ToneInput<'_>,
+    ) -> Poll {
         self.now += elapsed;
         let keep = self
             .foreground
             .step(
                 &mut self.radio,
-                self.now,
-                held,
-                allow_tail,
-                key,
+                Sample {
+                    now: self.now,
+                    voice_held: held,
+                    allow_tail,
+                },
+                tones,
                 self.config,
                 self.name,
             )
             .unwrap();
+        self.foreground.applied_at(self.now);
         self.radio.tick(self.now, keep).unwrap()
     }
 
@@ -350,6 +381,179 @@ fn mdc_off_releases_active_dtmf_without_an_end_burst() {
 }
 
 #[test]
+fn toneburst_keys_once_per_real_edge_and_release_keeps_tx_off() {
+    let mut h = Harness::keyed(0);
+    assert_eq!(signaling::keypad(0x2000), Some(TxKey::Toneburst));
+    assert_eq!(signaling::keypad(0x4000), Some(TxKey::Memory));
+    for chord in [0x2001, 0x6000, 0x1111, 0x8888, 0x1000, 0x8000] {
+        assert_eq!(signaling::keypad(chord), None);
+    }
+    let up = tone_input(Some(TxKey::Toneburst), &[]);
+    h.tick_tones(1, true, false, up);
+    h.tick_tones(20, true, false, up);
+    assert_eq!(h.bus.reg(0x70) & 0x8080, 0);
+    h.tick(1, true, false, None);
+    h.tick(12, true, false, None);
+    h.tick_tones(1, true, false, up);
+    h.tick_tones(11, true, false, up);
+    assert_eq!(h.bus.reg(0x70) & 0x8080, 0);
+    h.tick_tones(1, true, false, up);
+    assert_eq!(h.bus.reg(0x71), 18_068);
+    assert_eq!(h.bus.reg(0x72), 0);
+    assert_eq!(h.bus.reg(0x70), 0xd300);
+    assert_eq!(h.bus.reg(0x30) & MIC_ADC, 0);
+    h.tick_tones(499, true, false, up);
+    assert_eq!(h.bus.reg(0x70), 0xd300);
+    h.tick_tones(1, true, false, up);
+    h.tick_tones(600, true, false, up);
+    assert_eq!(h.bus.reg(0x70) & 0x8080, 0);
+    assert_eq!(h.bus.reg(0x30) & MIC_ADC, MIC_ADC);
+    h.tick(1, true, false, None);
+    h.tick(12, true, false, None);
+    h.tick_tones(1, true, false, up);
+    h.tick_tones(12, true, false, up);
+    let before = h.bus.0.borrow().writes.len();
+    assert!(h.tick(1, false, false, None).tx_ended);
+    h.assert_off();
+    assert!(!h.bus.0.borrow().writes[before..]
+        .iter()
+        .any(|&(r, w)| r == 0x30 && w & MIC_ADC != 0));
+}
+
+#[test]
+fn memory_sends_both_identical_digits_and_preserves_mute_during_the_gap() {
+    let mut h = Harness::keyed(0);
+    h.tick(1, true, false, None);
+    h.tick(12, true, false, None);
+    let memory = tone_input(Some(TxKey::Memory), b"00");
+    h.tick_tones(1, true, false, memory);
+    h.tick_tones(12, true, false, memory);
+    assert_eq!(h.bus.reg(0x70), 0xd3d3);
+    assert_eq!(h.bus.reg(0x30) & MIC_ADC, 0);
+    h.tick(100, true, false, None);
+    assert_eq!(h.bus.reg(0x70) & 0x8080, 0);
+    assert_eq!(h.bus.reg(0x30) & MIC_ADC, 0);
+    h.tick(69, true, false, None);
+    assert_eq!(h.bus.reg(0x70) & 0x8080, 0);
+    h.tick(1, true, false, None);
+    assert_eq!(h.bus.reg(0x70), 0xd3d3);
+    h.tick(100, true, false, None);
+    assert_eq!(h.bus.reg(0x70) & 0x8080, 0);
+    assert_eq!(h.bus.reg(0x30) & MIC_ADC, 0);
+    h.tick(1, true, false, None);
+    assert_eq!(h.bus.reg(0x30) & MIC_ADC, MIC_ADC);
+    assert_eq!(
+        h.bus
+            .0
+            .borrow()
+            .writes
+            .iter()
+            .filter(|&&(reg, word)| (reg, word) == (0x70, 0xd3d3))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn uncertain_matrix_does_not_start_a_new_mark_and_tot_still_stops_playback() {
+    let memory = tone_input(Some(TxKey::Memory), b"12");
+    let mut h = Harness::keyed(0);
+    h.tick(1, true, false, None);
+    h.tick(12, true, false, None);
+    h.tick_tones(1, true, false, memory);
+    h.tick_tones(12, true, false, memory);
+    assert_eq!(h.bus.reg(0x70), 0xd3d3);
+    let uncertain = ToneInput {
+        matrix_stable: false,
+        ..tone_input(None, &[])
+    };
+    h.tick_tones(1, true, false, uncertain);
+    assert_eq!(h.bus.reg(0x70), 0xd3d3);
+    h.tick_tones(99, true, false, uncertain);
+    assert_eq!(h.bus.reg(0x70) & 0x8080, 0);
+    h.tick(1, true, false, None);
+    h.tick_tones(80, true, false, uncertain);
+    assert_eq!(h.bus.reg(0x70) & 0x8080, 0);
+    assert_eq!(h.bus.reg(0x30) & MIC_ADC, 0);
+    let before = h.bus.0.borrow().writes.len();
+    assert!(h.tick(TX_TIMEOUT_MS, false, false, None).tx_ended);
+    h.assert_off();
+    assert!(!h.bus.0.borrow().writes[before..]
+        .iter()
+        .any(|&(r, w)| r == 0x30 && w & MIC_ADC != 0));
+}
+
+#[test]
+fn shorter_operator_limit_cuts_off_dtmf_without_starting_the_mdc_tail() {
+    let mut h = Harness::keyed_with_limit(2, 0, 10_000);
+    let expires = h.radio.tx_timer().unwrap().start_ms() + 10_000;
+    h.tick(expires - h.now - 100, true, false, None);
+    h.tick(12, true, false, None);
+    let memory = tone_input(Some(TxKey::Memory), b"12");
+    h.tick_tones(1, true, false, memory);
+    h.tick_tones(12, true, false, memory);
+    assert_eq!(h.bus.reg(0x70), 0xd3d3);
+    let poll = h.tick(expires - h.now, false, false, None);
+    assert!(poll.tx_timed_out && poll.tx_ended);
+    assert_eq!(h.bus.fifo_words(), 0);
+    h.assert_off();
+}
+
+#[test]
+fn a_new_tone_or_end_burst_is_not_started_at_the_deadline_margin() {
+    let mut h = Harness::keyed_with_limit(2, 0, 10_000);
+    let expires = h.radio.tx_timer().unwrap().start_ms() + 10_000;
+    h.tick(expires - h.now - 70, true, false, None);
+    h.tick(12, true, false, None);
+    let up = tone_input(Some(TxKey::Toneburst), &[]);
+    h.tick_tones(26, true, false, up);
+    let poll = h.tick_tones(12, true, false, up);
+    assert_eq!(poll.state, State::Transmitting);
+    assert_eq!(h.bus.reg(0x70) & 0x8080, 0);
+    assert!(h.tick(18, false, true, None).tx_ended);
+    assert_eq!(h.bus.fifo_words(), 0);
+    h.assert_off();
+}
+
+#[test]
+fn a_clean_release_during_toneburst_stops_the_tone_before_mdc_tail() {
+    let mut h = Harness::keyed(2);
+    h.tick(1, true, false, None);
+    h.tick(12, true, false, None);
+    let up = tone_input(Some(TxKey::Toneburst), &[]);
+    h.tick_tones(1, true, false, up);
+    h.tick_tones(12, true, false, up);
+    assert_eq!(h.bus.reg(0x70), 0xd300);
+    let before = h.bus.0.borrow().writes.len();
+    let mut at = h.now + 1;
+    let first = Sample {
+        now: at,
+        voice_held: false,
+        allow_tail: true,
+    };
+    let keep = h
+        .foreground
+        .step_pass(
+            &mut h.radio,
+            first,
+            tone_input(None, &[]),
+            h.config,
+            h.name,
+            || {
+                at += 1;
+                Some(Sample { now: at, ..first })
+            },
+        )
+        .unwrap();
+    assert!(keep);
+    assert_eq!(h.bus.0.borrow().writes[before], (0x70, 0));
+    h.now = at;
+    h.radio.tick(h.now, keep).unwrap();
+    h.advance_until_air(false, true);
+    assert_eq!(h.bus.fifo_words(), 11);
+}
+
+#[test]
 fn stock_name_tail_sends_the_original_fifo_words_once_after_clean_release() {
     let name = RadioName::from_payload(*b"AZ QX R0ABC\xFF\xFF\xFF\xFF\xFF").unwrap();
     // Numeric PTT-ID end is configured too. The name takes that end slot.
@@ -491,11 +695,18 @@ fn foreground_release_batches_name_before_deadline_with_a_tone_qualified_peer() 
         let first = observe(at);
         let keep = h
             .foreground
-            .step_pass(&mut h.radio, first, None, h.config, h.name, || {
-                // A fresh guard and one operation take 1ms in this model.
-                at += 1;
-                Some(observe(at))
-            })
+            .step_pass(
+                &mut h.radio,
+                first,
+                tone_input(None, &[]),
+                h.config,
+                h.name,
+                || {
+                    // A fresh guard and one operation take 1ms in this model.
+                    at += 1;
+                    Some(observe(at))
+                },
+            )
             .unwrap();
         assert!(keep);
         h.now = at;
@@ -531,16 +742,23 @@ fn fresh_guard_inside_a_name_slice_cancels_before_modem_arm() {
         };
         let keep = h
             .foreground
-            .step_pass(&mut h.radio, first, None, h.config, h.name, || {
-                h.now += 1;
-                let allow_tail = h.bus.fifo_words() < 8;
-                failed_guard |= !allow_tail;
-                Some(Sample {
-                    now: h.now,
-                    voice_held: false,
-                    allow_tail,
-                })
-            })
+            .step_pass(
+                &mut h.radio,
+                first,
+                tone_input(None, &[]),
+                h.config,
+                h.name,
+                || {
+                    h.now += 1;
+                    let allow_tail = h.bus.fifo_words() < 8;
+                    failed_guard |= !allow_tail;
+                    Some(Sample {
+                        now: h.now,
+                        voice_held: false,
+                        allow_tail,
+                    })
+                },
+            )
             .unwrap();
         let result = h.radio.tick(h.now, keep).unwrap();
         if result.tx_ended {

@@ -1,5 +1,6 @@
 extern crate std;
 mod render_batch;
+mod scan_coordinator;
 mod shortwave_redraw;
 
 use super::*;
@@ -331,6 +332,143 @@ fn menu(app: &mut App<Memory, Panel, NoDelay>, item: controller::MenuItem) -> Up
 }
 
 #[test]
+fn restores_b_vfo_and_a_memory_with_a_usable_peer_before_any_slot_switch() {
+    let mut memory = Memory::new();
+    add_channel(&mut memory, 7, 43_350_000);
+    add_zone(&mut memory, 0, b"Local", &[7, 0]);
+    let original = memory.bytes.clone();
+    let mut app = app(memory, PRESERVED_CALIBRATION_SHA256);
+    app.start(0).unwrap();
+    let words = [0xc000_0808, 43_700_000];
+    app.restore_positions(words).unwrap();
+    let view = app.status().view;
+    assert_eq!(view.active_slot, Slot::B);
+    assert_eq!(view.mode, Mode::Vfo);
+    assert_eq!(view.vfo_10hz, 43_700_000);
+    let (peer, record) = app.peer_radio_selection();
+    assert_eq!(peer.zone, Some(0));
+    assert_eq!(peer.channel, Some(7));
+    assert_eq!(record.unwrap().rx_frequency_code(), 43_350_000);
+    assert_eq!(app.positions(), words);
+    app.select_slot(Slot::A).unwrap();
+    assert_eq!(app.status().view.channel, Some(7));
+    assert_eq!(app.status().view.zone, Some(0));
+    let (memory, _) = app.into_parts();
+    assert_eq!(memory.bytes, original);
+    assert!(memory.commands.iter().all(|&c| c == 3));
+}
+
+#[test]
+fn restore_rebinds_a_deleted_channel_and_rejects_a_missing_zone() {
+    let mut memory = Memory::new();
+    add_channel(&mut memory, 7, 43_350_000);
+    add_zone(&mut memory, 0, b"Local", &[7, 0]);
+    let mut app = app(memory, PRESERVED_CALIBRATION_SHA256);
+    app.start(0).unwrap();
+    // Slot A names the existing zone and a deleted memory. Slot B names a
+    // deleted zone but still has an active memory in the global catalog.
+    app.restore_positions([0x4000_0809, 0x4000_1008]).unwrap();
+    assert_eq!(app.status().view.active_slot, Slot::A);
+    assert_eq!(app.status().view.zone, Some(0));
+    assert_eq!(app.status().view.channel, Some(7));
+    let (peer, channel) = app.peer_radio_selection();
+    assert_eq!(peer.zone, None);
+    assert_eq!(peer.channel, Some(7));
+    assert_eq!(channel.unwrap().rx_frequency_code(), 43_350_000);
+}
+
+#[test]
+fn restore_peer_empty_zone_does_not_warn_about_the_active_slot() {
+    let mut memory = Memory::new();
+    add_zone(&mut memory, 0, b"Empty", &[]);
+    let mut app = app(memory, PRESERVED_CALIBRATION_SHA256);
+    app.start(0).unwrap();
+    app.restore_positions([0x4000_0001, 0x4000_0800]).unwrap();
+    assert_eq!(app.status().view.notice, controller::Notice::None);
+    assert_eq!(app.status().view.channel, Some(0));
+    assert_eq!(app.peer_radio_selection().0.zone, Some(0));
+    assert!(app.peer_radio_selection().1.is_none());
+}
+
+#[test]
+fn rx_tone_search_applies_only_confirmed_rx_to_the_source_and_keeps_nor_unchanged() {
+    use uv98_radio_runtime::policy;
+    let mut memory = Memory::new();
+    add_channel(&mut memory, 1, 43_350_000);
+    memory.bytes[0x4004..0x4006].copy_from_slice(&0x1455_u16.to_le_bytes());
+    memory.bytes[0x400e..0x4010].copy_from_slice(&0x1302_u16.to_le_bytes());
+    let original = memory.bytes.clone();
+    let mut app = app(memory, PRESERVED_CALIBRATION_SHA256);
+    app.start(0).unwrap();
+    let view = app.status().view;
+    let source = RxToneSource::Channel {
+        slot: view.active_slot,
+        channel: 0,
+    };
+    let cfg = app.radio_config().unwrap();
+    let settings = policy::Settings {
+        squelch: cfg.squelch,
+        mic_gain: view.microphone_gain,
+        fm_volume: cfg.fm_volume,
+        am_volume: cfg.am_volume,
+        squelch_delay: cfg.squelch_delay,
+    };
+    let original_profile =
+        policy::profile(view, app.selected_channel(), settings, Default::default()).unwrap();
+    assert_eq!(original_profile.receive.unwrap().tone, 0x1455);
+    assert_eq!(original_profile.transmit.unwrap().tone, 0x1302);
+    assert_eq!(
+        menu(&mut app, controller::MenuItem::RxToneSearch).request,
+        Some(Request::StartRxToneSearch { source })
+    );
+    assert_eq!(event(&mut app, InputEvent::Short(Key::Menu)).request, None);
+    app.set_rx_tone_search_result(Some(0x3013)).unwrap();
+    assert_eq!(event(&mut app, InputEvent::Short(Key::Exit)).request, None);
+    assert_eq!(app.rx_tone_override(app.status().view), None);
+
+    for (down, up) in [
+        (InputEvent::Ptt(true), InputEvent::Ptt(false)),
+        (InputEvent::PttB(true), InputEvent::PttB(false)),
+    ] {
+        menu(&mut app, controller::MenuItem::RxToneSearch);
+        app.set_rx_tone_search_result(Some(0x3013)).unwrap();
+        let update = event(&mut app, down);
+        assert!(!update.ptt_tx_requested && !update.cancel_temporary);
+        assert!(app.status().view.rx_tone_search.is_none());
+        assert!(!event(&mut app, down).ptt_tx_requested);
+        event(&mut app, up);
+        assert_eq!(app.rx_tone_override(app.status().view), None);
+    }
+
+    menu(&mut app, controller::MenuItem::RxToneSearch);
+    app.set_rx_tone_search_result(Some(0x3013)).unwrap();
+    assert_eq!(
+        event(&mut app, InputEvent::Short(Key::Menu)).request,
+        Some(Request::ApplyRxToneOverride {
+            source,
+            tone_raw: 0x3013
+        })
+    );
+    let confirmed = original_profile.with_rx_tone_override(app.rx_tone_override(app.status().view));
+    assert_eq!(confirmed.receive.unwrap().tone, 0x3013);
+    assert_eq!(confirmed.receive.unwrap().tone_mode, 0);
+    assert_eq!(confirmed.transmit, original_profile.transmit);
+    assert_eq!(app.selected_channel().unwrap().rx_tone_raw(), 0x1455);
+    assert_eq!(app.rx_tone_override(app.peer_radio_selection().0), None);
+    let mut different = app.status().view;
+    different.reverse = true;
+    assert_eq!(app.rx_tone_override(different), None);
+    different.reverse = false;
+    different.channel = Some(1);
+    assert_eq!(app.rx_tone_override(different), None);
+    different.mode = Mode::Vfo;
+    assert_eq!(app.rx_tone_override(different), None);
+    let (memory, _) = app.into_parts();
+    assert_eq!(memory.bytes, original);
+    assert!(memory.commands.iter().all(|&c| c == 3));
+}
+
+#[test]
 fn cb_peer_selection_keeps_b_unchanged_and_restores_a_channel_from_nor_read_only() {
     let mut memory = Memory::new();
     add_channel(&mut memory, 1, 43_350_000);
@@ -577,6 +715,130 @@ fn scan_skip_keeps_zone_order_wraps_and_leaves_nor_intact() {
     assert_eq!(app.next_catalog_index(Some(20), true), Some(0));
     scanner.start(scan::Target::Channels, now).unwrap();
     assert_eq!(app.next_scan_channel(scanner.skipped_channels()), Some(0));
+    let (memory, _) = app.into_parts();
+    assert_eq!(memory.bytes, original);
+    assert!(memory.commands.iter().all(|command| *command == 3));
+}
+
+#[test]
+fn zone_priority_scan_keeps_open_audio_and_star_skip_until_restart() {
+    use uv98_radio_runtime::{scan, State as RadioState};
+
+    type TestApp = App<Memory, Panel, NoDelay>;
+    fn tune(
+        app: &mut TestApp,
+        order: &mut scan::ZoneOrder,
+        scanner: &mut scan::Scheduler,
+        forced: bool,
+        now: u32,
+        expected: u16,
+    ) {
+        let skipped = scanner.skipped_channels();
+        let next = order.next(
+            app.status.view.channel,
+            skipped,
+            forced,
+            |after, exclude| app.next_scan_channel_after(after, skipped, exclude),
+        );
+        assert_eq!(next, Some(expected));
+        app.select_scan_channel(expected).unwrap();
+        assert_eq!(app.status.view.channel, next);
+        let ticket = scanner.status().ticket.unwrap();
+        assert_eq!(
+            scanner.tune_ack(ticket, now, RadioState::Receiving),
+            Ok(true)
+        );
+        app.acknowledge_scan_started().unwrap();
+        app.set_scan_paused(scanner.paused()).unwrap();
+    }
+
+    let mut memory = Memory::new();
+    add_channel(&mut memory, 2, 43_350_000);
+    add_channel(&mut memory, 7, 43_375_000);
+    add_channel(&mut memory, 20, 43_400_000);
+    // The zone order deliberately differs from channel numbering.
+    add_zone(&mut memory, 0, b"Local", &[20, 0, 7, 2]);
+    let original = memory.bytes.clone();
+    let mut app = app(memory, PRESERVED_CALIBRATION_SHA256);
+    app.start(0).unwrap();
+    menu(&mut app, controller::MenuItem::Zones);
+    event(&mut app, InputEvent::Short(Key::Down));
+    event(&mut app, InputEvent::Short(Key::Menu));
+    assert_eq!(app.status.view.channel, Some(20));
+    assert_eq!(
+        menu(&mut app, controller::MenuItem::ScanPriority).request,
+        None
+    );
+    assert_eq!(app.scan_zone_priority(), None);
+    event(&mut app, InputEvent::Short(Key::Down));
+    event(&mut app, InputEvent::Short(Key::Menu));
+    assert_eq!(app.scan_zone_priority(), Some(20));
+
+    let start = event(&mut app, InputEvent::Hold(Key::Digit3));
+    assert_eq!(start.request, Some(Request::StartScan));
+    let mut scanner = scan::Scheduler::new();
+    let mut order =
+        scan::ZoneOrder::new(app.scan_zone_priority().unwrap(), app.status.view.channel);
+    assert_eq!(
+        scanner.start(scan::Target::Channels, 0),
+        Ok(scan::Action::NextChannel)
+    );
+    tune(&mut app, &mut order, &mut scanner, false, 1, 0);
+    for t in [10, 1_000, 20_000] {
+        assert_eq!(scanner.tick(t, true), Ok(scan::Action::None));
+        assert_eq!(app.status.view.channel, Some(0));
+    }
+    assert!(scanner.paused());
+    assert_eq!(scanner.tick(20_100, false), Ok(scan::Action::None));
+    assert_eq!(
+        scanner.tick(20_100 + scan::RESUME_MS - 1, false),
+        Ok(scan::Action::None)
+    );
+    assert_eq!(
+        scanner.tick(20_100 + scan::RESUME_MS, false),
+        Ok(scan::Action::NextChannel)
+    );
+    tune(&mut app, &mut order, &mut scanner, false, 20_601, 20);
+
+    assert_eq!(scanner.tick(20_610, true), Ok(scan::Action::None));
+    app.set_scan_paused(scanner.paused()).unwrap();
+    let skip = event(&mut app, InputEvent::Short(Key::Star));
+    assert_eq!(skip.request, Some(Request::SkipScanTarget));
+    assert!(!skip.ptt_tx_requested);
+    assert_eq!(
+        scanner.skip_current(20_611, app.status.view.channel),
+        Ok(scan::Action::NextChannel)
+    );
+    tune(&mut app, &mut order, &mut scanner, true, 20_612, 7);
+    assert_eq!(
+        scanner.tick(20_612 + scan::DWELL_MS, false),
+        Ok(scan::Action::NextChannel)
+    );
+    tune(&mut app, &mut order, &mut scanner, false, 20_763, 2);
+
+    let stop = event(&mut app, InputEvent::Ptt(true));
+    assert_eq!(stop.request, Some(Request::StopScan));
+    assert!(!stop.ptt_tx_requested);
+    assert_eq!(scanner.cancel(), scan::Action::Stop);
+    app.acknowledge_scan_stopped().unwrap();
+    event(&mut app, InputEvent::Ptt(false));
+    assert_eq!(
+        event(&mut app, InputEvent::Hold(Key::Digit3)).request,
+        Some(Request::StartScan)
+    );
+    assert_eq!(app.scan_zone_priority(), Some(20));
+    let mut order = scan::ZoneOrder::new(20, app.status.view.channel);
+    assert_eq!(
+        scanner.start(scan::Target::Channels, 21_000),
+        Ok(scan::Action::NextChannel)
+    );
+    tune(&mut app, &mut order, &mut scanner, false, 21_001, 0);
+    assert_eq!(
+        scanner.tick(21_001 + scan::DWELL_MS, false),
+        Ok(scan::Action::NextChannel)
+    );
+    tune(&mut app, &mut order, &mut scanner, false, 21_152, 20);
+
     let (memory, _) = app.into_parts();
     assert_eq!(memory.bytes, original);
     assert!(memory.commands.iter().all(|command| *command == 3));
