@@ -569,9 +569,19 @@ mod tests {
     fn high_pass_bit_and_soft_mute_attenuation_are_independent() {
         for high_pass in [false, true] {
             for soft_mute in [false, true] {
-                let settings = Processing { filter: AmFilter::Voice3k, high_pass, soft_mute };
-                assert_eq!(settings.filter_property(), if high_pass { 0x102 } else { 2 });
-                assert_eq!(settings.attenuation_property(), if soft_mute { 8 } else { 0 });
+                let settings = Processing {
+                    filter: AmFilter::Voice3k,
+                    high_pass,
+                    soft_mute,
+                };
+                assert_eq!(
+                    settings.filter_property(),
+                    if high_pass { 0x102 } else { 2 }
+                );
+                assert_eq!(
+                    settings.attenuation_property(),
+                    if soft_mute { 8 } else { 0 }
+                );
             }
         }
     }

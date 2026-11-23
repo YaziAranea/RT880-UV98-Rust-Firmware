@@ -238,8 +238,16 @@ pub(super) fn shortwave_processing_label(row: u16, out: &mut Row<'_>, view: View
         let _ = write!(
             label,
             "\x1f009 {filter} \x1f08F {}  HPF {}",
-            if view.shortwave_soft_mute { "ON" } else { "OFF" },
-            if view.shortwave_high_pass { "ON" } else { "OFF" }
+            if view.shortwave_soft_mute {
+                "ON"
+            } else {
+                "OFF"
+            },
+            if view.shortwave_high_pass {
+                "ON"
+            } else {
+                "OFF"
+            }
         );
     } else {
         let _ = label.write_str("\x1f137");
@@ -488,7 +496,11 @@ fn aprs_rx_page(row: u16, out: &mut Row<'_>, view: &View) {
             let _ = write!(line, "B {}  OK {}", s.bytes, s.packets);
             270
         } else {
-            let _ = write!(line, "CRC {} GAP {} OV {}", s.checksum_errors, s.poll_gaps, s.overruns);
+            let _ = write!(
+                line,
+                "CRC {} GAP {} OV {}",
+                s.checksum_errors, s.poll_gaps, s.overruns
+            );
             282
         };
         centered(row, out, y, 1, line.as_str(), color::MUTED);

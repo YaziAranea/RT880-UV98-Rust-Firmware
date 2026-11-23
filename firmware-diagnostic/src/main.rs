@@ -3064,9 +3064,9 @@ fn main() -> ! {
                             // side sources and the matrix before opening any gate.
                             let sides_clear =
                                 side.sample().is_ok_and(|sample| ptt::side_idle(sample.raw));
-                            let keys_clear = keys.guard_scan().is_ok_and(|sample| {
-                                sample.matrix_clear() && !sample.ptt_pressed()
-                            });
+                            let keys_clear = keys
+                                .guard_scan()
+                                .is_ok_and(|sample| sample.matrix_clear() && !sample.ptt_pressed());
                             let commit_at = sample_time(&mut time);
                             if !session.confirm_start(commit_at, carrier, sides_clear && keys_clear)
                             {

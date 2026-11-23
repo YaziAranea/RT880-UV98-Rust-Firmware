@@ -323,7 +323,9 @@ fn manual_beacon_explains_disabled_squelch_before_touching_modem_or_rf() {
     assert!(!h.radio.carrier_present().unwrap());
     h.beacon.refresh(true, false, h.now);
     assert_eq!(h.beacon.status(), AprsStatus::SquelchRequired);
-    assert!(!h.beacon.request(&h.calibration, h.profile, Some(FIX), h.now, false));
+    assert!(!h
+        .beacon
+        .request(&h.calibration, h.profile, Some(FIX), h.now, false));
     assert_eq!(h.beacon.status(), AprsStatus::SquelchRequired);
     assert!(!h.beacon.active());
     assert!(!h.beacon.take_finished());

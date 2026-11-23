@@ -299,7 +299,10 @@ mod tests {
             let mut session = Session::arm(a, b, Slot::A).unwrap();
             assert!(!session.confirm_start(0, Carrier::Open, true));
             assert_eq!(session.tick(1, Some(Carrier::Closed)), Action::None);
-            assert_eq!(session.tick(2, Some(Carrier::Open)), Action::Start(b.transmit.unwrap()));
+            assert_eq!(
+                session.tick(2, Some(Carrier::Open)),
+                Action::Start(b.transmit.unwrap())
+            );
             assert_eq!(session.confirm_start(12, carrier, input_clear), commit);
             assert_eq!(session.disarmed(), disarmed);
             if disarmed {

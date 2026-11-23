@@ -4103,11 +4103,16 @@ mod tests {
         ui.view.screen = Screen::Shortwave;
         ui.view.shortwave_mode = ShortwaveMode::Am;
         for (key, soft_mute, high_pass) in [
-            (Key::Digit3, false, true), (Key::Digit2, true, true),
-            (Key::Digit3, true, false), (Key::Digit2, false, false),
+            (Key::Digit3, false, true),
+            (Key::Digit2, true, true),
+            (Key::Digit3, true, false),
+            (Key::Digit2, false, false),
         ] {
             ui.handle(InputEvent::Hold(key), &bitmap);
-            assert_eq!((ui.view.shortwave_soft_mute, ui.view.shortwave_high_pass), (soft_mute, high_pass));
+            assert_eq!(
+                (ui.view.shortwave_soft_mute, ui.view.shortwave_high_pass),
+                (soft_mute, high_pass)
+            );
         }
     }
 
