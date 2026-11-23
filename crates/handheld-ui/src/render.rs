@@ -2715,6 +2715,7 @@ fn notice_label(value: Notice) -> Option<&'static str> {
         Notice::ScanPrioritySet => "\x1f177",
         Notice::ScanPriorityCleared => "\x1f178",
         Notice::ScanPriorityUnavailable => "\x1f179",
+        Notice::ScanChannelExcluded => "\x1f18E",
         Notice::ScanPriorityStopScan => "\x1f17A",
     })
 }
@@ -4120,6 +4121,7 @@ mod tests {
                 Notice::ScanPrioritySet,
                 Notice::ScanPriorityCleared,
                 Notice::ScanPriorityUnavailable,
+                Notice::ScanChannelExcluded,
             ] {
                 for locked in [false, true] {
                     let mut m = model(screen);
@@ -4320,6 +4322,7 @@ mod tests {
             Notice::ScanPrioritySet,
             Notice::ScanPriorityCleared,
             Notice::ScanPriorityUnavailable,
+            Notice::ScanChannelExcluded,
         ] {
             let mut shown = normal;
             shown.view.notice = notice;

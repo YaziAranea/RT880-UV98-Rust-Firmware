@@ -673,6 +673,7 @@ pub enum Notice {
     ScanPrioritySet,
     ScanPriorityCleared,
     ScanPriorityUnavailable,
+    ScanChannelExcluded,
     ScanPriorityStopScan,
 }
 
@@ -1870,13 +1871,16 @@ impl Controller {
                 && self.selected_cb().is_none()
                 && self.zone_exists(zone)
                 && channel_active(bitmap, channel)
-                && !channel_active(&self.scan_excluded, channel)
                 && self.channel_order().contains(&channel)
         }) else {
             self.view.notice = Notice::ScanPriorityUnavailable;
             return;
         };
 
+        if channel_active(&self.scan_excluded, channel) {
+            self.view.notice = Notice::ScanChannelExcluded;
+            return;
+        }
         let priority = &mut self.zone_priorities[zone as usize];
         if enabled {
             *priority = channel;

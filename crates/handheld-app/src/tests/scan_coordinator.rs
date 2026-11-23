@@ -467,7 +467,7 @@ fn codeplug_exclusions_apply_to_all_zone_and_priority_without_hiding_manual_chan
         menu(&mut app, controller::MenuItem::ScanPriority);
         event(&mut app, InputEvent::Short(Key::Down));
         event(&mut app, InputEvent::Short(Key::Menu));
-        assert_eq!(app.status().view.notice, Notice::ScanPriorityUnavailable);
+        assert_eq!(app.status().view.notice, Notice::ScanChannelExcluded);
         assert_eq!(app.scan_zone_priority(), None);
     }
     event(&mut app, InputEvent::Short(Key::Down));
