@@ -10,6 +10,7 @@ description = "Experimental radio diagnostic image for the related UV98/RT880 bo
 default = []
 upper-exo-tx-trial = []
 channel-tx = []
+voice-keyer = ["dep:uv98-voice-clip", "uv98-radio-runtime/voice-keyer", "uv98-handheld-app/voice-keyer"]
 verbose-faults = []
 # Extra UART key/RX snapshots for diagnostic builds, not LCD data or faults.
 verbose-runtime = []
@@ -25,6 +26,7 @@ test = false
 bench = false
 
 [dependencies]
+uv98-voice-clip = { path = "../crates/voice-clip", optional = true }
 uv98-settings-store = { path = "../crates/settings-store", features = ["hardware"] }
 uv98-spectrum = { path = "../crates/spectrum" }
 cortex-m = { version = "=0.7.7", features = ["critical-section-single-core"] }

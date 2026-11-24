@@ -173,6 +173,46 @@ fn ready() -> (Runtime<Mock>, u32) {
     (r, now)
 }
 
+#[cfg(feature = "voice-keyer")]
+#[test]
+fn voice_keyer_gate_touches_only_the_speaker_after_af_is_muted() {
+    let (mut radio, mut now) = ready();
+    radio.io.events.clear();
+    assert!(radio.signaling_keyer_speaker(true).is_err());
+    assert!(!radio.io.events.contains(&Event::Mute(false)));
+    radio.transmit(&cal(), tx(), now, true).unwrap();
+    pump(&mut radio, &mut now, true);
+    assert_eq!(radio.state(), State::Transmitting);
+    radio.signaling_write(0x47, 0x6040).unwrap();
+    let rf_before = radio.io.words;
+    assert_ne!(rf_before[0x30] & MIC_ADC, 0);
+    radio.io.events.clear();
+    radio.signaling_keyer_speaker(true).unwrap();
+    radio.signaling_keyer_speaker(false).unwrap();
+    assert_eq!(
+        &radio.io.events,
+        &[Event::Read(0x47), Event::Mute(false), Event::Mute(true)]
+    );
+    assert_eq!(radio.io.words, rf_before);
+    assert_eq!(radio.state(), State::Transmitting);
+    radio.tick(now + 1, false).unwrap();
+    assert_eq!(radio.state(), State::Off);
+    assert!(radio.io.muted);
+}
+
+#[cfg(feature = "voice-keyer")]
+#[test]
+fn voice_keyer_cannot_open_the_speaker_after_ptt_releases_during_setup() {
+    let (mut radio, now) = ready();
+    radio.transmit(&cal(), tx(), now, true).unwrap();
+    assert_eq!(radio.state(), State::Configuring);
+    radio.io.events.clear();
+    radio.tick(now + 1, false).unwrap();
+    assert_eq!(radio.state(), State::Off);
+    assert!(radio.signaling_keyer_speaker(true).is_err());
+    assert!(!radio.io.events.contains(&Event::Mute(false)));
+}
+
 #[test]
 fn rx_tone_search_arms_the_detector_with_tx_off_and_restores_the_rx_tone() {
     let (mut radio, now) = ready();

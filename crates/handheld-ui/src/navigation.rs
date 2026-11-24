@@ -515,6 +515,8 @@ pub fn shortcut_label(action: ShortcutAction) -> &'static str {
         ShortcutAction::Crossband => "\x1f097",
         ShortcutAction::DualWatch => "DUAL WATCH A/B",
         ShortcutAction::Cb => cb_label(),
+        #[cfg(feature = "voice-keyer")]
+        ShortcutAction::VoiceCall => "\x1f18F",
     }
 }
 
@@ -523,7 +525,7 @@ pub(super) fn shortcuts(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     let start = menu_start(index);
     if let Some((offset, y)) = list_row(row) {
         let item = start + offset;
-        if let Some(&action) = model.view.bindings.get(item) {
+        if let Some(action) = model.view.shortcut_at(item) {
             let selected = item == usize::from(index);
             item_background(row, out, y, selected);
             let mut number = Text::new();

@@ -6,7 +6,7 @@
 
 This guide covers first-time preparation of a UV-98 Plus / the investigated RT-880 platform. **Read the original data while stock firmware is installed. Choose firmware only after checking compatibility.** You can complete the backup without installing Rust firmware.
 
-R54 offers separate RU, EN and DE BINs. A full firmware write clears the settings journal, including the saved A/B position. [Release page](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r54) · [Engineering audit and bench plan (Russian)](../AUDIT-R54.ru.md)
+R57 offers separate RU, EN and DE BINs. A full firmware write clears the settings journal, including the saved A/B position. [Release page](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r57) · [Set up the R57 voice key](../RELEASE-NOTES-R57.md#english)
 
 ## 1. Prepare the radio and a folder
 
@@ -15,7 +15,7 @@ R54 offers separate RU, EN and DE BINs. A full firmware write clears the setting
 3. Use the stock CPS for your model to read the radio and save its original `.880dmf` or `.98pdmf` file. Keep an existing original such as `999.880dmf` unchanged.
 4. Close the stock CPS, Radio Tuning Software and other programs using the cable. Before the first read in our CPS, power the radio off for 3 seconds, then start it normally again.
 5. Create a folder such as `Documents/UV98-backup-2026-11-16`. Suggested subfolders: `01-original`, `02-calibration`, `03-nor`, `04-settings`, `05-recovery`. Put the original CPS file in `01-original`.
-6. Extract [CPS 0.8.1 for Windows](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/UV98-CPS-0.8.1.zip) or the [complete R54 package](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/R54-RT880-UV98.zip). Keep `libunwind.dll` beside `UV98-CPS.exe`. Run CPS, choose **English** in **Язык / Language / Sprache**, then open **Backups**. Select the actual cable COM port using **Refresh list → Available ports**. Old port numbers in screenshots and logs may differ.
+6. Extract [CPS 0.11.0 for Windows](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-CPS-0.11.0.zip) or the [complete R57 package](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/R57-RT880-UV98.zip). Keep `libunwind.dll` beside `UV98-CPS.exe`. Run CPS, choose **English** in **Язык / Language / Sprache**, then open **Backups**. Select the actual cable COM port using **Refresh list → Available ports**. Old port numbers in screenshots and logs may differ.
 
 The toolbar language selector is always visible. All eight tabs and existing status messages switch immediately and unsaved edits stay in place. CPS remembers the selection in your Windows user profile. File dialog titles and filters follow CPS. Standard dialog buttons follow Windows.
 
@@ -79,11 +79,11 @@ Place the file named `RT-880_Upgrade_V1_16_250915.bin` in a `recovery` folder be
 
 ## 4. Check compatibility before flashing
 
-R54 targets the investigated AT32F423 board profile. Verify the board revision before flashing. Backup-based preparation binds the image to your calibration.
+R57 targets the investigated AT32F423 board profile. Verify the board revision before flashing. Backup-based preparation binds the image to your calibration.
 
 For a confirmed compatible board, prepare a personal BIN. **No Rust compiler is needed.**
 
-1. Choose the original R54 BIN for your language from the complete package's `firmware` folder or download it separately. [RU](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/UV98-r54-ru.bin) · [EN](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/UV98-r54-en.bin) · [DE](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/UV98-r54-de.bin) In CPS open **Firmware → Select BIN…** and choose that file. A release catalog is optional for a compatible original application BIN with a calibration profile.
+1. Choose the original R57 BIN for your language from the complete package's `firmware` folder or download it separately. [RU](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-r57-ru.bin) · [EN](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-r57-en.bin) · [DE](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-r57-de.bin) In CPS open **Firmware → Select BIN…** and choose that file. A release catalog is optional for a compatible original application BIN with a calibration profile.
 2. Click **Prepare an image for my radio…**.
 3. Select **`manifest.json` from the full 4 MiB NOR snapshot** created by “Read settings storage (4 MiB)”. Select the manifest, not `storage-address-space.bin` itself. A calibration-only snapshot is not sufficient.
 4. Choose a parent folder for new images, for example `Documents/UV98-personal`. CPS creates a new `UV98-personal-…` directory inside it.
@@ -94,20 +94,20 @@ CPS checks the two-read status, file sizes and SHA256 values, and verifies that 
 
 The catalog records the personal BIN's SHA256 and schema 2 personalization provenance, including the source and snapshot hashes. CPS structural checks establish file layout and integrity. Verify the release source, publisher and board revision independently.
 
-If preparation is rejected, check that you selected your own complete two-read NOR snapshot and the original R54 BIN. Keep the original manifest and snapshot files together.
+If preparation is rejected, check that you selected your own complete two-read NOR snapshot and the original R57 BIN. Keep the original manifest and snapshot files together.
 
 Proceed only after successful preparation, confirmation of board compatibility, and saving verified backups and the correct factory BIN in two places.
 
 ## 5. Install a compatible image
 
-1. Open **Firmware → Select BIN…** in CPS 0.8.1.
+1. Open **Firmware → Select BIN…** in CPS 0.11.0.
 2. Select the prepared `UV98-personal.bin` and check its name and SHA256 on screen. CPS verifies it using the accompanying source BIN and personal catalog.
 3. Switch the radio off. Hold the **upper PTT**, turn it on, then release PTT after 2–3 seconds. On the investigated radio, the stock loader shows a black screen and green LED.
 4. Select the cable's COM port. Tick the loader readiness confirmation, then click **Write firmware** once.
 5. Wait for explicit completion. Do not switch off the radio, unplug the cable or close CPS during writing.
 6. After completion, switch off for 3 seconds and start **without PTT**. Check the display, keys and reception. Keep the operation log.
 
-**Firmware language.** Flash the BIN for your chosen language. Each R54 BIN has one interface language. Set the CPS language separately in its toolbar.
+**Firmware language.** Flash the BIN for your chosen language. Each R57 BIN has one interface language. Set the CPS language separately in its toolbar.
 
 With the default bindings, the upper PTT requests A and the lower PTT requests B. A green border marks the receiving slot. The red TX border takes priority. A large red **L**, yellow **M** or green **H** shows the configured power of the transmitting slot, including B while A is selected. Each slot's power starts at LOW and changes are held in RAM. The battery icon shows up to four approximate level bars and the voltage in 0.1 V steps (`--.-V` when unavailable). [Lower PTT hardware evidence](../research/r37/ptt.md)
 

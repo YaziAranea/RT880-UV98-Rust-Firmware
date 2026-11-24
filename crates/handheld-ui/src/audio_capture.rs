@@ -25,6 +25,7 @@ pub struct AudioCaptureView {
     pub quiet: bool,
     /// 0 not exported, 1 sending, 2 sent, 3 UART failed.
     pub export: u8,
+    pub collect_tone_candidate: bool,
 }
 
 pub fn render_audio_rows<B: DisplayBus, D: Delay>(
@@ -109,6 +110,15 @@ pub fn render_audio_rows<B: DisplayBus, D: Delay>(
             },
             color::MUTED,
         );
+        let (tone, ink) = match view.status {
+            Captured if view.low_clips != 0 || view.high_clips != 0 => {
+                ("1400 Hz: CLIPPED", color::BAD)
+            }
+            Captured if view.collect_tone_candidate => ("1400 Hz CANDIDATE", color::GOOD),
+            Captured => ("NO 1400 Hz CANDIDATE", color::MUTED),
+            _ => ("1400 Hz: NO BLOCK", color::MUTED),
+        };
+        centered(y, out, 253, 1, tone, ink);
         centered(
             y,
             out,

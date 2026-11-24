@@ -1,0 +1,17 @@
+[package]
+name = "uv98-voice-clip"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Bounded voice message storage and PCM playback for the RT-880"
+
+[features]
+wav = []
+mp3 = ["wav", "dep:symphonia"]
+
+[dependencies]
+symphonia = { version = "=0.5.5", optional = true, default-features = false, features = ["mp3"] }
+
+[[example]]
+name = "encode"
+required-features = ["wav"]

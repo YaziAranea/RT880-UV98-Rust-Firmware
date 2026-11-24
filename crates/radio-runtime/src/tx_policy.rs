@@ -20,6 +20,8 @@ use uv98_rf_sequence::{Modulation, TxRequest, Width};
 pub enum Source {
     Upper,
     Lower,
+    #[cfg(feature = "voice-keyer")]
+    VoiceKey(u8),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,6 +55,14 @@ pub struct Authorization {
 }
 
 impl Authorization {
+    #[cfg(feature = "voice-keyer")]
+    pub fn voice_key(self) -> Option<u8> {
+        match self.source {
+            Source::VoiceKey(digit) => Some(digit),
+            _ => None,
+        }
+    }
+
     pub fn still_held(self, view: View, profile: policy::Profile, input: Input) -> bool {
         self.still_held_target(view, view, profile, input)
     }
@@ -82,6 +92,10 @@ impl Authorization {
         profile: policy::Profile,
     ) -> bool {
         if operator.ptt_slot.is_some() || operator.ptt_down {
+            return false;
+        }
+        #[cfg(feature = "voice-keyer")]
+        if self.voice_key().is_some() {
             return false;
         }
         operator.ptt_slot = Some(self.slot);
@@ -120,18 +134,7 @@ pub fn authorize_target(
     if !input.clean || input.upper == input.lower {
         return Err(Denied::PhysicalInput);
     }
-    if operator.screen != Screen::Home {
-        return Err(Denied::Screen);
-    }
-    if operator.entry.is_some() {
-        return Err(Denied::Entry);
-    }
-    if operator.locked {
-        return Err(Denied::Locked);
-    }
-    if operator.scan != ScanState::Stopped {
-        return Err(Denied::Scan);
-    }
+    check_operator(operator)?;
     let (source, index) = if input.upper {
         (Source::Upper, 0)
     } else {
@@ -144,7 +147,64 @@ pub fn authorize_target(
         SideAction::Active => operator.active_slot,
         _ => return Err(Denied::Binding),
     };
-    if target.active_slot != slot || operator.ptt_slot != Some(slot) {
+    if operator.ptt_slot != Some(slot) {
+        return Err(Denied::Context);
+    }
+    authorize_slot(operator, target, &profile, source, slot, binding)
+}
+
+#[cfg(feature = "voice-keyer")]
+pub fn authorize_voice(
+    operator: &View,
+    target: &View,
+    profile: &policy::Profile,
+    digit: u8,
+) -> Result<Authorization, Denied> {
+    check_operator(operator)?;
+    if operator.voice_shortcut != Some(digit) || digit > 9 {
+        return Err(Denied::Binding);
+    }
+    if operator.ptt_down || operator.ptt_slot.is_some() || operator.dual_watch {
+        return Err(Denied::Context);
+    }
+    if profile.audio.modulation != Modulation::Fm {
+        return Err(Denied::Modulation);
+    }
+    authorize_slot(
+        operator,
+        target,
+        profile,
+        Source::VoiceKey(digit),
+        operator.active_slot,
+        SideAction::Active,
+    )
+}
+
+fn check_operator(operator: &View) -> Result<(), Denied> {
+    if operator.screen != Screen::Home {
+        return Err(Denied::Screen);
+    }
+    if operator.entry.is_some() {
+        return Err(Denied::Entry);
+    }
+    if operator.locked {
+        return Err(Denied::Locked);
+    }
+    if operator.scan != ScanState::Stopped {
+        return Err(Denied::Scan);
+    }
+    Ok(())
+}
+
+fn authorize_slot(
+    operator: &View,
+    target: &View,
+    profile: &policy::Profile,
+    source: Source,
+    slot: Slot,
+    binding: SideAction,
+) -> Result<Authorization, Denied> {
+    if target.active_slot != slot {
         return Err(Denied::Context);
     }
     let cb = operator.cb_for_slot(slot);
@@ -289,6 +349,64 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    #[cfg(feature = "voice-keyer")]
+    #[test]
+    fn voice_authorization_uses_active_slot_and_rejects_other_intents() {
+        let mut v = view();
+        v.ptt_slot = None;
+        v.ptt_down = false;
+        v.side_down = [false; 2];
+        v.active_slot = Slot::B;
+        v.voice_shortcut = Some(6);
+        let p = profile(v, &record(14_550_000, 14_550_000), 0);
+        let a = authorize_voice(&v, &v, &p, 6).unwrap();
+        assert_eq!(a.source, Source::VoiceKey(6));
+        assert_eq!(a.slot, Slot::B);
+        assert_eq!(authorize_voice(&v, &v, &p, 8), Err(Denied::Binding));
+        assert_eq!(
+            authorize_voice(
+                &v,
+                &View {
+                    active_slot: Slot::A,
+                    ..v
+                },
+                &p,
+                6
+            ),
+            Err(Denied::Context)
+        );
+        assert_eq!(
+            authorize_voice(&View { locked: true, ..v }, &v, &p, 6),
+            Err(Denied::Locked)
+        );
+        assert_eq!(
+            authorize_voice(
+                &View {
+                    scan: ScanState::Paused,
+                    ..v
+                },
+                &v,
+                &p,
+                6
+            ),
+            Err(Denied::Scan)
+        );
+        assert_eq!(
+            authorize_voice(
+                &View {
+                    ptt_down: true,
+                    ..v
+                },
+                &v,
+                &p,
+                6
+            ),
+            Err(Denied::Context)
+        );
+        assert_eq!(authorize(v, p, UPPER), Err(Denied::Context));
+        assert!(!a.tail_configuration_valid(v, p));
     }
 
     #[test]

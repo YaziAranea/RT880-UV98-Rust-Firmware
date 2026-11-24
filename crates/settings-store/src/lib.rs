@@ -4,7 +4,7 @@
     forbid(unsafe_code)
 )]
 //! Two-page journal for explicitly saved station name, Roger setting,
-//! microphone gain and opaque A/B position words.
+//! microphone gain, opaque A/B position words and voice-call shortcut.
 //! It uses reserved internal flash. External NOR is outside its address space.
 //! A full firmware update clears the journal.
 
@@ -23,6 +23,8 @@ pub struct Settings {
     /// Optional opaque per-slot firmware positions, stored in an adjacent
     /// extension so the legacy 32-byte primary record stays byte-compatible.
     pub positions: Option<[u32; 2]>,
+    /// None inherits the image's binding; Some(None) explicitly disables it.
+    pub voice_shortcut: Option<Option<u8>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -353,6 +353,10 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
     pub fn status(&self) -> Status {
         self.status
     }
+    #[cfg(feature = "voice-keyer")]
+    pub fn view_ref(&self) -> &controller::View {
+        &self.status.view
+    }
     pub fn snapshot(&self) -> Option<Snapshot<'_>> {
         if self.status.state != State::Ready {
             return None;
@@ -516,6 +520,11 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
     }
     pub fn apply_microphone_gain(&mut self, gain: u8) {
         self.controller.apply_microphone_gain(gain);
+        self.status.view = self.controller.view();
+    }
+    #[cfg(feature = "voice-keyer")]
+    pub fn restore_voice_shortcut(&mut self, image: Option<u8>, local: Option<Option<u8>>) {
+        self.controller.restore_voice_shortcut(image, local);
         self.status.view = self.controller.view();
     }
     pub fn report_name_save(&mut self, confirmed: bool) -> Result<(), Error<N::Error, L::Error>> {

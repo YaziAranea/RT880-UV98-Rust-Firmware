@@ -105,6 +105,197 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn replace_voice_then_personalize_and_reopen() {
+    use crate::firmware::voice;
+    use uv98_voice_clip::{Samples, SLOT_BYTES};
+    let mut fixture = Fixture::new();
+    let mut original = fixture.source.bytes.clone();
+    if let Some(real) = std::env::var_os("UV98_VOICE_TEST_BIN") {
+        original = fs::read(real).unwrap();
+    } else {
+        original[0x700..0x710].copy_from_slice(&voice::test_policy(2));
+        let initial = uv98_voice_clip::encode(&[0; 64]).unwrap();
+        original[8192..8192 + SLOT_BYTES].copy_from_slice(&initial);
+    }
+    fixture.rewrite_source(&original);
+    let start = fixture.source.voice_layout.unwrap().clip;
+    if fixture.source.voice_config().is_none() {
+        let destination = fixture.root.join("legacy-config.bin");
+        assert!(voice::save(
+            &fixture.source,
+            None,
+            Some(Default::default()),
+            &destination
+        )
+        .is_err());
+        assert!(!destination.exists());
+    }
+    let wav = fixture.root.join("voice.wav");
+    let mut pcm = Vec::from(&b"RIFF"[..]);
+    pcm.extend(836u32.to_le_bytes());
+    pcm.extend(b"WAVEfmt ");
+    pcm.extend(16u32.to_le_bytes());
+    for n in [1u16, 1] {
+        pcm.extend(n.to_le_bytes());
+    }
+    for n in [8000u32, 16000] {
+        pcm.extend(n.to_le_bytes());
+    }
+    for n in [2u16, 16] {
+        pcm.extend(n.to_le_bytes());
+    }
+    pcm.extend(b"data");
+    pcm.extend(800u32.to_le_bytes());
+    for i in 0..400 {
+        pcm.extend((if i % 16 < 8 { 9000i16 } else { -9000i16 }).to_le_bytes());
+    }
+    fs::write(&wav, &pcm).unwrap();
+    let path = fixture.root.join("edited.bin");
+    let clip = voice::load(&wav).unwrap().clip(0).unwrap();
+    let edited = voice::save(&fixture.source, Some(&clip), None, &path).unwrap();
+    assert_eq!(&original[..start], &edited.bytes[..start]);
+    assert_eq!(
+        &original[start + SLOT_BYTES..],
+        &edited.bytes[start + SLOT_BYTES..]
+    );
+    assert_ne!(
+        &original[start..start + SLOT_BYTES],
+        &edited.bytes[start..start + SLOT_BYTES]
+    );
+    assert_eq!(fs::read(&fixture.source.path).unwrap(), original);
+    let decoded = Samples::from_body(&edited.bytes[start + 16..start + SLOT_BYTES]).unwrap();
+    assert_eq!(decoded.len(), 400);
+    assert!(decoded.max().unwrap() > 148);
+    assert!(voice::save(&fixture.source, Some(&clip), None, &path).is_err());
+    assert_eq!(fs::read(&path).unwrap(), edited.bytes);
+    fs::write(&wav, b"broken").unwrap();
+    assert!(voice::load(&wav).is_err());
+    let personal = personalize(&edited, &fixture.manifest, &fixture.root.join("personal")).unwrap();
+    let selected = prepare_selected(&personal.path, None).unwrap();
+    assert!(selected.revalidate().is_ok());
+    assert!(!selected.can_add_voice());
+    let digest = digest_offset(&original).unwrap();
+    assert_eq!(&selected.bytes[..digest], &edited.bytes[..digest]);
+    assert_eq!(&selected.bytes[digest + 32..], &edited.bytes[digest + 32..]);
+
+    // The CPS workflow uses the selected portion of a real stereo MPEG Layer III file.
+    let mp3 = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/voice-clip/tests/fixtures/silence-tone.mp3");
+    let recording = voice::load(&mp3).unwrap();
+    let last = recording.last_start_ms();
+    let clip = recording.clip(last).unwrap();
+    let edited = voice::save(
+        &fixture.source,
+        Some(&clip),
+        None,
+        &fixture.root.join("mp3.bin"),
+    )
+    .unwrap();
+    assert_eq!(&original[..start], &edited.bytes[..start]);
+    assert_eq!(
+        &original[start + SLOT_BYTES..],
+        &edited.bytes[start + SLOT_BYTES..]
+    );
+    let personal = personalize(
+        &edited,
+        &fixture.manifest,
+        &fixture.root.join("personal-mp3"),
+    )
+    .unwrap();
+    let reopened = prepare_selected(&personal.path, None).unwrap();
+    assert!(reopened.revalidate().is_ok());
+    assert_eq!(&reopened.bytes[start..start + SLOT_BYTES], &clip);
+}
+
+#[test]
+fn voice_settings_only_and_mp3_survive_save_reopen_and_personalization() {
+    use crate::firmware::voice;
+    use uv98_voice_clip::{VoiceConfig, CONFIG_BYTES, MAX_DELAY_MS, SLOT_BYTES};
+
+    let mut fixture = Fixture::new();
+    let original = if let Some(path) = std::env::var_os("UV98_VOICE_CONFIG_TEST_BIN") {
+        fs::read(path).unwrap()
+    } else {
+        let mut bytes = fixture.source.bytes.clone();
+        bytes[0x700..0x710].copy_from_slice(&voice::test_policy(3));
+        bytes[0x1000..0x1000 + CONFIG_BYTES]
+            .copy_from_slice(&VoiceConfig::default().encode().unwrap());
+        bytes[0x2200..0x2200 + SLOT_BYTES]
+            .copy_from_slice(&uv98_voice_clip::encode(&[1000; 142]).unwrap());
+        bytes
+    };
+    fixture.rewrite_source(&original);
+    let slots = fixture.source.voice_layout.unwrap();
+    let (at, _) = slots
+        .config
+        .expect("expected R57 image with separate config record");
+    let config = VoiceConfig {
+        key: Some(0),
+        delay_ms: MAX_DELAY_MS,
+    };
+    let path = fixture.root.join("assigned.bin");
+    voice::save(&fixture.source, None, Some(config), &path).unwrap();
+    let assigned = prepare_selected(&path, None).unwrap();
+    assert_eq!(assigned.voice_config(), Some(config));
+    let mut expected = original.clone();
+    expected[at..at + CONFIG_BYTES].copy_from_slice(&config.encode().unwrap());
+    assert_eq!(assigned.bytes, expected);
+
+    let mp3 = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/voice-clip/tests/fixtures/silence-tone.mp3");
+    let recording = voice::load(&mp3).unwrap();
+    let clip = recording.clip(recording.last_start_ms()).unwrap();
+    let unassigned = VoiceConfig {
+        key: None,
+        delay_ms: 1,
+    };
+    let edited = voice::save(
+        &assigned,
+        Some(&clip),
+        Some(unassigned),
+        &fixture.root.join("modified.bin"),
+    )
+    .unwrap();
+    expected[at..at + CONFIG_BYTES].copy_from_slice(&unassigned.encode().unwrap());
+    expected[slots.clip..slots.clip + SLOT_BYTES].copy_from_slice(&clip);
+    assert_eq!(edited.bytes, expected);
+    let personal = personalize(&edited, &fixture.manifest, &fixture.root.join("personal")).unwrap();
+    let reopened = prepare_selected(&personal.path, None).unwrap();
+    reopened.revalidate().unwrap();
+    assert_eq!(reopened.voice_config(), Some(unassigned));
+    assert_eq!(&reopened.bytes[slots.clip..slots.clip + SLOT_BYTES], &clip);
+    let digest = digest_offset(&expected).unwrap();
+    assert_eq!(&reopened.bytes[..digest], &expected[..digest]);
+    assert_eq!(&reopened.bytes[digest + 32..], &expected[digest + 32..]);
+    let forbidden = fixture.root.join("forbidden.bin");
+    assert!(voice::save(&reopened, None, Some(config), &forbidden).is_err());
+    assert!(voice::save(
+        &assigned,
+        None,
+        Some(VoiceConfig {
+            key: Some(10),
+            delay_ms: 0
+        }),
+        &forbidden
+    )
+    .is_err());
+    assert!(voice::save(
+        &assigned,
+        None,
+        Some(VoiceConfig {
+            key: Some(9),
+            delay_ms: MAX_DELAY_MS + 1
+        }),
+        &forbidden
+    )
+    .is_err());
+    fs::write(&assigned.path, b"replaced after selection").unwrap();
+    assert!(voice::save(&assigned, None, Some(config), &forbidden).is_err());
+    assert!(!forbidden.exists());
+    assert_eq!(fs::read(&fixture.source.path).unwrap(), original);
+}
+
+#[test]
 fn independent_source_changes_only_digest_and_reopens_without_original_files() {
     let mut fixture = Fixture::new();
     fs::remove_file(&fixture.source_catalog).unwrap();

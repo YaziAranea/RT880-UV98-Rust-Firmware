@@ -101,6 +101,7 @@ fn settings(seed: u8) -> Settings {
         roger_enabled: seed & 1 != 0,
         microphone_gain: Some(seed & 31),
         positions: None,
+        voice_shortcut: None,
     }
 }
 
@@ -166,6 +167,7 @@ fn record_round_trip_and_crc_reject_every_single_bit_corruption() {
             roger_enabled: true,
             microphone_gain: Some(31),
             positions: None,
+            voice_shortcut: None,
         },
     };
     let words = entry.encode();
@@ -198,7 +200,8 @@ fn positions_use_adjacent_extension_without_changing_primary_and_bad_extension_k
             model.pages[0][1],
             primary_without_extension[0],
             primary_without_extension[6]
-        ),
+        )
+        .and_then(|extension| extension.positions),
         Some(positions)
     );
     assert_eq!(load(&mut model), Ok(Some(saved)));
@@ -220,6 +223,28 @@ fn positions_use_adjacent_extension_without_changing_primary_and_bad_extension_k
 }
 
 #[test]
+fn voice_shortcut_distinguishes_inherited_assigned_and_disabled() {
+    let mut model = Model::default();
+    let mut saved = settings(42);
+    for digit in [0, 9] {
+        saved.voice_shortcut = Some(Some(digit));
+        save(&mut model, saved).unwrap();
+        assert_eq!(load(&mut model), Ok(Some(saved)));
+        saved.positions = Some([0x1234_5678, 0x8765_4321]);
+    }
+    let mut invalid = saved;
+    invalid.voice_shortcut = Some(Some(10));
+    assert_eq!(save(&mut model, invalid), Err(Error::InvalidSettings));
+    assert_eq!(load(&mut model), Ok(Some(saved)));
+
+    for setting in [Some(None), None] {
+        saved.voice_shortcut = setting;
+        save(&mut model, saved).unwrap();
+        assert_eq!(load(&mut model), Ok(Some(saved)));
+    }
+}
+
+#[test]
 fn positions_power_cut_at_every_append_program_keeps_old_or_fully_committed_value() {
     let mut initial = Model::default();
     let previous = settings(1);
@@ -227,6 +252,7 @@ fn positions_power_cut_at_every_append_program_keeps_old_or_fully_committed_valu
     initial.reset_operations();
     let mut next = settings(2);
     next.positions = Some([0x1234_5678, 0x8765_4321]);
+    next.voice_shortcut = Some(None);
 
     let mut complete = initial.clone();
     save(&mut complete, next).unwrap();
@@ -264,7 +290,8 @@ fn staged_primary_blocks_legacy_writer_from_resurrecting_extension() {
             interrupted.pages[0][1],
             interrupted.pages[0][0][0],
             interrupted.pages[0][0][6]
-        ),
+        )
+        .and_then(|extension| extension.positions),
         next.positions
     );
 
@@ -303,7 +330,8 @@ fn positions_rollover_erases_only_inactive_page_and_commits_pair() {
             model.pages[destination as usize][1],
             model.pages[destination as usize][0][0],
             model.pages[destination as usize][0][6]
-        ),
+        )
+        .and_then(|extension| extension.positions),
         next.positions
     );
     assert_eq!(load(&mut model), Ok(Some(next)));

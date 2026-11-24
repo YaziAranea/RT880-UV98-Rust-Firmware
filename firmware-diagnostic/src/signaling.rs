@@ -7,7 +7,7 @@ use uv98_signaling::radio_name::RadioName;
 pub use uv98_signaling::tones::TxKey;
 use uv98_signaling::tones::{BkToneSession, ToneRegisters, TxTones};
 
-pub fn mdc_config(view: View, slot: Slot) -> Config {
+pub fn mdc_config(view: &View, slot: Slot) -> Config {
     let settings = view.mdc_for_slot(slot);
     Config {
         mode: match settings.mode {
@@ -105,6 +105,11 @@ impl TransmitTones {
         self.sequencer.mute_mic()
             || (self.mic_muted && !self.generator.active())
             || matches!(key, Some(TxKey::Toneburst | TxKey::Memory))
+    }
+
+    #[cfg(feature = "voice-keyer")]
+    pub fn voice_path_idle(&self) -> bool {
+        !self.generator.active() && !self.sequencer.mute_mic() && !self.mic_muted
     }
 
     pub fn applied_at(&mut self, now: u32) {

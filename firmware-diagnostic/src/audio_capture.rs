@@ -10,6 +10,10 @@ use uv98_sidekeys_at32::{
     CaptureStats, CaptureTiming, Error, PollTiming, RX_AUDIO_HZ, RX_AUDIO_SAMPLES,
 };
 
+#[path = "collect_tone.rs"]
+mod collect_tone;
+const _: () = assert!(RX_AUDIO_HZ == collect_tone::SAMPLE_RATE);
+
 const POST_CAPTURE_CYCLES: u32 = 2_400_000;
 
 #[derive(Default)]
@@ -147,6 +151,9 @@ impl Capture {
                             status: AudioCaptureStatus::Captured,
                             quiet,
                             export: 0,
+                            collect_tone_candidate: stats.clip_low == 0
+                                && stats.clip_high == 0
+                                && collect_tone::candidate(&self.samples),
                         };
                         self.timing = Some(timing);
                     }

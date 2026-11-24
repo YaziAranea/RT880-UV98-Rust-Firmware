@@ -9,6 +9,7 @@ locale-ru = []
 locale-en = []
 locale-de = []
 locale-all = []
+voice-keyer = []
 # Renderer unit tests switch languages even in single-locale configurations.
 renderer-tests = []
 

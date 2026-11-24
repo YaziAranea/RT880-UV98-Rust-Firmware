@@ -453,6 +453,29 @@ impl<I: Io> Runtime<I> {
         let word = self.read(0x30)?;
         self.write(0x30, (word & !MIC_ADC) | if enabled { MIC_ADC } else { 0 })
     }
+
+    /// Switch only the analog speaker/earphone amplifier during established
+    /// TX. The caller first mutes BK AF OUT, then provides DAC2 audio.
+    #[cfg(feature = "voice-keyer")]
+    pub fn signaling_keyer_speaker(&mut self, enabled: bool) -> Result<(), Fault<I::Error>> {
+        if self.state != State::Transmitting {
+            return Err(self.reject(Error::State));
+        }
+        let checked = self.io.verify_control();
+        self.io_result(checked)?;
+        if enabled {
+            let observed = self.read(0x47)?;
+            if observed != 0x6040 {
+                return Err(self.fail(Error::Readback {
+                    register: 0x47,
+                    expected: 0x6040,
+                    observed,
+                }));
+            }
+        }
+        let switched = self.io.mute(!enabled);
+        self.io_result(switched)
+    }
     fn gates(&mut self, route: u8) -> Result<(), Fault<I::Error>> {
         let result = self.io.hf_gates(false, false);
         self.io_result(result)?;

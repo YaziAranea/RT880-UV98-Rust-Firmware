@@ -8,17 +8,17 @@ This open-source Rust firmware gives the Radtel RT-880 (RT880) and iRadio UV-98 
 
 **English** · [Deutsch](README.de.md) · [Прошивка и установка на русском](README.ru.md)
 
-[**R54 release**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r54) · [**Start here — backup and installation**](docs/GETTING-STARTED.en.md)
+[**R57 release**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r57) · [**Start here — backup and installation**](docs/GETTING-STARTED.en.md)
 
-[**Complete R54 package (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/R54-RT880-UV98.zip) · [**Windows CPS 0.8.1 (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/UV98-CPS-0.8.1.zip)
+[**Complete R57 package (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/R57-RT880-UV98.zip) · [**Windows CPS 0.11.0 (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-CPS-0.11.0.zip)
 
-R54 BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/UV98-r54-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/UV98-r54-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/UV98-r54-de.bin) · [PA5 RX-only diagnostics (ZIP, Russian)](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/R54-PA5-RX-only.zip)
+R57 BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-r57-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-r57-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-r57-de.bin) · [PA5 RX-only diagnostics (ZIP, Russian)](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/R54-PA5-RX-only.zip)
 
-> **Experimental firmware for the investigated AT32F423 board profile.** Verify board compatibility. Use CPS to prepare a personal R54 image from your radio's verified NOR backup before flashing. CPS binds the image to your factory calibration. [Backup and preparation guide](docs/GETTING-STARTED.en.md#4-check-compatibility-before-flashing)
+> **Experimental firmware for the investigated AT32F423 board profile.** Verify board compatibility. Use CPS to prepare a personal R57 image from your radio's verified NOR backup before flashing. CPS binds the image to your factory calibration. [Backup and preparation guide](docs/GETTING-STARTED.en.md#4-check-compatibility-before-flashing)
 
-R54 fixes side-button scanning, honours the CPS scan exclusion flag and rechecks a clean upper PTT edge while RX recovers. It adds APRS RX counters and separate shortwave AM soft mute and 100 Hz filter controls. [Release notes](RELEASE-NOTES-R54.md) · [Engineering audit and bench plan (Russian)](AUDIT-R54.ru.md)
+Hold a digit on the radio to send a short recorded phrase. In Windows CPS, choose the digit, set a 0–3000 ms delay from TX start and preview an excerpt from an MP3 or WAV file. [R57 release notes](RELEASE-NOTES-R57.md#english)
 
-## Windows CPS 0.8.1
+## Windows CPS 0.11.0
 
 Use **Язык / Language / Sprache** in the toolbar to select **Русский**, **English** or **Deutsch**. All eight tabs and existing status messages switch immediately. Unsaved edits stay in place, and CPS remembers the selection in your Windows user profile. File dialog titles and filters follow CPS. Standard dialog buttons follow Windows.
 
@@ -92,13 +92,13 @@ The stock “800 MHz” mode starts at **840 MHz**. The preset uses 850.000 MHz.
 1. Keep the radio on its stock firmware and save its original `.880dmf` / `.98pdmf` file.
 2. Use our CPS to save **calibration**, **4 MiB NOR** and **settings/channel sections**. Each operation reads twice and compares the results.
 3. Keep the complete snapshot folders and a matching factory recovery file in two places. The public package does not include the manufacturer's firmware.
-4. Check board compatibility, then prepare your personal R54 image in CPS from the verified NOR snapshot. No Rust compiler is needed for this step.
+4. Check board compatibility, then prepare your personal R57 image in CPS from the verified NOR snapshot. No Rust compiler is needed for this step.
 
 The [file checklist and step-by-step guide](docs/GETTING-STARTED.en.md) names every CPS button and expected file. **The 4 MiB NOR backup is not an MCU firmware or bootloader dump.**
 
 ## Current limits
 
-In the R53 RU check on one radio, the operator confirmed startup, both PTT buttons and an audible repeater tail. R54 passed software checks. Bench testing and on-air checks of R54 are pending. [R53 release history](RELEASE-NOTES-R53.md) · [R54 test evidence (Russian)](AUDIT-R54.ru.md)
+R57 has been checked in software, including linked Cortex-M4 playback; repeater timing and speech intelligibility on the radio are pending. [R53 release history](RELEASE-NOTES-R53.md) · [R54 test evidence (Russian)](AUDIT-R54.ru.md)
 
 - Dual Watch alternates the receiver. Simultaneous audio from two BK4819 receivers is not implemented.
 - The HF waterfall retunes one Si4732 and interrupts audio during the sweep; it is not an FFT.

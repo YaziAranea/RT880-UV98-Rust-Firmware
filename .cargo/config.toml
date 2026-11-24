@@ -5,6 +5,12 @@ stage0 = "build -p uv98-stage0 --release --target thumbv7em-none-eabi"
 rustflags = [
     "-C", "link-arg=-Tlink.x",
     "-C", "link-arg=--nmagic",
-    # Share repeated Thumb instruction sequences while retaining the UI optimization levels.
+    # Share repeated Thumb sequences and short common tails. Keep the hot
+    # renderer at its existing optimization level and preserve the Flash reserve.
     "-C", "llvm-args=-enable-machine-outliner=always",
+    # Further outlining passes can emit Thumb leaf helpers that overwrite LR
+    # before a tail return. Keep the single pass tested by the linked ARM probes.
+    "-C", "llvm-args=-tail-merge-size=2",
+    # Keep short repeated call sites out of line on the flash-limited MCU.
+    "-C", "llvm-args=-inline-threshold=5",
 ]

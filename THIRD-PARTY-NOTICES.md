@@ -49,3 +49,7 @@ or linked. Register documentation and other primary sources are listed in
 declared in its package and source. Public kits include `licenses/dependencies.json`
 and copies of available dependency license and copyright files. These are
 separate from the project's MIT license.
+
+Windows CPS uses Symphonia 0.5.5 for MP3 decoding. The voice-keyer kit includes
+the corresponding unmodified crate sources under `licenses/source/` and the
+Mozilla Public License 2.0 under `licenses/dependencies/symphonia-0.5.5/`.

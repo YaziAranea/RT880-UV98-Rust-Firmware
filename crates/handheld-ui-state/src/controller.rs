@@ -528,9 +528,11 @@ pub enum ShortcutAction {
     Crossband,
     DualWatch,
     Cb,
+    #[cfg(feature = "voice-keyer")]
+    VoiceCall,
 }
 
-pub const SHORTCUT_ACTIONS: [ShortcutAction; 17] = [
+pub const SHORTCUT_ACTIONS: [ShortcutAction; 17 + cfg!(feature = "voice-keyer") as usize] = [
     ShortcutAction::None,
     ShortcutAction::Power,
     ShortcutAction::Monitor,
@@ -548,6 +550,8 @@ pub const SHORTCUT_ACTIONS: [ShortcutAction; 17] = [
     ShortcutAction::Crossband,
     ShortcutAction::Spectrum,
     ShortcutAction::Cb,
+    #[cfg(feature = "voice-keyer")]
+    ShortcutAction::VoiceCall,
 ];
 
 /// Indices 0..8 retain digits 1..9; index 9 is digit 0.
@@ -583,6 +587,8 @@ impl ScanState {
 /// An outer runtime must explicitly accept, execute and report these requests.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Request {
+    #[cfg(feature = "voice-keyer")]
+    VoiceCall(u8),
     SendAprs,
     RetryShortwave,
     CyclePower,
@@ -982,6 +988,11 @@ pub struct View {
     pub reverse: bool,
     pub scan: ScanState,
     pub bindings: [ShortcutAction; 10],
+    /// The only persisted long-key override, separate from volatile actions.
+    #[cfg(feature = "voice-keyer")]
+    pub voice_shortcut: Option<u8>,
+    #[cfg(feature = "voice-keyer")]
+    pub voice_shortcut_overridden: bool,
     /// Long-digit binding being edited: 0 means digit1, 9 means digit0.
     pub binding_index: u8,
     /// Pending action in SHORTCUT_ACTIONS; only MENU commits this choice.
@@ -1007,6 +1018,15 @@ pub struct View {
 }
 
 impl View {
+    pub fn shortcut_at(&self, index: usize) -> Option<ShortcutAction> {
+        let action = *self.bindings.get(index)?;
+        #[cfg(feature = "voice-keyer")]
+        if binding_digit(index as u8).is_some_and(|digit| self.voice_shortcut == Some(digit)) {
+            return Some(ShortcutAction::VoiceCall);
+        }
+        Some(action)
+    }
+
     #[doc(hidden)]
     pub fn can_arm_aprs_auto(&self) -> bool {
         self.aprs_auto_available && self.aprs_status.can_send() && !self.ptt_down && !self.locked
@@ -1267,6 +1287,10 @@ impl Controller {
                 reverse: false,
                 scan: ScanState::Stopped,
                 bindings: DEFAULT_BINDINGS,
+                #[cfg(feature = "voice-keyer")]
+                voice_shortcut: None,
+                #[cfg(feature = "voice-keyer")]
+                voice_shortcut_overridden: false,
                 binding_index: 0,
                 binding_action_index: 0,
                 active_slot: Slot::A,
@@ -2277,16 +2301,34 @@ impl Controller {
     }
 
     pub fn binding(&self, digit: u8) -> Option<ShortcutAction> {
-        binding_index(digit).map(|index| self.view.bindings[index as usize])
+        self.view.shortcut_at(binding_index(digit)? as usize)
     }
 
-    /// Change a volatile UI assignment. No saved codeplug or NOR is modified.
+    /// Change an assignment in the UI. Firmware owns any persistence.
     pub fn set_binding(&mut self, digit: u8, action: ShortcutAction) -> bool {
         let Some(index) = binding_index(digit) else {
             return false;
         };
+        #[cfg(feature = "voice-keyer")]
+        {
+            if action == ShortcutAction::VoiceCall {
+                self.view.voice_shortcut = Some(digit);
+                self.view.voice_shortcut_overridden = true;
+                return true;
+            }
+            if self.view.voice_shortcut == Some(digit) {
+                self.view.voice_shortcut = None;
+                self.view.voice_shortcut_overridden = true;
+            }
+        }
         self.view.bindings[index as usize] = action;
         true
+    }
+
+    #[cfg(feature = "voice-keyer")]
+    pub fn restore_voice_shortcut(&mut self, image: Option<u8>, local: Option<Option<u8>>) {
+        self.view.voice_shortcut = local.unwrap_or(image).filter(|&digit| digit <= 9);
+        self.view.voice_shortcut_overridden = local.is_some();
     }
 
     fn change_since(&mut self, before: View) -> Change {
@@ -2931,7 +2973,20 @@ impl Controller {
                 // An editing field or test page never accidentally invokes an
                 // RF shortcut. In particular holding a digit cannot first type it.
                 if self.view.screen == Screen::Home && self.view.entry.is_none() {
-                    if let Some(action) = digit(key).and_then(|digit| self.binding(digit)) {
+                    if let Some((digit, action)) = digit(key)
+                        .and_then(|digit| self.binding(digit).map(|action| (digit, action)))
+                    {
+                        #[cfg(feature = "voice-keyer")]
+                        if action == ShortcutAction::VoiceCall {
+                            if self.view.scan == ScanState::Stopped
+                                && !self.view.ptt_down
+                                && !self.view.dual_watch
+                            {
+                                self.queue_request(Request::VoiceCall(digit));
+                            }
+                            return;
+                        }
+                        let _ = digit;
                         self.shortcut(action, bitmap);
                     }
                 }
@@ -3074,6 +3129,8 @@ impl Controller {
     fn shortcut(&mut self, action: ShortcutAction, bitmap: &[u8; 128]) {
         match action {
             ShortcutAction::None => {}
+            #[cfg(feature = "voice-keyer")]
+            ShortcutAction::VoiceCall => {}
             ShortcutAction::Power => self.queue_request(Request::CyclePower),
             ShortcutAction::Monitor => self.queue_request(Request::ToggleMonitor),
             ShortcutAction::Modulation => {
@@ -3563,7 +3620,10 @@ impl Controller {
     }
 
     fn open_binding_action(&mut self) {
-        let action = self.view.bindings[self.view.binding_index as usize];
+        let action = self
+            .view
+            .shortcut_at(self.view.binding_index as usize)
+            .unwrap_or(ShortcutAction::None);
         self.view.binding_action_index = SHORTCUT_ACTIONS
             .iter()
             .position(|candidate| *candidate == action)
@@ -3901,8 +3961,12 @@ impl Controller {
             }
             Screen::Shortcuts => self.open_binding_action(),
             Screen::ShortcutAction => {
-                self.view.bindings[self.view.binding_index as usize] =
-                    SHORTCUT_ACTIONS[self.view.binding_action_index as usize];
+                if let Some(digit) = binding_digit(self.view.binding_index) {
+                    self.set_binding(
+                        digit,
+                        SHORTCUT_ACTIONS[self.view.binding_action_index as usize],
+                    );
+                }
                 self.view.screen = Screen::Shortcuts;
             }
             Screen::Zones => {
@@ -5418,6 +5482,68 @@ mod tests {
         assert_eq!(ui.view.scan, ScanState::Stopped);
     }
 
+    #[cfg(feature = "voice-keyer")]
+    #[test]
+    fn voice_assignment_starts_only_from_home_hold_and_leaves_both_ptts_ordinary() {
+        let bitmap = catalog(&[0, 2]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        assert_eq!(ui.view.voice_shortcut, None);
+        assert!(ui.set_binding(1, ShortcutAction::Monitor));
+        assert!(ui.set_binding(1, ShortcutAction::VoiceCall));
+        assert!(ui.set_binding(0, ShortcutAction::VoiceCall));
+        assert_eq!(ui.binding(1), Some(ShortcutAction::Monitor));
+        assert_eq!(ui.binding(0), Some(ShortcutAction::VoiceCall));
+        let held = InputEvent::Hold(Key::Digit0);
+        ui.view.screen = Screen::Home;
+        let change = ui.handle(held, &bitmap);
+        assert_eq!(change.request, Some(Request::VoiceCall(0)));
+        assert!(!change.ptt_tx_requested);
+        for (press, release, slot) in [
+            (InputEvent::Ptt(true), InputEvent::Ptt(false), Slot::A),
+            (InputEvent::PttB(true), InputEvent::PttB(false), Slot::B),
+        ] {
+            let tx = ui.handle(press, &bitmap);
+            assert_eq!(tx.ptt_slot, Some(slot));
+            assert_eq!(ui.handle(held, &bitmap).request, None);
+            ui.handle(release, &bitmap);
+        }
+        ui.view.scan = ScanState::Running;
+        assert_eq!(ui.handle(held, &bitmap).request, None);
+        ui.view.scan = ScanState::Stopped;
+        ui.view.screen = Screen::Shortcuts;
+        assert_eq!(ui.handle(held, &bitmap).request, None);
+        ui.restore_voice_shortcut(None, Some(Some(0)));
+        assert!(ui.set_binding(0, ShortcutAction::Spectrum));
+        assert_eq!(ui.view.voice_shortcut, None);
+        assert!(ui.view.voice_shortcut_overridden);
+    }
+
+    #[cfg(feature = "voice-keyer")]
+    #[test]
+    fn voice_binding_prefers_local_choice_and_disabling_over_image_default() {
+        let bitmap = catalog(&[0]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        ui.restore_voice_shortcut(Some(4), None);
+        assert_eq!(ui.binding(4), Some(ShortcutAction::VoiceCall));
+        assert!(!ui.view.voice_shortcut_overridden);
+        assert!(ui.set_binding(6, ShortcutAction::Monitor));
+        assert!(!ui.view.voice_shortcut_overridden);
+        assert!(ui.set_binding(4, ShortcutAction::VoiceCall));
+        assert_eq!(ui.view.voice_shortcut, Some(4));
+        assert!(ui.view.voice_shortcut_overridden);
+        assert!(ui.set_binding(4, ShortcutAction::None));
+        assert_eq!(ui.view.voice_shortcut, None);
+        assert!(ui.view.voice_shortcut_overridden);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        ui.restore_voice_shortcut(Some(4), Some(None));
+        assert_eq!(ui.binding(4), Some(ShortcutAction::Reverse));
+        ui.restore_voice_shortcut(Some(4), Some(Some(2)));
+        assert_eq!(ui.binding(2), Some(ShortcutAction::VoiceCall));
+        assert_ne!(ui.binding(4), Some(ShortcutAction::VoiceCall));
+        ui.restore_voice_shortcut(None, None);
+        assert_eq!(ui.view.voice_shortcut, None);
+    }
+
     #[test]
     fn zero_binding_defaults_to_spectrum_is_editable_and_respects_lock_and_draft() {
         let bitmap = catalog(&[0]);
@@ -5460,7 +5586,19 @@ mod tests {
             SHORTCUT_ACTIONS[ui.view.binding_action_index as usize],
             ShortcutAction::Cb,
         );
-        press(&mut ui, Key::Down, &bitmap); // Wrap from CB to None.
+        #[cfg(feature = "voice-keyer")]
+        {
+            press(&mut ui, Key::Down, &bitmap);
+            assert_eq!(
+                SHORTCUT_ACTIONS[ui.view.binding_action_index as usize],
+                ShortcutAction::VoiceCall,
+            );
+        }
+        press(&mut ui, Key::Down, &bitmap);
+        assert_eq!(
+            SHORTCUT_ACTIONS[ui.view.binding_action_index as usize],
+            ShortcutAction::None,
+        );
         press(&mut ui, Key::Menu, &bitmap);
         assert_eq!(ui.binding(0), Some(ShortcutAction::None));
         assert_eq!(&ui.view.bindings[..9], &DEFAULT_BINDINGS[..9]);

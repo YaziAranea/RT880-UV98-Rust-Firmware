@@ -110,14 +110,14 @@ impl Io for Bus {
 
 fn config(mode: u8) -> Config {
     let mut view = Controller::new(&[255; 128], 14_550_000).view();
-    assert_eq!(mdc_config(view, Slot::A), Config::default());
+    assert_eq!(mdc_config(&view, Slot::A), Config::default());
     view.mdc[1] = MdcSettings {
         mode,
         id: Some(0x1234),
     };
     assert_eq!(view.active_slot, Slot::A);
-    assert_eq!(mdc_config(view, Slot::A), Config::default());
-    mdc_config(view, Slot::B)
+    assert_eq!(mdc_config(&view, Slot::A), Config::default());
+    mdc_config(&view, Slot::B)
 }
 
 struct Harness {

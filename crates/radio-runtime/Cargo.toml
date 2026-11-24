@@ -6,6 +6,9 @@ publish = false
 
 [features]
 hardware = ["dep:at32f4xx-pac", "dep:uv98-board-pins", "dep:uv98-diag-quiesce"]
+# Leave room for the clip and its controls in the voice image. The compact
+# software compressor produces the same SHA-256 profile fingerprints.
+voice-keyer = ["uv98-handheld-ui/voice-keyer", "sha2/force-soft-compact"]
 
 [dependencies]
 sha2 = { version = "=0.10.9", default-features = false }

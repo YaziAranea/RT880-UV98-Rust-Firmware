@@ -23,7 +23,11 @@ CHANNEL_TX_FEATURE = "channel-tx"
 PA5_FEATURE = "pa5-audio"
 PA5_DEPENDENCIES = ["uv98-handheld-app/pa5-audio", "uv98-boot-log/pa5-audio"]
 LOCALE_FEATURES = {f"locale-{code}": [f"uv98-handheld-ui/locale-{code}"] for code in LANGUAGES}
+VOICE_FEATURE = "voice-keyer"
+VOICE_DEPS = ["dep:uv98-voice-clip", "uv98-radio-runtime/voice-keyer", "uv98-handheld-app/voice-keyer"]
+CHANNEL_PROFILES = ("channel-tx", VOICE_FEATURE)
 PROFILES = {
+    VOICE_FEATURE: ((0x108, 1, 0x16, 0x564B3033), [CHANNEL_TX_FEATURE, VOICE_FEATURE], "manual FM TX with configurable voice-key delay"),
     "rx": (RX_CANDIDATE_POLICY, [], "RX candidate"),
     "upper-exo-trial": (UPPER_EXO_TRIAL_POLICY, [TRIAL_FEATURE], "upper EXO trial"),
     "channel-tx": (CHANNEL_TX_POLICY, [CHANNEL_TX_FEATURE], "FM channel/VFO TX"),
@@ -107,10 +111,17 @@ def validate_source(text, manifest, profile):
     # rustfmt may retain trailing commas inside multiline cfg! predicates.
     expression = expression.replace(",)", ")") if expression else expression
     dual = expression in dual_gates
-    if not (dual or expression == old_gate and profile != "channel-tx"
+    if not (dual or expression == old_gate and profile not in CHANNEL_PROFILES
             or expression == "false" and profile == "rx"):
         raise ValueError("Packaged source must set LIVE_TX=false or use the selected explicit TX feature")
     features = manifest.get("features", {}).copy()
+    if VOICE_FEATURE in features:
+        compact = re.sub(r"\s+", "", code).replace(",)", ")")
+        guard = '#[cfg(all(feature="voice-keyer",not(feature="channel-tx")))]compile_error!('
+        if features.pop(VOICE_FEATURE) != VOICE_DEPS or guard not in compact:
+            raise ValueError("Voice playback requires its exact dependencies and explicit channel-tx guard")
+    elif profile == VOICE_FEATURE:
+        raise ValueError("Missing voice-keyer feature")
     if PA5_FEATURE in features:
         if features.pop(PA5_FEATURE) != PA5_DEPENDENCIES:
             raise ValueError("PA5 diagnostic feature dependencies must remain exact")
@@ -148,19 +159,27 @@ def validate_source(text, manifest, profile):
             r"\btx_trial\s*::\s*record_permitted\s*\(",
             r"\btx_trial\s*::\s*hold_within_limit\s*\(")):
         raise ValueError("Trial source must retain the allowlist and hold deadline")
-    if profile == "channel-tx" and any(not re.search(pattern, calls) for pattern in (
-            r"\btx_policy\s*::\s*authorize_target\s*\(",
-            r"\btx_policy\s*::\s*hold_within_limit\s*\(",
-            r"\.\s*still_held_target\s*\(")):
-        raise ValueError("Channel TX source must retain authorization, held-context checks, and hold deadline")
+    if profile in CHANNEL_PROFILES:
+        # R56 avoids copying the two Views. Its check compares a fresh
+        # authorization with the exact token held for this transmission.
+        compact_calls = re.sub(r"\s+", "", calls)
+        same_authorization = (
+            "tx_authorization.is_some_and(|a|{"
+            "tx_policy::authorize_target(&view,target,*p,raw_ptt)==Ok(a)})"
+        )
+        if (not re.search(r"\btx_policy\s*::\s*authorize_target\s*\(", calls)
+                or not re.search(r"\btx_policy\s*::\s*hold_within_limit\s*\(", calls)
+                or not (re.search(r"\.\s*still_held_target\s*\(", calls)
+                        or same_authorization in compact_calls)):
+            raise ValueError("Channel TX source must retain authorization, held-context checks, and hold deadline")
     lower = re.findall(r'^\s*const\s+LOWER_PTT_ENABLED\s*:\s*bool\s*=\s*([^;]+);', code, re.M)
     lower_gate = re.sub(r"\s+", "", lower[0]) if len(lower) == 1 else None
     legacy_lower = re.findall(r"^const LOWER_PTT_CODE:\s*Option<u8>\s*=\s*(\w+)\s*;", code, re.M) == ["None"]
-    if lower_gate != 'cfg!(feature="channel-tx")' and not (legacy_lower and profile != "channel-tx"):
+    if lower_gate != 'cfg!(feature="channel-tx")' and not (legacy_lower and profile not in CHANNEL_PROFILES):
         raise ValueError("Lower PTT must be gated exclusively by channel-tx")
-    if profile == "channel-tx" and not re.search(r"\bptt\s*::\s*lower_pressed\s*\(", calls):
+    if profile in CHANNEL_PROFILES and not re.search(r"\bptt\s*::\s*lower_pressed\s*\(", calls):
         raise ValueError("Lower PTT requires isolated ADC window checking")
-    if profile == "channel-tx" and not re.search(r"\bptt\s*::\s*side_idle\s*\(", calls):
+    if profile in CHANNEL_PROFILES and not re.search(r"\bptt\s*::\s*side_idle\s*\(", calls):
         raise ValueError("PTT release requires isolated idle ADC checking")
 
 
@@ -170,7 +189,7 @@ def validate_inputs(folder, root, profile="rx"):
     if profile not in PROFILES:
         raise ValueError("Unknown candidate profile")
     trial = profile == "upper-exo-trial"
-    channel_tx = profile == "channel-tx"
+    channel_tx = profile in CHANNEL_PROFILES
     expected_policy, expected_features, _ = PROFILES[profile]
     verification = json.loads((folder / "verification.json").read_text(encoding="utf-8-sig"))
     layout = json.loads((folder / "image/image-layout.json").read_text())
@@ -245,6 +264,7 @@ def validate_inputs(folder, root, profile="rx"):
                                        if channel_tx else None),
             "compiled_features": ["FM_RX", "AM_RX", "channel_and_vfo_scan", "A_B_selection",
                                   "zones", "key_shortcuts"] + (["FM_TX_UPPER_EXO_LIMITED"] if trial else
+                                                              ["FM_TX_CHANNEL_VFO", "LONG_DIGIT_VOICE_CLIP"] if profile == VOICE_FEATURE else
                                                               ["FM_TX_CHANNEL_VFO"] if channel_tx else
                                                               ["PA5_MANUAL_PCM_RX_ONLY"] if profile == "pa5-audio" else []),
             "linked_release_policy": policy,

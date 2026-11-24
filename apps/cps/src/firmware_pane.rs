@@ -14,6 +14,8 @@ const ACCENT: Color32 = Color32::from_rgb(100, 204, 202);
 const WARNING: Color32 = Color32::from_rgb(245, 190, 100);
 const ERROR: Color32 = Color32::from_rgb(255, 172, 133);
 
+mod voice;
+
 enum Event {
     Progress(Progress),
     Finished(Result<FlashReport, LocalizedText>),
@@ -21,6 +23,7 @@ enum Event {
 
 pub struct FirmwarePane {
     image: Option<PreparedImage>,
+    voice: voice::VoiceImport,
     selected_path: Option<PathBuf>,
     port: String,
     ports: Vec<String>,
@@ -45,6 +48,7 @@ impl Default for FirmwarePane {
             .unwrap_or_else(|| PathBuf::from("."));
         let mut pane = Self {
             image: None,
+            voice: Default::default(),
             selected_path: None,
             port: String::new(),
             ports: Vec::new(),
@@ -80,6 +84,22 @@ impl FirmwarePane {
         self.receiver.is_some()
     }
 
+    fn has_voice_edits(&self) -> bool {
+        self.voice.pending()
+            || self
+                .image
+                .as_ref()
+                .is_some_and(|image| self.voice.config_changed(image))
+    }
+
+    fn voice_draft_notice() -> LocalizedText {
+        msg!(
+            "Сохраните голосовые настройки и запись в BIN или отмените изменения.",
+            "Save the voice settings and recording in a BIN or discard the changes.",
+            "Spracheinstellungen und Aufnahme in einer BIN speichern oder Änderungen verwerfen."
+        )
+    }
+
     pub fn set_preview(&mut self, preview: bool) {
         self.preview = preview;
         self.armed = false;
@@ -90,15 +110,20 @@ impl FirmwarePane {
             return;
         }
         self.armed = false;
-        self.finished = false;
-        self.progress = None;
-        self.session_dir = None;
-        self.log.clear();
-        self.selected_path = Some(path.clone());
+        if self.has_voice_edits() {
+            self.error = true;
+            self.message = Self::voice_draft_notice();
+            return;
+        }
         match firmware::prepare(&path) {
-            Ok(image) => self.set_prepared(image),
+            Ok(image) => {
+                self.finished = false;
+                self.progress = None;
+                self.session_dir = None;
+                self.log.clear();
+                self.set_prepared(image);
+            }
             Err(error) => {
-                self.image = None;
                 self.error = true;
                 self.message = LocalizedText::from_fn(|lang| {
                     trf!(
@@ -114,6 +139,7 @@ impl FirmwarePane {
     }
 
     fn set_prepared(&mut self, image: PreparedImage) {
+        self.voice = voice::VoiceImport::for_image(&image);
         self.selected_path = Some(image.path.clone());
         self.image = Some(image);
         self.error = false;
@@ -144,6 +170,11 @@ impl FirmwarePane {
     }
 
     fn personalize_image(&mut self) {
+        if self.has_voice_edits() {
+            self.error = true;
+            self.message = Self::voice_draft_notice();
+            return;
+        }
         let lang = self.language;
         let Some(source) = self.image.clone() else {
             return;
@@ -212,6 +243,7 @@ impl FirmwarePane {
     }
 
     pub fn poll(&mut self, ctx: &egui::Context) {
+        self.poll_voice(ctx);
         let Some(receiver) = self.receiver.as_ref() else {
             return;
         };
@@ -316,6 +348,9 @@ impl FirmwarePane {
                 "Ein anderer Vorgang am Funkgerät läuft noch."
             ));
         }
+        if self.has_voice_edits() {
+            return Err(Self::voice_draft_notice());
+        }
         if !self.armed {
             return Err(msg!(
                 "Сначала подтвердите готовность загрузчика.",
@@ -418,7 +453,7 @@ impl FirmwarePane {
                         .color(ACCENT),
                 );
                 ui.horizontal(|ui| {
-                    if ui.button(tr!(lang, "Выбрать BIN…", "Select BIN…", "BIN auswählen…")).clicked() {
+                    if ui.add_enabled(!self.has_voice_edits(), egui::Button::new(tr!(lang, "Выбрать BIN…", "Select BIN…", "BIN auswählen…"))).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .set_title(tr!(
                                 lang,
@@ -452,8 +487,11 @@ impl FirmwarePane {
                     ui.small(image.provenance_label(lang));
                 }
                 ui.add_space(5.0);
+                if self.image.as_ref().is_some_and(|image| image.can_add_voice() || image.voice_config().is_some()) {
+                    self.voice_controls(ui);
+                }
                 if ui.add_enabled(
-                    self.image.as_ref().is_some_and(PreparedImage::is_personalization_source),
+                    !self.has_voice_edits() && self.image.as_ref().is_some_and(PreparedImage::is_personalization_source),
                     egui::Button::new(tr!(
                     lang,
                     "Подготовить образ для моей рации…",
@@ -553,14 +591,15 @@ impl FirmwarePane {
                 if let Some(warning) = self.image.as_ref().and_then(|image| image.source_warning(lang)) {
                     ui.colored_label(WARNING, warning);
                 }
-                ui.checkbox(
-                    &mut self.armed,
+                ui.add_enabled(
+                    !self.has_voice_edits(),
+                    egui::Checkbox::new(&mut self.armed,
                     tr!(
                         lang,
                         "Рация в загрузчике, выбран нужный COM-порт, питание устойчивое",
                         "The radio is in bootloader mode, the correct COM port is selected, and power is stable",
                         "Das Funkgerät ist im Bootloader-Modus, der richtige COM-Port ist ausgewählt und die Stromversorgung ist stabil",
-                    ),
+                    )),
                 );
             });
             ui.add_space(8.0);
@@ -585,6 +624,7 @@ impl FirmwarePane {
             if ui
                 .add_enabled(
                     self.image.is_some()
+                        && !self.has_voice_edits()
                         && self.armed
                         && !self.port.trim().is_empty()
                         && !self.preview,
@@ -753,6 +793,7 @@ mod tests {
     fn pane_without_file_or_port() -> FirmwarePane {
         FirmwarePane {
             image: None,
+            voice: Default::default(),
             selected_path: None,
             port: String::new(),
             ports: Vec::new(),

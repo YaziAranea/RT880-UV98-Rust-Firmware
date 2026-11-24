@@ -1209,15 +1209,19 @@ fn dtmf_memory_page(row: u16, out: &mut Row<'_>, view: &View) {
 }
 
 /// One user-visible build identity for the header and the About page.
-#[cfg(not(feature = "pa5-audio"))]
+#[cfg(not(any(feature = "pa5-audio", feature = "voice-keyer")))]
 pub const VERSION: &str = "0.1.8-r54";
 #[cfg(feature = "pa5-audio")]
-pub const VERSION: &str = "R54-PA5";
+pub const VERSION: &str = "R55-CT";
+#[cfg(all(feature = "voice-keyer", not(feature = "pa5-audio")))]
+pub const VERSION: &str = "R57-VK";
 /// Header has a fixed 42 px slot; About shows the full string.
-#[cfg(not(feature = "pa5-audio"))]
+#[cfg(not(any(feature = "pa5-audio", feature = "voice-keyer")))]
 pub const VERSION_SHORT: &str = "R54";
 #[cfg(feature = "pa5-audio")]
 pub const VERSION_SHORT: &str = "PA5";
+#[cfg(all(feature = "voice-keyer", not(feature = "pa5-audio")))]
+pub const VERSION_SHORT: &str = "VK3";
 
 fn crossband(row: u16, out: &mut Row<'_>, view: &View) {
     let (status, tint) = match view.crossband_probe {
@@ -2692,6 +2696,16 @@ fn about(row: u16, out: &mut Row<'_>) {
     ] {
         text(row, out, 16, y, 1, label, color::MUTED);
     }
+    #[cfg(feature = "voice-keyer")]
+    text(
+        row,
+        out,
+        16,
+        226,
+        1,
+        "VOICE CLIP: HOLD LOWER PTT",
+        color::ACCENT,
+    );
 }
 
 fn notice_label(value: Notice) -> Option<&'static str> {
@@ -3409,6 +3423,10 @@ mod tests {
             reverse: false,
             scan: ScanState::Stopped,
             bindings: crate::controller::DEFAULT_BINDINGS,
+            #[cfg(feature = "voice-keyer")]
+            voice_shortcut: None,
+            #[cfg(feature = "voice-keyer")]
+            voice_shortcut_overridden: false,
             binding_index: 0,
             binding_action_index: 0,
             active_slot: Slot::A,
@@ -4465,6 +4483,25 @@ mod tests {
         for &action in &SHORTCUT_ACTIONS {
             assert!(text_width(shortcut_label(action), 2) <= WIDTH - 48);
         }
+    }
+
+    #[test]
+    #[cfg(feature = "voice-keyer")]
+    fn send_recording_assignment_fits_shortcut_list_in_all_languages() {
+        for (language, expected) in [
+            (Language::Russian, "ПЕРЕДАТЬ ЗАПИСЬ"),
+            (Language::English, "SEND RECORDING"),
+            (Language::German, "AUFNAHME SENDEN"),
+        ] {
+            let label = shortcut_label(ShortcutAction::VoiceCall);
+            assert_eq!(locale::resolve(label, language).as_str(), expected);
+            assert!(localized_width(label, 2, language) <= WIDTH - 48);
+        }
+        let old = model(Screen::Shortcuts);
+        let mut new = old;
+        new.view.voice_shortcut = Some(1);
+        compare_incremental(old, new);
+        compare_incremental(new, old);
     }
 
     #[test]
@@ -5945,7 +5982,7 @@ mod tests {
             locale::resolve(shortcut_label(ShortcutAction::Spectrum), Language::Russian).as_str(),
             "СПЕКТР ЧАСТОТ"
         );
-        #[cfg(not(feature = "pa5-audio"))]
+        #[cfg(not(any(feature = "pa5-audio", feature = "voice-keyer")))]
         assert_eq!(VERSION.rsplit_once("-r").unwrap().1, &VERSION_SHORT[1..]);
         assert!(212 + text_width(VERSION_SHORT, 1) <= WIDTH - 10);
         assert!(16 + text_width("ВЕРСИЯ ", 2) + text_width(VERSION, 2) <= WIDTH - 8);

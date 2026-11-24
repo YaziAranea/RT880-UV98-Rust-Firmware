@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 [features]
 pa5-audio = []
+voice-keyer = ["uv98-handheld-ui-state/voice-keyer"]
 locale-ru = ["uv98-handheld-ui-state/locale-ru"]
 locale-en = ["uv98-handheld-ui-state/locale-en"]
 locale-de = ["uv98-handheld-ui-state/locale-de"]

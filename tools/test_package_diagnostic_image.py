@@ -284,12 +284,17 @@ class PackageTests(unittest.TestCase):
             '#[cfg(all(feature="pa5-audio",any(feature="channel-tx",feature="upper-exo-tx-trial")))]compile_error!("RX only");\n')
         self.manifest.write_text(self.manifest.read_text() +
             'pa5-audio = ["uv98-handheld-app/pa5-audio", "uv98-boot-log/pa5-audio"]\n')
+        self.source.write_text(self.source.read_text() +
+            '#[cfg(all(feature="voice-keyer",not(feature="channel-tx")))]compile_error!("manual TX required");\n')
+        self.manifest.write_text(self.manifest.read_text() +
+            'voice-keyer = ' + json.dumps(packaging.VOICE_DEPS) + '\n')
         for profile, (words, features, _) in packaging.PROFILES.items():
             with self.subTest(profile=profile):
                 self.build(policy_fixture(words))
                 self.mutate_json("verification.json", firmware_features=features)
                 packaging.validate_inputs(self.folder, self.root, profile)
                 for wrong in [[], [packaging.TRIAL_FEATURE], [packaging.CHANNEL_TX_FEATURE], [packaging.PA5_FEATURE],
+                              [packaging.VOICE_FEATURE], [packaging.CHANNEL_TX_FEATURE, packaging.VOICE_FEATURE],
                               [packaging.TRIAL_FEATURE, packaging.CHANNEL_TX_FEATURE],
                               [packaging.CHANNEL_TX_FEATURE, packaging.CHANNEL_TX_FEATURE]]:
                     if wrong == features:
@@ -322,6 +327,18 @@ class PackageTests(unittest.TestCase):
                 self.source.write_text(source)
                 with self.assertRaises(ValueError):
                     packaging.validate_inputs(self.folder, self.root, "channel-tx")
+
+    def test_borrowed_target_guard_compares_with_the_live_authorization(self):
+        self.prepare_channel()
+        guard = "tx_authorization.is_some_and(|a| { tx_policy::authorize_target(&view, target, *p, raw_ptt) == Ok(a) })"
+        source = self.source.read_text().replace("auth.still_held_target()", guard)
+        self.source.write_text(source)
+        packaging.validate_inputs(self.folder, self.root, "channel-tx")
+        for change in (guard.replace("== Ok(a)", ".is_ok()"),
+                       guard.replace("raw_ptt", "old_ptt"), "/* " + guard + " */"):
+            self.source.write_text(source.replace(guard, change))
+            with self.assertRaisesRegex(ValueError, "held-context"):
+                packaging.validate_inputs(self.folder, self.root, "channel-tx")
 
     def test_tx_feature_declarations_cannot_enable_defaults_aliases_or_dependencies(self):
         self.prepare_channel()

@@ -18,6 +18,12 @@ mod scan_flow;
 #[path = "shortwave.rs"]
 mod shortwave_bus;
 mod signaling;
+#[cfg(feature = "voice-keyer")]
+mod voice_clip;
+#[cfg(feature = "voice-keyer")]
+mod voice_keyer;
+#[cfg(feature = "voice-keyer")]
+mod voice_keyer_logic;
 use at32f4xx_pac::at32f423::interrupt;
 
 #[at32f4xx_pac::at32f423::interrupt]
@@ -25,6 +31,12 @@ fn USART2() {
     unsafe {
         uv98_gps_at32::on_interrupt();
     }
+}
+
+#[cfg(feature = "voice-keyer")]
+#[at32f4xx_pac::at32f423::interrupt]
+fn TMR2() {
+    voice_keyer::on_interrupt();
 }
 
 use uv98_radio_runtime::shortwave;
@@ -65,6 +77,8 @@ compile_error!("Select exactly one TX profile");
     any(feature = "channel-tx", feature = "upper-exo-tx-trial")
 ))]
 compile_error!("PA5 capture is an RX-only diagnostic; TX profiles are incompatible");
+#[cfg(all(feature = "voice-keyer", not(feature = "channel-tx")))]
+compile_error!("voice-keyer requires the explicit channel-tx profile");
 const LIVE_TX: bool = cfg!(any(feature = "upper-exo-tx-trial", feature = "channel-tx"));
 const LIVE_RELAY: bool = cfg!(feature = "channel-tx");
 const LOWER_PTT_ENABLED: bool = cfg!(feature = "channel-tx");
@@ -131,7 +145,9 @@ pub static UV98_RELEASE_POLICY: [u32; 4] = [
     0x108,
     LIVE_TX as u32,
     if LOWER_PTT_ENABLED { 0x16 } else { 0xffff_ffff },
-    if cfg!(feature = "channel-tx") {
+    if cfg!(feature = "voice-keyer") {
+        0x564b_3033 // VK03, configurable voice lead-in
+    } else if cfg!(feature = "channel-tx") {
         0x464d_5431
     } else if LIVE_TX {
         0x4558_4f31
@@ -231,8 +247,8 @@ fn sample_time(time: &mut CycleMillis) -> u32 {
 }
 
 fn feed() {
-    // SAFETY: used only after successful startup in one masked-IRQ context;
-    // no other owner can reconfigure either watchdog. Reload never starts it.
+    // SAFETY: startup validated both watchdogs. The foreground owns their configuration;
+    // the USART2 and TMR2 handlers touch neither watchdog. Reload never starts it.
     require(unsafe { startup::feed_watchdog() }, 0xE001);
 }
 
@@ -311,12 +327,16 @@ impl uv98_sidekeys_at32::PollTiming for Timing {
 
 fn tx_permitted<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
     app: &App<N, L, D>,
-    target: View,
+    target: &View,
     profile: policy::Profile,
     input: ptt::Input,
 ) -> bool {
     if cfg!(feature = "channel-tx") {
-        tx_policy::authorize_target(&app.status().view, &target, profile, input).is_ok()
+        #[cfg(feature = "voice-keyer")]
+        let operator = app.view_ref();
+        #[cfg(not(feature = "voice-keyer"))]
+        let operator = &app.status().view;
+        tx_policy::authorize_target(operator, target, profile, input).is_ok()
     } else {
         tx_trial::permits(app.status().view, profile, input)
             && app
@@ -330,6 +350,46 @@ fn tx_hold_within_limit(timer: TxTimer, now: u32) -> bool {
         tx_policy::hold_within_limit(timer.start_ms(), now) && timer.remaining_ms(now) != 0
     } else {
         tx_trial::hold_within_limit(timer.start_ms(), now)
+    }
+}
+
+#[cfg(feature = "voice-keyer")]
+fn voice_digit(scan: Option<uv98_keyscan_at32::Scan>, adc: u16) -> Option<u8> {
+    let scan = scan?;
+    if scan.ptt_pressed() || !ptt::side_idle(adc) {
+        return None;
+    }
+    match uv98_keys::stock_matrix_code(scan.matrix_raw()) {
+        digit @ 0..=9 => Some(digit),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "voice-keyer")]
+#[inline(never)]
+fn fresh_voice_digit(
+    log: &mut TxLogger,
+    side: &mut uv98_sidekeys_at32::hardware::SideAdc<Timing>,
+    keys: &mut uv98_keyscan_at32::hardware::KeyScanner<Timing>,
+) -> Option<u8> {
+    let adc = checked(log, side.sample(), 0xE055).raw;
+    voice_digit(keys.scan_idle_or_full().ok(), adc)
+}
+
+#[cfg(feature = "voice-keyer")]
+fn voice_authorized(
+    authorization: Option<tx_policy::Authorization>,
+    operator: &View,
+    target: Option<&(View, policy::Profile)>,
+    physical_digit: Option<u8>,
+) -> bool {
+    match (authorization, target, physical_digit) {
+        (Some(authorization), Some((target, profile)), Some(digit))
+            if authorization.voice_key() == Some(digit) =>
+        {
+            tx_policy::authorize_voice(operator, target, profile, digit) == Ok(authorization)
+        }
+        _ => false,
     }
 }
 
@@ -351,10 +411,13 @@ fn apply_saved_name<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
     app: &mut App<N, L, D>,
     settings: &mut uv98_settings_store::Settings,
     stock_microphone_gain: u8,
+    #[cfg(feature = "voice-keyer")] image_voice_key: Option<u8>,
 ) {
     let name = uv98_signaling::radio_name::RadioName::from_payload(settings.name);
     app.apply_radio_name_settings(name, settings.roger_enabled);
     app.apply_microphone_gain(settings.microphone_gain.unwrap_or(stock_microphone_gain));
+    #[cfg(feature = "voice-keyer")]
+    app.restore_voice_shortcut(image_voice_key, settings.voice_shortcut);
     settings.microphone_gain = Some(app.status().view.microphone_gain);
     // Keep unsupported stock encodings untouched in external NOR.
     settings.name = name.map_or([0xff; 16], |name| name.payload());
@@ -814,6 +877,25 @@ fn main() -> ! {
     );
     let (tuner_pins, reserved) = radio_pins.reserved.with_shortwave();
     let (gps_pins, modem_pins, _reserved) = reserved.with_auxiliary();
+    #[cfg(feature = "voice-keyer")]
+    let voice_config = voice_clip::config();
+    #[cfg(feature = "voice-keyer")]
+    let image_voice_key = voice_config.and_then(|config| config.key);
+    #[cfg(feature = "voice-keyer")]
+    let voice_delay_ms = voice_config.map_or(0, |config| config.delay_ms);
+    #[cfg(feature = "voice-keyer")]
+    let mut voice_keyer = {
+        let (pins, _reserved) = _reserved.with_rx_audio();
+        voice_keyer::Keyer::new(
+            pins,
+            p.DAC,
+            p.TMR2,
+            &mut p.CRM,
+            &mut core.NVIC,
+            voice_config.and_then(|_| voice_clip::samples()),
+        )
+        .unwrap_or_else(|| stop(0xE068))
+    };
     #[cfg(feature = "pa5-audio")]
     let mut audio_capture = {
         let (audio_pins, _reserved) = _reserved.with_rx_audio();
@@ -844,11 +926,6 @@ fn main() -> ! {
     let mut packet_rx = aprs_rx::Receiver::new(if read_aprs_config { aprs_raw[194] } else { 0 });
     let mut gps_configuration = (false, 1u8);
     let mut gps_ui_at = 0u32;
-    // Preinit disabled and cleared every NVIC line. Only the installed USART2
-    // handler may be enabled by Gps::configure; it owns a separate IRQ ring.
-    unsafe {
-        cortex_m::interrupt::enable();
-    }
     let mut tuner_bus = shortwave_bus::Bus::new(p.I2C1, tuner_pins, &mut p.CRM);
     let mut tuner_session: Option<shortwave::Session> = None;
     let mut tuner_mode_switch = shortwave::ModeSwitch::default();
@@ -876,6 +953,11 @@ fn main() -> ! {
         unsafe { startup::arm_independent_watchdog() },
         0xE053,
     );
+    // Watchdog setup leaves PRIMASK set. Both runtime IRQ owners now exist,
+    // and preinit cleared the NVIC. Drivers unmask their own lines on demand.
+    unsafe {
+        cortex_m::interrupt::enable();
+    }
     // Load the stock name only; never write the external NOR/configuration.
     // The isolated internal journal supersedes it after an explicit menu save.
     let mut stock_name = [0xff; 16];
@@ -910,11 +992,18 @@ fn main() -> ! {
             roger_enabled: stock_roger[0] == 3,
             microphone_gain: Some(app.status().view.microphone_gain),
             positions: None,
+            voice_shortcut: None,
         })
     };
     #[cfg(not(feature = "pa5-audio"))]
     {
-        apply_saved_name(&mut app, &mut saved_name_settings, stock_microphone_gain);
+        apply_saved_name(
+            &mut app,
+            &mut saved_name_settings,
+            stock_microphone_gain,
+            #[cfg(feature = "voice-keyer")]
+            image_voice_key,
+        );
         if let Some(positions) = saved_name_settings.positions {
             checked(&mut log, app.restore_positions(positions), 0xE032);
         }
@@ -971,6 +1060,10 @@ fn main() -> ! {
     let mut tx_slot = None;
     let mut tx_authorization: Option<tx_policy::Authorization> = None;
     let mut ptt_guard = ptt::Guard::new();
+    #[cfg(feature = "voice-keyer")]
+    let mut voice_hold = voice_keyer_logic::Hold::default();
+    #[cfg(feature = "voice-keyer")]
+    let mut voice_tx_confirmed_cycle = None;
     let mut relay_session = None;
     let mut second_rx = None;
     let mut watch_config = None;
@@ -981,6 +1074,8 @@ fn main() -> ! {
     let mut css_receive = false;
     let mut css_rearm = false;
     let mut reply_window = reply::ReplyWindow::Idle;
+    #[cfg(feature = "voice-keyer")]
+    let mut reply_hold = voice_keyer_logic::ReplyHold::default();
     let mut signal_at = now;
     let mut meter_floor = uv98_handheld_ui::meter::NoiseFloor::default();
     let mut meter_receive = None;
@@ -1057,10 +1152,14 @@ fn main() -> ! {
         }
         let matrix = raw.map(|(matrix, _)| matrix);
         let view = app.status().view;
+        #[cfg(feature = "voice-keyer")]
+        let voice_session = tx_authorization.and_then(tx_policy::Authorization::voice_key);
         let tx_key = matrix.and_then(signaling::keypad).filter(|key| {
             radio.state() == RfState::Transmitting
                 && (view.dtmf_enabled || *key == signaling::TxKey::Toneburst)
         });
+        #[cfg(feature = "voice-keyer")]
+        let tx_key = tx_key.filter(|_| voice_session.is_none());
         if tx_key.is_some() {
             tx_key_latched = true;
         }
@@ -1127,11 +1226,12 @@ fn main() -> ! {
             && tx_slot == view.ptt_slot
             && tx_timer.is_some_and(|timer| tx_hold_within_limit(timer, now))
             && !view.locked
-            && guarded_target.is_some_and(|(target, p)| {
-                tx_permitted(&app, target, p, raw_ptt)
+            && guarded_target.as_ref().is_some_and(|(target, p)| {
+                tx_permitted(&app, target, *p, raw_ptt)
                     && (!cfg!(feature = "channel-tx")
-                        || tx_authorization
-                            .is_some_and(|a| a.still_held_target(view, target, p, raw_ptt)))
+                        || tx_authorization.is_some_and(|a| {
+                            tx_policy::authorize_target(&view, target, *p, raw_ptt) == Ok(a)
+                        }))
             });
         let mut tail_view = view;
         tail_view.ptt_down = false;
@@ -1233,6 +1333,38 @@ fn main() -> ! {
             now,
         );
         checked(&mut log, app.set_aprs_status(beacon.status()), 0xE032);
+        #[cfg(feature = "voice-keyer")]
+        let (voice_context, voice_held, playback) = {
+            let context = !tx_context_blocked
+                && !beacon.active()
+                && !relay_active
+                && second_rx.is_none()
+                && tuner_session.is_none()
+                && !reply_window.active();
+            let scan = key_sample.as_ref().ok().copied();
+            let digit = voice_digit(scan, adc.raw);
+            let released = scan.is_some_and(|s| s.matrix_raw() == 0 && !s.ptt_pressed())
+                && ptt::side_idle(adc.raw);
+            let ready = context
+                && view.screen == Screen::Home
+                && view.entry.is_none()
+                && !view.locked
+                && !view.dual_watch
+                && radio.state() == RfState::Receiving
+                && voice_keyer.available();
+            voice_hold.observe(
+                now,
+                if ready { view.voice_shortcut } else { None },
+                digit,
+                released,
+            );
+            let held = context
+                && voice_session.is_some()
+                && tx_timer.is_some_and(|timer| tx_hold_within_limit(timer, now))
+                && voice_authorized(tx_authorization, &view, guarded_target.as_ref(), digit);
+            let playback = checked(&mut log, voice_keyer.maintain(&mut radio, held), 0xE068);
+            (ready, held, playback)
+        };
         let tx_held = if beacon.active() {
             beacon_held
         } else {
@@ -1247,7 +1379,30 @@ fn main() -> ! {
             let fresh_first = programmed
                 || modem_active
                 || (radio.state() == RfState::Transmitting && allow_tail);
+            #[cfg(feature = "voice-keyer")]
+            let fresh_first = fresh_first
+                || (voice_session.is_some() && playback == voice_keyer::Playback::Complete);
             let mut tx_sample = |fresh: bool, programmed: bool, admitted_tail: bool| {
+                #[cfg(feature = "voice-keyer")]
+                if let Some(digit) = voice_session {
+                    use voice_keyer::Playback;
+                    let held = voice_held
+                        && (!fresh
+                            || fresh_voice_digit(&mut log, &mut side, &mut keys) == Some(digit));
+                    let now = sample_time(&mut time);
+                    let held =
+                        held && tx_timer.is_some_and(|timer| tx_hold_within_limit(timer, now));
+                    return (
+                        signaling::Sample {
+                            now,
+                            voice_held: held
+                                && matches!(playback, Playback::Pending | Playback::Playing),
+                            allow_tail: held && playback == Playback::Complete,
+                        },
+                        None,
+                        true,
+                    );
+                }
                 let mut signal_voice = physical_held;
                 let mut signal_tail = admitted_tail;
                 let mut key = tx_key;
@@ -1330,7 +1485,7 @@ fn main() -> ! {
                     memory: app.dtmf_memory(),
                     matrix_stable,
                 },
-                signaling::mdc_config(view, tx_slot.unwrap_or(view.active_slot)),
+                signaling::mdc_config(&view, tx_slot.unwrap_or(view.active_slot)),
                 view.roger_name(),
                 || {
                     if DWT::cycle_count().wrapping_sub(slice_at) >= 384_000 {
@@ -1341,6 +1496,28 @@ fn main() -> ! {
                 },
             );
             checked(&mut log, result, 0xE065)
+        };
+        #[cfg(feature = "voice-keyer")]
+        let tx_held = if tx_held
+            && playback == voice_keyer::Playback::Pending
+            && radio.state() == RfState::Transmitting
+            && voice_keyer_logic::lead_in_ready(
+                voice_tx_confirmed_cycle,
+                voice_delay_ms,
+                DWT::cycle_count(),
+                voice_held,
+                radio.mdc_progress().is_none() && tx_tones.voice_path_idle(),
+            ) {
+            let fresh = fresh_voice_digit(&mut log, &mut side, &mut keys);
+            let at = sample_time(&mut time);
+            fresh == voice_session
+                && checked(
+                    &mut log,
+                    voice_keyer.start(&mut radio, tx_timer.map_or(0, |t| t.remaining_ms(at))),
+                    0xE068,
+                )
+        } else {
+            tx_held
         };
         // Foreground signaling may perform bounded SPI work. Re-evaluate TOT
         // against elapsed time rather than the timestamp before that work.
@@ -1359,6 +1536,15 @@ fn main() -> ! {
                 break;
             }
             feed();
+            #[cfg(feature = "voice-keyer")]
+            if let Some(digit) = voice_session {
+                let fresh = fresh_voice_digit(&mut log, &mut side, &mut keys);
+                let held = voice_held && fresh == Some(digit);
+                let now = sample_time(&mut time);
+                let held = held && tx_timer.is_some_and(|t| tx_hold_within_limit(t, now));
+                tx_ended = checked(&mut log, radio.tick(now, held), 0xE056).tx_ended;
+                continue;
+            }
             let fresh_adc = checked(&mut log, side.sample(), 0xE055);
             let guard = keys.guard_scan();
             let input = ptt::Input {
@@ -1381,16 +1567,44 @@ fn main() -> ! {
                 && tx_slot == view.ptt_slot
                 && tx_timer.is_some_and(|timer| tx_hold_within_limit(timer, now))
                 && !view.locked
-                && guarded_target.is_some_and(|(target, p)| {
-                    tx_permitted(&app, target, p, input)
+                && guarded_target.as_ref().is_some_and(|(target, p)| {
+                    tx_permitted(&app, target, *p, input)
                         && (!cfg!(feature = "channel-tx")
-                            || tx_authorization
-                                .is_some_and(|a| a.still_held_target(view, target, p, input)))
+                            || tx_authorization.is_some_and(|a| {
+                                tx_policy::authorize_target(&view, target, *p, input) == Ok(a)
+                            }))
                 });
             let now = sample_time(&mut time);
             tx_ended = checked(&mut log, radio.tick(now, held), 0xE056).tx_ended;
         }
+        #[cfg(feature = "voice-keyer")]
+        if voice_session.is_some()
+            && voice_tx_confirmed_cycle.is_none()
+            && radio.state() == RfState::Transmitting
+        {
+            // The executor completed the TX plan and its readbacks, including
+            // the setup slice above. The TOT was armed before that plan.
+            voice_tx_confirmed_cycle = Some(DWT::cycle_count());
+        }
         if tx_ended {
+            #[cfg(feature = "voice-keyer")]
+            {
+                voice_tx_confirmed_cycle = None;
+                let completed_held = voice_session.filter(|&digit| {
+                    if !voice_held || playback != voice_keyer::Playback::Complete {
+                        return false;
+                    }
+                    let scan = keys.scan_idle_or_full().ok();
+                    let adc = checked(&mut log, side.sample(), 0xE055).raw;
+                    voice_digit(scan, adc) == Some(digit)
+                });
+                reply_hold = voice_keyer_logic::ReplyHold::new(completed_held);
+            }
+            #[cfg(feature = "voice-keyer")]
+            if voice_session.is_some() {
+                checked(&mut log, voice_keyer.maintain(&mut radio, false), 0xE068);
+                voice_keyer.reset();
+            }
             ptt_guard.disarm();
             if tx_slot.is_some() {
                 battery_sag.end_tx();
@@ -1439,10 +1653,19 @@ fn main() -> ! {
             && uncertain_tx_since.is_none()
             && !lower
             && ptt::side_idle(adc.raw);
+        #[cfg(feature = "voice-keyer")]
+        let reply_held = reply_window.active()
+            && reply_hold.observe(voice_digit(key_sample.as_ref().ok().copied(), adc.raw));
+        #[cfg(feature = "voice-keyer")]
+        let reply_input_quiet = quiet_input || reply_held;
+        #[cfg(not(feature = "voice-keyer"))]
+        let reply_input_quiet = quiet_input;
         let mut observed_release_rx = false;
         if reply_window.active() {
             let now = sample_time(&mut time);
-            if reply_window.sample_due(now, radio.state() == RfState::Receiving) && quiet_input {
+            if reply_window.sample_due(now, radio.state() == RfState::Receiving)
+                && reply_input_quiet
+            {
                 if let Some(p) = current {
                     let tone = p.receive.map_or(0, |rx| rx.tone);
                     let observed = if p.audio.modulation == Modulation::Fm {
@@ -1502,6 +1725,12 @@ fn main() -> ! {
             }
             None => InputSample::Unstable,
         };
+        #[cfg(feature = "voice-keyer")]
+        let sample = if voice_session.is_some() || reply_held {
+            InputSample::Unstable
+        } else {
+            sample
+        };
         let now = sample_time(&mut time);
         // Any physical side-key activity cancels a sweep. PTT cannot turn this
         // cancellation into transmission; the guard requires a later release
@@ -1515,7 +1744,7 @@ fn main() -> ! {
         scope.event(now, spectrum::Event::Ptt(side_activity));
         let update = checked(&mut log, app.sample(input_at, sample), 0xE032);
         if reply_window.active() {
-            if quiet_input
+            if reply_input_quiet
                 && current.is_some()
                 && update.request.is_none()
                 && !update.cancel_temporary
@@ -1542,7 +1771,14 @@ fn main() -> ! {
                 roger_enabled: enabled,
                 microphone_gain: Some(view.microphone_gain),
                 positions: saved_name_settings.positions,
+                voice_shortcut: saved_name_settings.voice_shortcut,
             };
+            #[cfg(feature = "voice-keyer")]
+            {
+                desired.voice_shortcut = view
+                    .voice_shortcut_overridden
+                    .then_some(view.voice_shortcut);
+            }
             let explicit = desired != saved_name_settings;
             let save_allowed = radio.initialized()
                 && view.screen != Screen::AprsRx
@@ -1619,7 +1855,13 @@ fn main() -> ! {
                     position_save.attempted(now, saved_name_settings.positions);
                 }
                 if explicit && !confirmed {
-                    apply_saved_name(&mut app, &mut saved_name_settings, stock_microphone_gain);
+                    apply_saved_name(
+                        &mut app,
+                        &mut saved_name_settings,
+                        stock_microphone_gain,
+                        #[cfg(feature = "voice-keyer")]
+                        image_voice_key,
+                    );
                 }
                 if explicit {
                     checked(&mut log, app.report_name_save(confirmed), 0xE032);
@@ -1731,6 +1973,8 @@ fn main() -> ! {
                 checked(&mut log, scanner.cancel(&mut app), 0xE032);
             }
             match request {
+                #[cfg(feature = "voice-keyer")]
+                Request::VoiceCall(_) => {}
                 Request::StartSpectrum => {
                     spectrum_center = None;
                     spectrum_edge = None;
@@ -2691,27 +2935,44 @@ fn main() -> ! {
                     }
                 }
             }
-            let requested_tx = update
+            #[cfg(feature = "voice-keyer")]
+            let voice_candidate = match update.request {
+                Some(Request::VoiceCall(digit)) if voice_hold.take(digit) && voice_context => {
+                    Some(digit)
+                }
+                _ => None,
+            };
+            #[cfg(not(feature = "voice-keyer"))]
+            let voice_candidate: Option<u8> = None;
+            let requested_slot = update
                 .ptt_slot
-                .and_then(|slot| profile_for_slot(&app, &settings, slot).ok());
+                .or_else(|| voice_candidate.map(|_| app.status().view.active_slot));
+            let requested_tx =
+                requested_slot.and_then(|slot| profile_for_slot(&app, &settings, slot).ok());
+            let manual_requested = update.ptt_tx_requested
+                && ptt_guard.allow_edge()
+                && (upper ^ lower)
+                && (ptt::side_idle(adc.raw) || lower)
+                && requested_tx
+                    .as_ref()
+                    .is_some_and(|(target, p)| tx_permitted(&app, target, *p, raw_ptt));
             if LIVE_TX
                 && !css_open
                 && !was_css_receive
                 && app.status().view.screen != Screen::Crossband
-                && requested_tx.is_some_and(|(target, p)| tx_permitted(&app, target, p, raw_ptt))
-                && ptt_guard.allow_edge()
-                && update.ptt_tx_requested
-                && (upper ^ lower)
-                && (ptt::side_idle(adc.raw) || lower)
+                && (manual_requested || voice_candidate.is_some())
             {
-                if let (Some((target, tx_profile)), Some(slot)) = (requested_tx, update.ptt_slot) {
-                    let tx = tx_profile.transmit.unwrap_or_else(|| stop(0xE059));
+                if let (Some((target, tx_profile)), Some(slot), Some(tx)) = (
+                    requested_tx.as_ref(),
+                    requested_slot,
+                    requested_tx.as_ref().and_then(|(_, p)| p.transmit),
+                ) {
                     let calibration = match app.calibration_view() {
                         Some(c) => c,
                         None => stop(0xE050),
                     };
                     let mut launch_ptt = raw_ptt;
-                    if LOWER_PTT_ENABLED {
+                    if manual_requested && LOWER_PTT_ENABLED {
                         // UI and RF polling follow the original sample. Check
                         // the same physical source again before disturbing RX.
                         let fresh_adc = checked(&mut log, side.sample(), 0xE055);
@@ -2724,9 +2985,19 @@ fn main() -> ! {
                                 && (ptt::side_idle(fresh_adc.raw) || lower),
                         };
                     }
-                    if launch_ptt == raw_ptt
+                    #[cfg(feature = "voice-keyer")]
+                    let voice_authorization = voice_candidate.and_then(|digit| {
+                        if fresh_voice_digit(&mut log, &mut side, &mut keys) != Some(digit) {
+                            return None;
+                        }
+                        tx_policy::authorize_voice(app.view_ref(), target, tx_profile, digit).ok()
+                    });
+                    #[cfg(not(feature = "voice-keyer"))]
+                    let voice_authorization: Option<tx_policy::Authorization> = None;
+                    if (voice_authorization.is_some()
+                        || (manual_requested && launch_ptt == raw_ptt))
                         && uv98_rf_sequence::transmit(&calibration, tx).is_ok()
-                        && ptt_guard.arm(launch_ptt)
+                        && (voice_authorization.is_some() || ptt_guard.arm(launch_ptt))
                     {
                         checked(&mut log, radio.stop(), 0xE057);
                         let started_at = sample_time(&mut time);
@@ -2748,14 +3019,16 @@ fn main() -> ! {
                         );
                         tx_slot = Some(slot);
                         battery_sag.begin_tx(started_at);
-                        tx_authorization = tx_policy::authorize_target(
-                            &app.status().view,
-                            &target,
-                            tx_profile,
-                            launch_ptt,
-                        )
-                        .ok();
-                        current = Some(tx_profile);
+                        tx_authorization = voice_authorization.or_else(|| {
+                            tx_policy::authorize_target(
+                                &app.status().view,
+                                target,
+                                *tx_profile,
+                                launch_ptt,
+                            )
+                            .ok()
+                        });
+                        current = Some(*tx_profile);
                         last_signal = None;
                     }
                 }
@@ -2763,6 +3036,15 @@ fn main() -> ! {
         }
         if update.ptt_tx_requested && !radio.tx_active_or_starting() {
             checked(&mut log, app.reject_tx(), 0xE032);
+        }
+        #[cfg(feature = "voice-keyer")]
+        if let Some(request @ Request::VoiceCall(_)) = update.request {
+            if tx_authorization
+                .and_then(tx_policy::Authorization::voice_key)
+                .is_none()
+            {
+                checked(&mut log, app.reject_radio_request(request), 0xE032);
+            }
         }
         let now = sample_time(&mut time);
         let aprs_open = view.screen == Screen::AprsRx;

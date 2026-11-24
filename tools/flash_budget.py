@@ -33,7 +33,7 @@ def measure(exported, language, profile, *, baseline_path=BASELINE):
     """Use the last file-backed PT_LOAD physical end, including the RAM init image."""
     end = last_flash_load_end(exported["layout"]["load_segments"])
     remaining = JOURNAL_START - end
-    gate_applied = profile == RELEASE_PROFILE
+    gate_applied = profile in (RELEASE_PROFILE, "voice-keyer")
     report = {
         "schema": 1,
         "profile": profile,

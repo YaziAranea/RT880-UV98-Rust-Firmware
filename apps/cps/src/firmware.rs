@@ -4,6 +4,7 @@
 use crate::i18n::{Language, LocalizedText};
 use serde_json::json;
 pub mod profile;
+pub mod voice;
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
@@ -50,6 +51,7 @@ pub struct PreparedImage {
     pub sha256: String,
     pub bytes_len: usize,
     bytes: Vec<u8>,
+    voice_layout: Option<voice::Layout>,
     tx_sha256: String,
     provenance: Provenance,
 }
@@ -64,10 +66,19 @@ impl PreparedImage {
                 .into_owned(),
             sha256: hash(&bytes),
             bytes_len: bytes.len(),
+            voice_layout: voice::layout(&bytes),
             tx_sha256: wire_hash(&bytes),
             bytes,
             provenance,
         }
+    }
+
+    pub fn can_add_voice(&self) -> bool {
+        self.is_personalization_source() && self.voice_layout.is_some()
+    }
+
+    pub fn voice_config(&self) -> Option<uv98_voice_clip::VoiceConfig> {
+        self.voice_layout?.config.map(|(_, config)| config)
     }
 
     pub fn display_label(&self) -> &str {

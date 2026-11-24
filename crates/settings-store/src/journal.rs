@@ -9,7 +9,11 @@ const HEADER: u32 = 0x5556_0200; // "UV", schema 2, flags in the low byte.
 const COMMIT: u32 = 0x51A7_6E39;
 const EXT_HEADER: u32 = 0x5556_0300;
 const EXT_COMMIT: u32 = 0x51A7_6E3A;
-const EXT_VERSION: u32 = 1;
+const EXT_POSITIONS: u32 = 1;
+const EXT_VOICE: u32 = 2;
+const HAS_POSITIONS: u32 = 1 << 8;
+const VOICE_DIGIT_SHIFT: u32 = 9;
+const VOICE_DISABLED: u8 = 10;
 const COMMIT_INDEX: usize = WORDS - 1;
 type Words = [u32; WORDS];
 
@@ -91,6 +95,7 @@ impl Entry {
                 roger_enabled: words[5] & 1 != 0,
                 microphone_gain,
                 positions: None,
+                voice_shortcut: None,
             },
         })
     }
@@ -100,7 +105,8 @@ impl Entry {
 struct Extension {
     generation: u32,
     primary_crc: u32,
-    positions: [u32; 2],
+    positions: Option<[u32; 2]>,
+    voice_shortcut: Option<Option<u8>>,
 }
 
 impl Extension {
@@ -108,25 +114,49 @@ impl Extension {
         let mut words = [ERASED; WORDS];
         words[0] = EXT_HEADER;
         words[1] = self.generation;
-        words[2..4].copy_from_slice(&self.positions);
+        if let Some(positions) = self.positions {
+            words[2..4].copy_from_slice(&positions);
+        }
         words[4] = self.primary_crc;
-        words[5] = EXT_VERSION;
+        words[5] = self.voice_shortcut.map_or(EXT_POSITIONS, |digit| {
+            EXT_VOICE
+                | if self.positions.is_some() {
+                    HAS_POSITIONS
+                } else {
+                    0
+                }
+                | (u32::from(digit.unwrap_or(VOICE_DISABLED)) << VOICE_DIGIT_SHIFT)
+        });
         words[6] = crc32(&words[..6]);
         words[COMMIT_INDEX] = EXT_COMMIT;
         words
     }
 
-    fn decode(words: Words, generation: u32, primary_crc: u32) -> Option<[u32; 2]> {
+    fn decode(words: Words, generation: u32, primary_crc: u32) -> Option<Self> {
         if words[COMMIT_INDEX] != EXT_COMMIT
             || words[0] != EXT_HEADER
             || words[1] != generation
             || words[4] != primary_crc
-            || words[5] != EXT_VERSION
             || crc32(&words[..6]) != words[6]
         {
             return None;
         }
-        Some([words[2], words[3]])
+        let digit = words[5] >> VOICE_DIGIT_SHIFT;
+        let (positions, voice_shortcut) = if words[5] == EXT_POSITIONS {
+            (Some([words[2], words[3]]), None)
+        } else if words[5] & 0xff == EXT_VOICE && digit <= u32::from(VOICE_DISABLED) {
+            let positions = (words[5] & HAS_POSITIONS != 0).then_some([words[2], words[3]]);
+            let digit = digit as u8;
+            (positions, Some((digit != VOICE_DISABLED).then_some(digit)))
+        } else {
+            return None;
+        };
+        Some(Self {
+            generation,
+            primary_crc,
+            positions,
+            voice_shortcut,
+        })
     }
 }
 
@@ -166,26 +196,34 @@ fn latest(storage: &mut impl Storage) -> Result<Option<(Page, usize, u32, Entry)
     Ok(latest)
 }
 
-fn latest_with_positions(storage: &mut impl Storage) -> Result<Option<(Page, Entry)>, Error> {
+fn latest_settings(storage: &mut impl Storage) -> Result<Option<(Page, Entry)>, Error> {
     let Some((page, slot, crc, mut entry)) = latest(storage)? else {
         return Ok(None);
     };
     if slot + 1 < SLOTS {
         let extension = storage.read(page, slot + 1)?;
-        entry.settings.positions = Extension::decode(extension, entry.generation, crc);
+        if let Some(extension) = Extension::decode(extension, entry.generation, crc) {
+            entry.settings.positions = extension.positions;
+            entry.settings.voice_shortcut = extension.voice_shortcut;
+        }
     }
     Ok(Some((page, entry)))
 }
 
 pub fn load(storage: &mut impl Storage) -> Result<Option<Settings>, Error> {
-    Ok(latest_with_positions(storage)?.map(|(_, entry)| entry.settings))
+    Ok(latest_settings(storage)?.map(|(_, entry)| entry.settings))
 }
 
 pub fn save(storage: &mut impl Storage, settings: Settings) -> Result<(), Error> {
-    if settings.microphone_gain.is_some_and(|gain| gain > 31) {
+    if settings.microphone_gain.is_some_and(|gain| gain > 31)
+        || settings
+            .voice_shortcut
+            .flatten()
+            .is_some_and(|digit| digit > 9)
+    {
         return Err(Error::InvalidSettings);
     }
-    let (active, generation) = match latest_with_positions(storage)? {
+    let (active, generation) = match latest_settings(storage)? {
         Some((_, entry)) if settings == entry.settings => return Ok(()),
         Some((page, entry)) => (page, entry.generation.wrapping_add(1)),
         None => (Page::First, 0),
@@ -196,7 +234,8 @@ pub fn save(storage: &mut impl Storage, settings: Settings) -> Result<(), Error>
     };
     // Append on the newest page. Extension records occupy the adjacent slot;
     // primary range scanning still decodes only the unchanged 32-byte format.
-    if let Some(slot) = find_slot(storage, active, settings.positions.is_some())? {
+    let with_extension = settings.positions.is_some() || settings.voice_shortcut.is_some();
+    if let Some(slot) = find_slot(storage, active, with_extension)? {
         return commit_entry(storage, active, slot, entry);
     }
     // Leave the active page untouched throughout erase and commit.
@@ -236,14 +275,15 @@ fn commit_entry(
     entry: Entry,
 ) -> Result<(), Error> {
     let primary = entry.encode();
-    if let Some(positions) = entry.settings.positions {
+    if entry.settings.positions.is_some() || entry.settings.voice_shortcut.is_some() {
         // Reserve and verify the primary before placing a committed extension.
         // This prevents a legacy writer from treating the primary as blank.
         stage_words(storage, page, slot, &primary)?;
         let extension = Extension {
             generation: entry.generation,
             primary_crc: primary[6],
-            positions,
+            positions: entry.settings.positions,
+            voice_shortcut: entry.settings.voice_shortcut,
         }
         .encode();
         commit_words(storage, page, slot + 1, &extension, EXT_COMMIT)?;

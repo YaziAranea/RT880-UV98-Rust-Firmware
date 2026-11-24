@@ -259,7 +259,11 @@ fn controller_damage(model: &Model<'_>, previous: Option<&View>) -> DirtyRanges 
             } else {
                 (old.binding_action_index, new.binding_action_index)
             };
-            if menu_start(a) != menu_start(b) || old.bindings != new.bindings {
+            #[cfg(feature = "voice-keyer")]
+            let voice_changed = old.voice_shortcut != new.voice_shortcut;
+            #[cfg(not(feature = "voice-keyer"))]
+            let voice_changed = false;
+            if menu_start(a) != menu_start(b) || old.bindings != new.bindings || voice_changed {
                 dirty.push(48, HEIGHT);
             } else if a != b {
                 for index in [a, b] {

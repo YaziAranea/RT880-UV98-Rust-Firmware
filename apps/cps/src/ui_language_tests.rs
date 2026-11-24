@@ -48,7 +48,7 @@ fn sample_app() -> App {
     app
 }
 
-fn collect_text(shape: &Shape, result: &mut Vec<String>) {
+pub(crate) fn collect_text(shape: &Shape, result: &mut Vec<String>) {
     match shape {
         Shape::Text(text) => result.push(text.galley.text().to_owned()),
         Shape::Vec(shapes) => {
