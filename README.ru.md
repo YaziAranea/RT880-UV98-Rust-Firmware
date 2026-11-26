@@ -8,15 +8,15 @@
 
 [English](README.md) · [Deutsch](README.de.md) · **Русский**
 
-[**Выпуск R58**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r58) · [**Начать здесь — бэкап и установка**](docs/GETTING-STARTED.ru.md)
+[**Выпуск R58-SC5**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r58-sc5) · [**Начать здесь — бэкап и установка**](docs/GETTING-STARTED.ru.md)
 
-[**Полный комплект R58 (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/R58-RT880-UV98.zip) · [**CPS 0.11.0 для Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-CPS-0.11.0.zip)
+[**Полный комплект R58-SC5 (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/R58-SC5-RT880-UV98.zip) · [**CPS 0.11.0 для Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/UV98-CPS-0.11.0.zip)
 
-BIN R58 [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-de.bin) · [Диагностика PA5 RX-only (ZIP, русский)](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/R54-PA5-RX-only.zip)
+BIN R58-SC5 [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/UV98-r58-sc5-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/UV98-r58-sc5-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/UV98-r58-sc5-de.bin) · [Диагностика PA5 RX-only (ZIP, русский)](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/R54-PA5-RX-only.zip)
 
-> **Экспериментальная прошивка для исследованного профиля платы AT32F423.** Сначала проверьте совместимость платы. Перед записью подготовьте в CPS персональный образ R58 по проверенному NOR-бэкапу своей станции. CPS привяжет образ к вашим заводским калибровкам. [Инструкция резервирования и подготовки](docs/GETTING-STARTED.ru.md#4-проверьте-совместимость-перед-прошивкой)
+> **Экспериментальная прошивка для исследованного профиля платы AT32F423.** Сначала проверьте совместимость платы. Перед записью подготовьте в CPS персональный образ R58-SC5 по проверенному NOR-бэкапу своей станции. CPS привяжет образ к вашим заводским калибровкам. [Инструкция резервирования и подготовки](docs/GETTING-STARTED.ru.md#4-проверьте-совместимость-перед-прошивкой)
 
-R58 раньше выводит выбранный пункт меню, сокращает обмен с LCD при сканировании зоны и добавляет окно VFO-скана и журнал находок. В спектре водопад продолжает обновляться во время прослушивания. Для частоты курсора доступны AUTO, AM и FM. [Заметки R58](RELEASE-NOTES-R58.md#русский) · [Настройка голосовой кнопки](RELEASE-NOTES-R57.md#русский)
+В спектре нажимайте **#**, пока не появится **RX+ОБЗОР**. После секунды автоматического прослушивания рация измерит всю полосу и вернётся к прежнему сигналу, если он ещё выше порога. Во время обхода звук прерывается. Курсор остаётся на выбранной частоте. [Заметки R58-SC5](RELEASE-NOTES-R58-SC5.md#русский) · [Настройка голосовой кнопки](RELEASE-NOTES-R57.md#русский)
 
 ## CPS 0.11.0 для Windows
 
@@ -92,7 +92,7 @@ R58 раньше выводит выбранный пункт меню, сокр
 1. Оставьте стоковую прошивку и сохраните исходный `.880dmf` / `.98pdmf` своей станции.
 2. Через нашу CPS считайте **калибровки**, **4 МиБ NOR** и **секции настроек/каналов**. Каждая операция читает данные дважды и сравнивает их.
 3. Сохраните целые папки снимков и подходящий заводской BIN в двух местах. Публичный комплект не содержит прошивку производителя.
-4. Проверьте совместимость платы, затем подготовьте в CPS персональный образ R58 по проверенному снимку NOR. Компилятор Rust для этого не нужен.
+4. Проверьте совместимость платы, затем подготовьте в CPS персональный образ R58-SC5 по проверенному снимку NOR. Компилятор Rust для этого не нужен.
 
 В [пошаговой инструкции](docs/GETTING-STARTED.ru.md) указаны кнопки CPS, ожидаемые файлы, проверка результата и откат. **Дамп NOR 4 МиБ не содержит прошивку MCU и загрузчик.**
 

@@ -8,15 +8,15 @@ This open-source Rust firmware gives the Radtel RT-880 (RT880) and iRadio UV-98 
 
 **English** · [Deutsch](README.de.md) · [Прошивка и установка на русском](README.ru.md)
 
-[**R58 release**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r58) · [**Start here — backup and installation**](docs/GETTING-STARTED.en.md)
+[**R58-SC5 release**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r58-sc5) · [**Start here — backup and installation**](docs/GETTING-STARTED.en.md)
 
-[**Complete R58 package (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/R58-RT880-UV98.zip) · [**Windows CPS 0.11.0 (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-CPS-0.11.0.zip)
+[**Complete R58-SC5 package (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/R58-SC5-RT880-UV98.zip) · [**Windows CPS 0.11.0 (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/UV98-CPS-0.11.0.zip)
 
-R58 BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-de.bin) · [PA5 RX-only diagnostics (ZIP, Russian)](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/R54-PA5-RX-only.zip)
+R58-SC5 BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/UV98-r58-sc5-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/UV98-r58-sc5-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/UV98-r58-sc5-de.bin) · [PA5 RX-only diagnostics (ZIP, Russian)](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/R54-PA5-RX-only.zip)
 
-> **Experimental firmware for the investigated AT32F423 board profile.** Verify board compatibility. Use CPS to prepare a personal R58 image from your radio's verified NOR backup before flashing. CPS binds the image to your factory calibration. [Backup and preparation guide](docs/GETTING-STARTED.en.md#4-check-compatibility-before-flashing)
+> **Experimental firmware for the investigated AT32F423 board profile.** Verify board compatibility. Use CPS to prepare a personal R58-SC5 image from your radio's verified NOR backup before flashing. CPS binds the image to your factory calibration. [Backup and preparation guide](docs/GETTING-STARTED.en.md#4-check-compatibility-before-flashing)
 
-R58 draws the selected menu control earlier, reduces LCD traffic during zone scanning and adds a VFO scan range and a log of recent signals. The spectrum keeps drawing the waterfall while you listen and offers AUTO, AM and FM for the cursor frequency. [R58 release notes](RELEASE-NOTES-R58.md#english) · [Set up the voice key](RELEASE-NOTES-R57.md#english)
+In the spectrum, tap **#** until **RX+SWEEP** appears. After one second of automatic listening, the radio measures the whole band and returns to the same signal if it is still above threshold. Audio pauses during the sweep. The cursor stays on the frequency you selected. [R58-SC5 release notes](RELEASE-NOTES-R58-SC5.md#english) · [Set up the voice key](RELEASE-NOTES-R57.md#english)
 
 ## Windows CPS 0.11.0
 
@@ -92,7 +92,7 @@ The stock “800 MHz” mode starts at **840 MHz**. The preset uses 850.000 MHz.
 1. Keep the radio on its stock firmware and save its original `.880dmf` / `.98pdmf` file.
 2. Use our CPS to save **calibration**, **4 MiB NOR** and **settings/channel sections**. Each operation reads twice and compares the results.
 3. Keep the complete snapshot folders and a matching factory recovery file in two places. The public package does not include the manufacturer's firmware.
-4. Check board compatibility, then prepare your personal R58 image in CPS from the verified NOR snapshot. No Rust compiler is needed for this step.
+4. Check board compatibility, then prepare your personal R58-SC5 image in CPS from the verified NOR snapshot. No Rust compiler is needed for this step.
 
 The [file checklist and step-by-step guide](docs/GETTING-STARTED.en.md) names every CPS button and expected file. **The 4 MiB NOR backup is not an MCU firmware or bootloader dump.**
 

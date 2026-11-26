@@ -8,15 +8,15 @@ Die quelloffene Rust-Firmware für Radtel RT-880 (RT880) und iRadio UV-98 Plus (
 
 [English](README.md) · **Deutsch** · [Русский](README.ru.md)
 
-[**Version R58**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r58) · [**Hier beginnen — Sicherung und Installation**](docs/GETTING-STARTED.de.md)
+[**Version R58-SC5**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r58-sc5) · [**Hier beginnen — Sicherung und Installation**](docs/GETTING-STARTED.de.md)
 
-[**R58-Komplettpaket (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/R58-RT880-UV98.zip) · [**CPS 0.11.0 für Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-CPS-0.11.0.zip)
+[**R58-SC5-Komplettpaket (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/R58-SC5-RT880-UV98.zip) · [**CPS 0.11.0 für Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/UV98-CPS-0.11.0.zip)
 
-R58-BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-de.bin) · [PA5-Empfangsdiagnose (ZIP, Russisch)](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/R54-PA5-RX-only.zip)
+R58-SC5-BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/UV98-r58-sc5-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/UV98-r58-sc5-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/UV98-r58-sc5-de.bin) · [PA5-Empfangsdiagnose (ZIP, Russisch)](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/R54-PA5-RX-only.zip)
 
-> **Experimentelle Firmware für das untersuchte AT32F423-Platinenprofil.** Zuerst die Platinenkompatibilität prüfen. Vor dem Flashen mit CPS ein persönliches R58-Image aus der geprüften NOR-Sicherung des eigenen Geräts erstellen. CPS bindet das Image an die eigenen Werkskalibrierungen. [Sicherungs- und Vorbereitungsanleitung](docs/GETTING-STARTED.de.md#4-kompatibilität-vor-dem-flashen-prüfen)
+> **Experimentelle Firmware für das untersuchte AT32F423-Platinenprofil.** Zuerst die Platinenkompatibilität prüfen. Vor dem Flashen mit CPS ein persönliches R58-SC5-Image aus der geprüften NOR-Sicherung des eigenen Geräts erstellen. CPS bindet das Image an die eigenen Werkskalibrierungen. [Sicherungs- und Vorbereitungsanleitung](docs/GETTING-STARTED.de.md#4-kompatibilität-vor-dem-flashen-prüfen)
 
-R58 zeigt das ausgewählte Bedienelement früher an, überträgt beim Zonensuchlauf weniger LCD-Daten und ergänzt den VFO-Suchlauf um einen einstellbaren Bereich und ein Trefferprotokoll. Beim Abhören läuft der Wasserfall weiter. Für die Cursorfrequenz stehen AUTO, AM und FM zur Wahl. [Versionshinweise R58](RELEASE-NOTES-R58.md#deutsch) · [Sprachtaste einrichten](RELEASE-NOTES-R57.md#deutsch)
+In der Spektrumanzeige **#** kurz drücken, bis **RX+SCAN** erscheint. Nach einer Sekunde automatischen Abhörens misst das Gerät den gesamten Bereich und kehrt zum bisherigen Signal zurück, sofern es noch über der Schwelle liegt. Beim Durchlauf setzt der Ton kurz aus. Der Cursor bleibt auf der gewählten Frequenz. [Versionshinweise R58-SC5](RELEASE-NOTES-R58-SC5.md#deutsch) · [Sprachtaste einrichten](RELEASE-NOTES-R57.md#deutsch)
 
 ## Windows-CPS 0.11.0
 
@@ -92,7 +92,7 @@ Der originale Modus „800 MHz“ beginnt bei **840 MHz**. Die Vorgabe wählt 85
 1. Die Originalfirmware beibehalten und die ursprüngliche `.880dmf`-/`.98pdmf`-Datei des eigenen Geräts sichern.
 2. Mit unserer CPS **Kalibrierung**, **4 MiB NOR** sowie **Einstellungs-/Kanalsektionen** lesen. Jeder Vorgang liest zweimal und vergleicht die Daten.
 3. Die vollständigen Sicherungsordner und eine passende originale Wiederherstellungsdatei an zwei Orten aufbewahren. Das öffentliche Paket enthält keine Herstellerfirmware.
-4. Die Platinenkompatibilität prüfen und anschließend in CPS ein persönliches R58-Image aus der geprüften NOR-Sicherung erstellen. Dafür wird kein Rust-Compiler benötigt.
+4. Die Platinenkompatibilität prüfen und anschließend in CPS ein persönliches R58-SC5-Image aus der geprüften NOR-Sicherung erstellen. Dafür wird kein Rust-Compiler benötigt.
 
 Die [Schritt-für-Schritt-Anleitung](docs/GETTING-STARTED.de.md) nennt die CPS-Schaltflächen, erwarteten Dateien, Prüfkriterien und den Rückweg. **Der 4-MiB-NOR-Dump enthält weder MCU-Firmware noch Bootloader.**
 

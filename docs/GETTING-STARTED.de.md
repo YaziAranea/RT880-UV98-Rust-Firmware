@@ -6,7 +6,7 @@
 
 Diese Anleitung beschreibt die erste Vorbereitung eines UV-98 Plus / der untersuchten RT-880-Plattform. **Die Originaldaten zunächst mit installierter Originalfirmware auslesen. Erst nach der Kompatibilitätsprüfung ein Firmware-Image wählen.** Die Sicherung ist auch ohne Installation der Rust-Firmware möglich.
 
-R58 bietet getrennte BINs für RU, EN und DE. Ein vollständiges Firmware-Update löscht das Einstellungsjournal samt gespeicherter A/B-Position. [Versionsseite](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r58) · [Versionshinweise R58](../RELEASE-NOTES-R58.md#deutsch) · [Sprachtaste einrichten](../RELEASE-NOTES-R57.md#deutsch)
+R58-SC5 bietet getrennte BINs für RU, EN und DE. Ein vollständiges Firmware-Update löscht das Einstellungsjournal samt gespeicherter A/B-Position. [Versionsseite](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r58-sc5) · [Versionshinweise R58-SC5](../RELEASE-NOTES-R58-SC5.md#deutsch) · [Sprachtaste einrichten](../RELEASE-NOTES-R57.md#deutsch)
 
 ## 1. Funkgerät und Ordner vorbereiten
 
@@ -15,7 +15,7 @@ R58 bietet getrennte BINs für RU, EN und DE. Ein vollständiges Firmware-Update
 3. Mit der originalen CPS für das eigene Modell das Gerät auslesen und die ursprüngliche `.880dmf`- oder `.98pdmf`-Datei speichern. Eine vorhandene Originaldatei wie `999.880dmf` unverändert aufbewahren.
 4. Original-CPS, Radio Tuning Software und andere Programme schließen, die das Kabel verwenden. Vor dem ersten Auslesen mit unserer CPS das Gerät für 3 Sekunden ausschalten und wieder normal starten.
 5. Einen Ordner anlegen, etwa `Dokumente/UV98-backup-2026-11-16`. Sinnvolle Unterordner: `01-original`, `02-calibration`, `03-nor`, `04-settings`, `05-recovery`. Die ursprüngliche CPS-Datei in `01-original` ablegen.
-6. [CPS 0.11.0 für Windows](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-CPS-0.11.0.zip) oder das [R58-Komplettpaket](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/R58-RT880-UV98.zip) entpacken. `libunwind.dll` neben `UV98-CPS.exe` belassen. CPS starten, unter **Язык / Language / Sprache** die Option **Deutsch** wählen und **Sicherungen** öffnen. Den tatsächlichen COM-Port über **Liste aktualisieren → Verfügbare Ports** wählen. Portnummern in älteren Screenshots und Protokollen können abweichen.
+6. [CPS 0.11.0 für Windows](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/UV98-CPS-0.11.0.zip) oder das [R58-SC5-Komplettpaket](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/R58-SC5-RT880-UV98.zip) entpacken. `libunwind.dll` neben `UV98-CPS.exe` belassen. CPS starten, unter **Язык / Language / Sprache** die Option **Deutsch** wählen und **Sicherungen** öffnen. Den tatsächlichen COM-Port über **Liste aktualisieren → Verfügbare Ports** wählen. Portnummern in älteren Screenshots und Protokollen können abweichen.
 
 Die Sprachwahl ist stets in der Symbolleiste sichtbar. Alle acht Reiter und bereits angezeigte Statusmeldungen wechseln sofort die Sprache. Ungespeicherte Änderungen bleiben erhalten. CPS speichert die Sprachwahl im Windows-Benutzerprofil. Titel und Filter der Dateidialoge folgen der CPS-Sprache. Die Standardschaltflächen folgen der Windows-Sprache.
 
@@ -79,11 +79,11 @@ Die Datei mit dem Namen `RT-880_Upgrade_V1_16_250915.bin` im Ordner `recovery` n
 
 ## 4. Kompatibilität vor dem Flashen prüfen
 
-R58 ist für das untersuchte AT32F423-Platinenprofil vorgesehen. Vor dem Flashen die Platinenrevision prüfen. Die öffentlichen R58-BINs enthalten einen Nullwert für den Kalibrierungs-Hash. CPS setzt den Hash des eigenen Geräts ein, wenn es das persönliche Image aus der Sicherung vorbereitet.
+R58-SC5 ist für das untersuchte AT32F423-Platinenprofil vorgesehen. Vor dem Flashen die Platinenrevision prüfen. Die öffentlichen R58-SC5-BINs enthalten einen Nullwert für den Kalibrierungs-Hash. CPS setzt den Hash des eigenen Geräts ein, wenn es das persönliche Image aus der Sicherung vorbereitet.
 
 Für eine bestätigte kompatible Platine eine persönliche BIN vorbereiten. **Ein Rust-Compiler wird dafür nicht benötigt.**
 
-1. Die ursprüngliche R58-BIN für die gewünschte Sprache aus dem Ordner `firmware` des Komplettpakets wählen oder separat herunterladen. [RU](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-ru.bin) · [EN](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-en.bin) · [DE](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-de.bin) Die Datei in CPS unter **Firmware → BIN auswählen…** öffnen. Für eine kompatible ursprüngliche Anwendungs-BIN mit Kalibrierprofil ist der Versionskatalog optional.
+1. Die ursprüngliche R58-SC5-BIN für die gewünschte Sprache aus dem Ordner `firmware` des Komplettpakets wählen oder separat herunterladen. [RU](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/UV98-r58-sc5-ru.bin) · [EN](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/UV98-r58-sc5-en.bin) · [DE](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58-sc5/UV98-r58-sc5-de.bin) Die Datei in CPS unter **Firmware → BIN auswählen…** öffnen. Für eine kompatible ursprüngliche Anwendungs-BIN mit Kalibrierprofil ist der Versionskatalog optional.
 2. **Image für mein Funkgerät vorbereiten…** anklicken.
 3. **`manifest.json` der vollständigen 4-MiB-NOR-Sicherung** auswählen, die mit „Einstellungsspeicher lesen (4 MiB)“ erstellt wurde. Das Manifest auswählen, nicht `storage-address-space.bin` selbst. Eine reine Kalibrierungssicherung reicht nicht aus.
 4. Einen übergeordneten Ordner für neue Images wählen, etwa `Dokumente/UV98-personal`. CPS erstellt darin ein neues Verzeichnis `UV98-personal-…`.
@@ -94,7 +94,7 @@ CPS prüft den Status der zwei Lesevorgänge, Größen und SHA256-Werte der Sich
 
 Der Katalog enthält den SHA256-Wert der persönlichen BIN sowie Personalisierungsdaten im Schema 2 mit den Hashes von Quelle und Sicherung. CPS prüft Aufbau und Integrität der Datei. Quelle der Version, Herausgeber und Platinenrevision separat bestätigen.
 
-Wird die Vorbereitung abgelehnt, die Auswahl prüfen. Erforderlich sind die vollständige NOR-Sicherung des eigenen Geräts mit zwei übereinstimmenden Lesevorgängen und die ursprüngliche R58-BIN. Das Originalmanifest bei den Dateien der Sicherung aufbewahren.
+Wird die Vorbereitung abgelehnt, die Auswahl prüfen. Erforderlich sind die vollständige NOR-Sicherung des eigenen Geräts mit zwei übereinstimmenden Lesevorgängen und die ursprüngliche R58-SC5-BIN. Das Originalmanifest bei den Dateien der Sicherung aufbewahren.
 
 Erst nach erfolgreicher Vorbereitung, bestätigter Platinenkompatibilität und Sicherung der geprüften Daten sowie der richtigen Werks-BIN an zwei Orten fortfahren.
 
@@ -107,13 +107,13 @@ Erst nach erfolgreicher Vorbereitung, bestätigter Platinenkompatibilität und S
 5. Auf die ausdrückliche Abschlussmeldung warten. Während des Schreibens weder ausschalten noch das Kabel abziehen oder CPS schließen.
 6. Nach Abschluss für 3 Sekunden ausschalten und **ohne PTT** starten. Anzeige, Tasten und Empfang prüfen. Das Vorgangsprotokoll aufbewahren.
 
-**Anzeigesprache.** Vor dem Flashen die BIN für die gewünschte Sprache wählen. Jede R58-BIN enthält eine Anzeigesprache. Die CPS-Sprache wird getrennt in der Symbolleiste gewählt.
+**Anzeigesprache.** Vor dem Flashen die BIN für die gewünschte Sprache wählen. Jede R58-SC5-BIN enthält eine Anzeigesprache. Die CPS-Sprache wird getrennt in der Symbolleiste gewählt.
 
 In der Standardbelegung fordert die obere PTT eine Sendung über A an, die untere über B. Der grüne Rahmen markiert den Empfang, der rote TX-Rahmen hat Vorrang. Ein großes rotes **L**, gelbes **M** oder grünes **H** zeigt die eingestellte Leistung des sendenden VFOs, auch wenn B sendet und A ausgewählt ist. Nach dem Einschalten steht die Leistung auf LOW. Änderungen bleiben im RAM. Das Akkusymbol zeigt den ungefähren Stand mit bis zu vier Balken und die Spannung in Schritten von 0,1 V (`--.-V`, wenn kein Messwert verfügbar ist). [Nachweise zur unteren PTT](../research/r37/ptt.md)
 
 Bootloader-Bestätigungen belegen die Dateiübertragung. Start, Empfang, beide PTT-Tasten bei kurzem Druck, Relaisantwort und Zonenscan am Funkgerät prüfen.
 
-Unter **SYSTEM / TX → ÜBER FIRMWARE** steht **R58-SC3**. Die Kopfzeile der Menüseiten zeigt **R58**.
+Unter **SYSTEM / TX → ÜBER FIRMWARE** steht **R58-SC5**. Die Kopfzeile der Menüseiten zeigt **SC5**.
 
 ### VFO-Suchlaufbereich und Protokoll
 
@@ -128,7 +128,7 @@ Unter **SCAN/SPEKTRUM → SCANPROTOKOLL** lassen sich mit den Pfeiltasten bis zu
 
 1. Im VFO **126400** eingeben und mit **MENU** bestätigen. Bei Standardbelegung **0** gedrückt halten oder **SCAN/SPEKTRUM → SPEKTRUM** öffnen. In der Spektrumanzeige steuern die Zifferntasten den Durchlauf.
 2. In **AUTO** zeigt der Cursor bei 126,400 MHz und im Bereich ab 118,000 MHz bis unter 137,000 MHz **AM** an. Außerhalb dieses Bereichs zeigt er **FM** an. Während eines Durchlaufs **MENU → ↑** drücken und unter **AM/FM** mit **MENU** den Modus wählen. Ein kurzer Druck auf **EXIT** schließt das Menü.
-3. Mit **6** die Cursorfrequenz abhören. Ein kurzer Druck auf **0** setzt den Durchlauf fort. Mit **#** kurz zwischen **AUTO AUDIO** und **AUTO SCAN** wechseln. Bei einem gehaltenen Signal fügt der Wasserfall Messwerte dieser Frequenz hinzu. Benachbarte Frequenzen bleiben in den neuen Zeilen leer.
+3. Mit **6** die Cursorfrequenz manuell abhören. Mit **0** kurz zum Durchlauf zurückkehren. Ein kurzer Druck auf **#** wechselt zwischen **AUTO AUDIO → AUTO SCAN → RX+SCAN**. Voreingestellt ist **AUTO AUDIO**. In **RX+SCAN** misst das Gerät nach einer Sekunde automatischen Abhörens den gesamten Bereich. Die benachbarten Spalten werden aktualisiert. Während des Durchlaufs setzt der Ton aus. Liegt das bisherige Signal noch über der Schwelle, kehrt das Gerät dorthin zurück. Der Cursor bleibt auf der manuell gewählten Frequenz. Die große **RX**-Anzeige zeigt die Empfangsfrequenz.
 
 ### CB-Kanalraster
 
