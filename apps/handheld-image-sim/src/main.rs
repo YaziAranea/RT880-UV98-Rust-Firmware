@@ -2164,13 +2164,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "57-SIMULATED-spectrum-listening.png",
         milliseconds.get(),
     )?);
-    // Keep the receiver on one bin. A stable carrier must still advance the
-    // time axis after it has filled the entire 16-row waterfall.
+    // Hold the receiver on one bin for longer than the whole waterfall.
+    // Its neighbours must keep the exact history from before listening.
     let mut held = snapshot;
+    let history_before_listen = panel.borrow().pixels[190 * WIDTH..254 * WIDTH].to_vec();
+    let bins = usize::from(snapshot.len);
+    let held_x = 12 + usize::from(cursor) * 216 / bins..12 + (usize::from(cursor) + 1) * 216 / bins;
     for sequence in 1..=20 {
         held.plot.held_sample = Some(uv98_spectrum::compact::HeldSample {
             bin: cursor,
-            raw: 165,
+            raw: match sequence {
+                18 => 0,
+                19 => 30,
+                _ => 165,
+            },
             sequence: std::num::NonZeroU32::new(sequence).unwrap(),
         });
         let before = panel.borrow().pixels[190 * WIDTH..254 * WIDTH].to_vec();
@@ -2180,6 +2187,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             before[..] != panel.borrow().pixels[190 * WIDTH..254 * WIDTH],
             "held carrier froze the waterfall at observation {sequence}"
         );
+        for (original, current) in history_before_listen.chunks_exact(WIDTH)
+            .zip(panel.borrow().pixels[190 * WIDTH..254 * WIDTH].chunks_exact(WIDTH))
+        {
+            assert_eq!(original[12..held_x.start], current[12..held_x.start]);
+            assert_eq!(original[held_x.end..228], current[held_x.end..228]);
+        }
         let name = format!("57-held-{sequence:02}.png");
         frames.push(capture(&mut app, &panel, output, &name, milliseconds.get())?);
     }

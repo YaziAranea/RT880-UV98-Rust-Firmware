@@ -1333,14 +1333,14 @@ pub const VERSION: &str = "0.1.8-r54";
 #[cfg(feature = "pa5-audio")]
 pub const VERSION: &str = "R55-CT";
 #[cfg(all(feature = "voice-keyer", not(feature = "pa5-audio")))]
-pub const VERSION: &str = "R58-SC3";
+pub const VERSION: &str = "R58-SC4";
 /// Header has a fixed 42 px slot; About shows the full string.
 #[cfg(not(any(feature = "pa5-audio", feature = "voice-keyer")))]
 pub const VERSION_SHORT: &str = "R54";
 #[cfg(feature = "pa5-audio")]
 pub const VERSION_SHORT: &str = "PA5";
 #[cfg(all(feature = "voice-keyer", not(feature = "pa5-audio")))]
-pub const VERSION_SHORT: &str = "R58";
+pub const VERSION_SHORT: &str = "SC4";
 
 fn crossband(row: u16, out: &mut Row<'_>, view: &View) {
     let (status, tint) = match view.crossband_probe {
@@ -1427,6 +1427,7 @@ pub struct Waterfall {
     last_held: u16,
     // Consecutive advances that left the newest band's pixels unchanged.
     repeats: u8,
+    held_tick: u8,
 }
 
 impl Default for Waterfall {
@@ -1442,6 +1443,7 @@ impl Waterfall {
             newest: 0,
             last_held: 0,
             repeats: 0,
+            held_tick: 0,
         }
     }
 
@@ -1449,7 +1451,9 @@ impl Waterfall {
         let Some((floor, _)) = spectrum_bounds(plot) else {
             return;
         };
-        let row = self.next_row();
+        self.newest = (self.newest + 1) % WATERFALL_ROWS;
+        let row = &mut self.rows[self.newest];
+        row.fill(0);
         for index in 0..usize::from(len).min(SPECTRUM_BINS) {
             if plot.valid(index) {
                 row[index] = waterfall_level(plot.latest[index], floor);
@@ -1458,6 +1462,7 @@ impl Waterfall {
         self.last_held = 0;
     }
 
+    #[inline(never)]
     pub fn push_held(&mut self, plot: &Plot, len: u8) {
         if let Some(sample) = plot.held_sample.filter(|sample| {
             sample.bin < len.min(SPECTRUM_BINS as u8)
@@ -1465,9 +1470,19 @@ impl Waterfall {
         }) {
             // A manual Listen can start before the first complete sweep.
             let floor = spectrum_bounds(plot).map_or(128, |(floor, _)| floor);
-            let level = waterfall_level(sample.raw, floor);
-            self.next_row()[usize::from(sample.bin)] = level;
+            let mut level = waterfall_level(sample.raw, floor);
             let held = (u16::from(sample.bin) << 3) | u16::from(level);
+            // Carry one real sample down the held bin. The other columns keep
+            // the same sweep history until the next full sweep.
+            let mut row = self.newest;
+            loop {
+                level = core::mem::replace(&mut self.rows[row][usize::from(sample.bin)], level);
+                row = row.wrapping_sub(1) % WATERFALL_ROWS;
+                if row == self.newest {
+                    break;
+                }
+            }
+            self.held_tick = self.held_tick.wrapping_add(1);
             self.repeats = if self.last_held == held {
                 self.repeats.saturating_add(1)
             } else {
@@ -1475,14 +1490,6 @@ impl Waterfall {
             };
             self.last_held = held;
         }
-    }
-
-    #[inline(never)]
-    fn next_row(&mut self) -> &mut [u8; SPECTRUM_BINS] {
-        self.newest = (self.newest + 1) % WATERFALL_ROWS;
-        let row = &mut self.rows[self.newest];
-        row.fill(0);
-        row
     }
 
     fn row(&self, age: usize) -> &[u8; SPECTRUM_BINS] {
@@ -1785,7 +1792,7 @@ fn spectrum(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
             // a steady carrier produces identical rows throughout the history.
             if listening
                 && view.plot.held_sample.is_some()
-                && age == history.newest % WATERFALL_TICK_SLOTS
+                && age == (history.newest + usize::from(history.held_tick)) % WATERFALL_TICK_SLOTS
             {
                 out[5..8].fill(color::ACCENT);
             }
@@ -3482,6 +3489,34 @@ mod tests {
     use super::*;
     use crate::controller::Entry;
     use std::{cell::RefCell, rc::Rc, vec, vec::Vec};
+
+    #[test]
+    fn listen_before_first_sweep_only_records_valid_samples_of_the_held_bin() {
+        use uv98_spectrum::compact::{HeldSample, MAX_RAW};
+
+        let mut history = Waterfall::new();
+        let mut plot = Plot::EMPTY;
+        plot.held_sample = Some(HeldSample {
+            sequence: core::num::NonZeroU32::MIN,
+            bin: 0,
+            raw: 160,
+        });
+        history.push_held(&plot, 5);
+        assert_eq!(history.row(0)[0], waterfall_level(160, 128));
+        assert!(history.row(0)[1..].iter().all(|&level| level == 0));
+        for age in 1..WATERFALL_ROWS {
+            assert_eq!(history.row(age), &[0; SPECTRUM_BINS]);
+        }
+
+        let original = history.clone();
+        for (bin, raw) in [(5, 160), (0, MAX_RAW + 1)] {
+            let sample = plot.held_sample.as_mut().unwrap();
+            sample.bin = bin;
+            sample.raw = raw;
+            history.push_held(&plot, 5);
+            assert_eq!(history, original);
+        }
+    }
 
     #[test]
     fn menu_cache_matches_label_pixels_and_reuses_glyphs_across_windows() {
