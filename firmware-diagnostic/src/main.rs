@@ -50,13 +50,13 @@ use uv98_boot_log::hardware::{RawMmio, TxLogger};
 use uv98_boot_log::{Frame, Logger, RegisterIo};
 use uv98_diag_startup::{hardware as startup, FixedCycleMillis, CORE_NOMINAL_HZ, CORE_UPPER_HZ};
 use uv98_display::DisplayBus;
-use uv98_handheld_app::{App, InputSample, SpectrumSnapshot};
 #[cfg(not(feature = "voice-keyer"))]
 use uv98_handheld_app::PRESERVED_CALIBRATION_SHA256;
+use uv98_handheld_app::{App, InputSample, SpectrumSnapshot};
 use uv98_handheld_ui::{
     controller::{
-        CrossbandProbe, Request, RxToneSource, ScanState, Screen, ShortwaveStatus, Slot, View,
-        SPECTRUM_INTERVALS, STEP_10HZ,
+        CrossbandProbe, Request, RxToneSource, ScanState, Screen, ShortwaveStatus, Slot,
+        SpectrumCapture, View, SPECTRUM_INTERVALS, STEP_10HZ,
     },
     render,
     render::{Modulation as UiModulation, RadioRoute, RadioState, RadioView, SpectrumState},
@@ -130,7 +130,9 @@ fn expected_calibration_digest() -> [u8; 32] {
 /// What the operator asked the spectrum session to become after the sweep
 /// owner finishes its current restore. The allowed follow-up is decided by the
 /// tested `spectrum_flow` policy, not by the restore reason alone.
-use uv98_radio_runtime::spectrum_flow::{Action as SpectrumAction, Intent as SpectrumIntent};
+use uv98_radio_runtime::spectrum_flow::{
+    Action as SpectrumAction, AfterListen, Intent as SpectrumIntent,
+};
 
 fn spectrum_error(error: scope::StartError) -> render::SpectrumError {
     use render::SpectrumError as Ui;
@@ -1063,9 +1065,7 @@ fn main() -> ! {
     let mut spectrum_edge: Option<(u32, bool)> = None;
     // Pending action after the sweep's selected/original restore completes.
     let mut spectrum_intent: Option<SpectrumIntent> = None;
-    // End temporary listening: Some(true) resumes the same window, Some(false)
-    // exits the spectrum session. None means no stop was requested.
-    let mut listen_after: Option<bool> = None;
+    let mut listen_after: Option<AfterListen> = None;
     // Publish one final stopped snapshot after the sweep ends, then stop
     // rewriting an identical snapshot every 250 ms while the scope is idle.
     let mut publish_spectrum_final = false;
@@ -1759,6 +1759,9 @@ fn main() -> ! {
         let side_activity = upper || lower;
         if side_activity {
             restart_spectrum = false;
+            if matches!(spectrum_intent, Some(SpectrumIntent::SkipListen(_))) {
+                spectrum_intent = None;
+            }
         }
         scope.event(now, spectrum::Event::Ptt(side_activity));
         let update = checked(&mut log, app.sample(input_at, sample), 0xE032);
@@ -1978,7 +1981,7 @@ fn main() -> ! {
             checked(&mut log, app.cancel_spectrum_pending(), 0xE032);
             if scope.listening() || scope.listen_restoring() {
                 checked(&mut log, app.set_spectrum_listening(false), 0xE032);
-                listen_after = Some(false);
+                listen_after = Some(AfterListen::Exit);
             } else {
                 spectrum_intent = Some(SpectrumIntent::Exit);
                 scope.event(now, spectrum::Event::Stop);
@@ -2061,7 +2064,7 @@ fn main() -> ! {
                     checked(&mut log, app.cancel_spectrum_pending(), 0xE032);
                     if scope.listening() || scope.listen_restoring() {
                         checked(&mut log, app.set_spectrum_listening(false), 0xE032);
-                        listen_after = Some(false);
+                        listen_after = Some(AfterListen::Exit);
                     } else {
                         spectrum_intent = Some(SpectrumIntent::Exit);
                         scope.event(now, spectrum::Event::Stop);
@@ -2129,7 +2132,7 @@ fn main() -> ! {
                 }
                 Request::PanSpectrum { forward, fine } => {
                     let from_listen = (scope.listening() || scope.listen_restoring())
-                        && listen_after != Some(false);
+                        && listen_after != Some(AfterListen::Exit);
                     if scope.can_restart() || restart_spectrum || from_listen {
                         let next = (|| {
                             let current = scope.window()?;
@@ -2155,7 +2158,7 @@ fn main() -> ! {
                             spectrum_edge = fine.then_some((center, forward));
                             if from_listen {
                                 checked(&mut log, app.set_spectrum_listening(false), 0xE032);
-                                listen_after = Some(true);
+                                listen_after = Some(AfterListen::Resume);
                             } else if !restart_spectrum {
                                 restart_spectrum = true;
                                 spectrum_intent = Some(SpectrumIntent::Restart);
@@ -2177,7 +2180,11 @@ fn main() -> ! {
                     }
                 }
                 Request::ResumeSpectrum => {
-                    scope.resume();
+                    if matches!(listen_after, Some(AfterListen::Refresh(_))) {
+                        listen_after = Some(AfterListen::Resume);
+                    } else {
+                        scope.resume();
+                    }
                     spectrum_published_at = now.wrapping_sub(250);
                 }
                 Request::ResetSpectrumPeaks => {
@@ -2210,20 +2217,30 @@ fn main() -> ! {
                         } else {
                             render::SpectrumError::Window
                         };
-                        if !matches!(spectrum_intent, Some(SpectrumIntent::Listen(_))) {
+                        if !matches!(
+                            spectrum_intent,
+                            Some(SpectrumIntent::Listen(_) | SpectrumIntent::AutoListen(_))
+                        ) {
                             checked(&mut log, app.cancel_spectrum_pending(), 0xE032);
                         }
                         checked(&mut log, app.note_spectrum_error(reason), 0xE032);
                     }
                 }
                 Request::StopListenSpectrum => {
-                    checked(&mut log, app.cancel_spectrum_pending(), 0xE032);
-                    if scope.listening() || scope.listen_restoring() {
+                    if let Some(SpectrumIntent::Listen(bin) | SpectrumIntent::AutoListen(bin)) =
+                        spectrum_intent
+                    {
+                        checked(&mut log, app.cancel_spectrum_pending(), 0xE032);
+                        spectrum_intent = Some(SpectrumIntent::SkipListen(bin));
+                        scope.event(now, spectrum::Event::Stop);
+                    } else if (scope.listening() || scope.listen_restoring())
+                        && listen_after != Some(AfterListen::Exit)
+                    {
                         // Resume the same sweep window after the original RX
                         // plan is confirmed again. The UI stops claiming audio
                         // before the restore completes.
                         checked(&mut log, app.set_spectrum_listening(false), 0xE032);
-                        listen_after = Some(true);
+                        listen_after = Some(AfterListen::Resume);
                         spectrum_published_at = now.wrapping_sub(250);
                     }
                 }
@@ -2378,7 +2395,7 @@ fn main() -> ! {
             let view = app.status().view;
             scope.set_trigger(
                 Some(u16::from(view.spectrum_trigger)),
-                view.spectrum_auto_listen,
+                view.spectrum_capture.listens(),
             );
             let completion = checked(
                 &mut log,
@@ -2396,7 +2413,9 @@ fn main() -> ! {
                 match action {
                     SpectrumAction::BeginListen => {
                         let at = sample_time(&mut time);
-                        if scope.begin_listen(at) {
+                        if scope
+                            .begin_listen(at, matches!(intent, Some(SpectrumIntent::AutoListen(_))))
+                        {
                             // A cancel may already have arrived while the bin
                             // restore was in flight; the listen-end pass below
                             // then restores the original plan immediately.
@@ -2415,7 +2434,7 @@ fn main() -> ! {
                                     } else {
                                         // UI rejected this late ACK. Restore the
                                         // saved receiver now, not after Listen timeout.
-                                        listen_after = Some(false);
+                                        listen_after = Some(AfterListen::Exit);
                                         checked(
                                             &mut log,
                                             app.set_spectrum_listening(false),
@@ -2429,7 +2448,7 @@ fn main() -> ! {
                                         );
                                     }
                                 } else {
-                                    listen_after = Some(false);
+                                    listen_after = Some(AfterListen::Exit);
                                     checked(&mut log, app.set_spectrum_listening(false), 0xE032);
                                     checked(&mut log, app.cancel_spectrum_pending(), 0xE032);
                                     checked(
@@ -2467,57 +2486,53 @@ fn main() -> ! {
                         publish_spectrum_final = false;
                         spectrum_published_at = now.wrapping_sub(250);
                     }
-                    SpectrumAction::Restart => {
-                        let mut restarted = false;
-                        let mut discarded = false;
-                        if restart_spectrum {
-                            restart_spectrum = false;
-                            if matches!(reason, spectrum::StopReason::Exit) {
-                                let started = {
-                                    let calibration = match app.calibration_view() {
-                                        Some(c) => c,
-                                        None => stop(0xE050),
-                                    };
-                                    match spectrum_window(
-                                        app.view_ref(),
-                                        spectrum_center.unwrap_or(request.frequency_10hz),
-                                    ) {
-                                        Some(window) => scope
-                                            .start_panned_window(
-                                                &radio,
-                                                &calibration,
-                                                request,
-                                                window,
-                                                sample_time(&mut time),
-                                            )
-                                            .is_ok(),
-                                        None => false,
-                                    }
+                    SpectrumAction::Restart | SpectrumAction::RestartSkipping(_) => {
+                        let skip = if let SpectrumAction::RestartSkipping(bin) = action {
+                            Some(bin)
+                        } else {
+                            None
+                        };
+                        let restart = core::mem::take(&mut restart_spectrum);
+                        if !side_activity && (restart || skip.is_some()) {
+                            let started = if let Some(bin) = skip {
+                                scope.restart_held_window(now, bin, true).is_ok()
+                            } else {
+                                let calibration = match app.calibration_view() {
+                                    Some(c) => c,
+                                    None => stop(0xE050),
                                 };
-                                if started {
-                                    restarted = true;
-                                    last_signal = None;
-                                    telemetry_samples = 4;
-                                    spectrum_published_at = now.wrapping_sub(250);
-                                } else {
-                                    scope.discard();
-                                    discarded = true;
-                                    publish_spectrum_final = false;
-                                    checked(&mut log, app.clear_spectrum(), 0xE032);
-                                    checked(
-                                        &mut log,
-                                        app.reject_spectrum_start(render::SpectrumError::Route),
-                                        0xE032,
-                                    );
+                                match spectrum_window(
+                                    app.view_ref(),
+                                    spectrum_center.unwrap_or(request.frequency_10hz),
+                                ) {
+                                    Some(window) => scope
+                                        .start_panned_window(
+                                            &radio,
+                                            &calibration,
+                                            request,
+                                            window,
+                                            sample_time(&mut time),
+                                        )
+                                        .is_ok(),
+                                    None => false,
                                 }
+                            };
+                            if !started {
+                                scope.discard();
+                                publish_spectrum_final = false;
+                                checked(&mut log, app.clear_spectrum(), 0xE032);
+                                checked(
+                                    &mut log,
+                                    app.reject_spectrum_start(render::SpectrumError::Route),
+                                    0xE032,
+                                );
                             }
-                        }
-                        if !restarted && !discarded {
+                        } else {
                             current =
                                 policy::restored_current(profile(&app, &settings).ok(), request);
                             publish_spectrum_final = true;
-                            spectrum_published_at = now.wrapping_sub(250);
                         }
+                        spectrum_published_at = now.wrapping_sub(250);
                     }
                     SpectrumAction::Finish => {
                         current = policy::restored_current(profile(&app, &settings).ok(), request);
@@ -2529,13 +2544,20 @@ fn main() -> ! {
         }
         if scope.listening() || scope.listen_restoring() {
             let at = sample_time(&mut time);
-            if scope.listen_expired(at) && listen_after.is_none() {
-                checked(&mut log, app.set_spectrum_listening(false), 0xE032);
-                listen_after = Some(true);
+            if side_activity {
+                // A short physical press can end before RX restoration is
+                // acknowledged. Do not allow that ACK to restart this session.
+                listen_after = listen_after.map(|_| AfterListen::Exit);
+            } else if listen_after.is_none() {
+                let interleaved = app.view_ref().spectrum_capture == SpectrumCapture::Interleaved;
+                if let Some(after) = scope.listen_due(at, interleaved) {
+                    checked(&mut log, app.set_spectrum_listening(false), 0xE032);
+                    listen_after = Some(after);
+                }
             }
             if let Some(resume) = listen_after {
                 let window = scope.window();
-                let held_bin = scope.completed_plot().held_bin;
+                let held_bin = scope.listened_bin();
                 let restored = {
                     let calibration = match app.calibration_view() {
                         Some(c) => c,
@@ -2551,25 +2573,30 @@ fn main() -> ! {
                     checked(&mut log, app.set_spectrum_listening(false), 0xE032);
                     current = policy::restored_current(profile(&app, &settings).ok(), original);
                     listen_after = None;
-                    if resume {
-                        let target = spectrum_center
-                            .or_else(|| window.map(|window| window.center_10hz()))
-                            .and_then(|center| spectrum_window(app.view_ref(), center));
-                        let started = {
+                    if resume != AfterListen::Exit {
+                        let started = if let AfterListen::Refresh(bin) = resume {
+                            scope.restart_held_window(at, bin, false).is_ok()
+                        } else {
+                            let target = spectrum_center
+                                .or_else(|| window.map(|window| window.center_10hz()))
+                                .and_then(|center| spectrum_window(app.view_ref(), center));
                             let calibration = match app.calibration_view() {
                                 Some(c) => c,
                                 None => stop(0xE050),
                             };
-                            target.is_some_and(|window| {
+                            let started = target.is_some_and(|window| {
                                 scope
                                     .start_panned_window(&radio, &calibration, original, window, at)
                                     .is_ok()
-                            })
+                            });
+                            if started {
+                                if let Some(bin) = held_bin.filter(|_| target == window) {
+                                    scope.suppress_bin_until_below(bin);
+                                }
+                            }
+                            started
                         };
                         if started {
-                            if let Some(bin) = held_bin.filter(|_| target == window) {
-                                scope.suppress_bin_until_below(bin);
-                            }
                             spectrum_published_at = at.wrapping_sub(250);
                         } else {
                             scope.discard();
@@ -2648,7 +2675,7 @@ fn main() -> ! {
                             && checked(&mut log, app.begin_spectrum_peak_listen(bin), 0xE032)
                         {
                             if scope.listen_bin(now, bin, app.view_ref().spectrum_modulation) {
-                                spectrum_intent = Some(SpectrumIntent::Listen(bin));
+                                spectrum_intent = Some(SpectrumIntent::AutoListen(bin));
                                 listen_after = None;
                             } else {
                                 checked(&mut log, app.cancel_spectrum_pending(), 0xE032);
@@ -3743,7 +3770,11 @@ fn main() -> ! {
         } else if scope.active()
             || current.is_some_and(|profile| profile.audio.modulation == Modulation::Am)
         {
-            let rows = if app.home_channel_paint_pending() { 5 } else { 4 };
+            let rows = if app.home_channel_paint_pending() {
+                5
+            } else {
+                4
+            };
             (rows, LCD_BATCH_ADMISSION_CYCLES)
         } else if (app.view_ref().screen == Screen::Menu || page_timing.is_some())
             && !scanner.active()
@@ -3757,7 +3788,11 @@ fn main() -> ! {
         {
             // Reuse the menu's checked input windows for page entry. Other
             // pages return to normal RF service after at most 12 ms admission.
-            let periods = if app.view_ref().screen == Screen::Menu { 12 } else { 6 };
+            let periods = if app.view_ref().screen == Screen::Menu {
+                12
+            } else {
+                6
+            };
             (67, LCD_BATCH_ADMISSION_CYCLES * periods)
         } else if raw.is_some() && ptt::side_idle(adc.raw) {
             // A longer RX-only batch amortizes the keypad and RF work. Each
@@ -3931,3 +3966,5 @@ core::arch::global_asm!(
 
 #[cfg(target_arch = "arm")]
 core::arch::global_asm!(include_str!("memmove.s"), options(raw));
+#[cfg(all(target_arch = "arm", feature = "voice-keyer"))]
+core::arch::global_asm!(include_str!("aeabi_fill.s"), options(raw));

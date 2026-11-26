@@ -5,6 +5,7 @@
 
 use core::num::NonZeroU32;
 
+use crate::spectrum_flow::AfterListen;
 use crate::{Error, Fault, Io, Runtime, State};
 use uv98_calibration::Calibration;
 use uv98_handheld_ui::controller::SpectrumModulation;
@@ -51,6 +52,7 @@ enum Waiting {
 /// Bounded temporary listening on one measured bin. The adapter keeps the
 /// original receive plan for the return and never commits UI context.
 pub const LISTEN_TIMEOUT_MS: u32 = 15_000;
+const INTERLEAVED_LISTEN_MS: u32 = 1_000;
 pub(crate) const LISTEN_SAMPLE_INTERVAL_MS: u32 = 125;
 
 #[derive(Clone, Copy)]
@@ -59,6 +61,7 @@ enum Listen {
         started: u32,
         sampled_at: u32,
         bin: u8,
+        automatic: bool,
     },
     /// Original RX plan is already submitted; wait for its full completion.
     Restoring { original: RxRequest },
@@ -70,6 +73,7 @@ pub struct Scope {
     trigger: Option<u16>,
     trigger_listens: bool,
     skipped_bin: Option<u8>,
+    preferred_bin: Option<u8>,
     sweep_started_at: u32,
     qualified: Option<sequence::sweep::QualifiedRange>,
     original: Option<RxRequest>,
@@ -95,6 +99,7 @@ impl Scope {
             trigger: None,
             trigger_listens: false,
             skipped_bin: None,
+            preferred_bin: None,
             sweep_started_at: 0,
             qualified: None,
             original: None,
@@ -117,6 +122,17 @@ impl Scope {
     }
     pub fn listen_restoring(&self) -> bool {
         matches!(self.listen, Some(Listen::Restoring { .. }))
+    }
+
+    /// The RF-confirmed bin remains bound until its original RX is restored.
+    pub fn listened_bin(&self) -> Option<u8> {
+        if let (Some(_), compact::State::Restored(compact::StopReason::Accepted { index })) =
+            (self.listen, self.engine.state())
+        {
+            Some(index)
+        } else {
+            None
+        }
     }
     /// A bin action is accepted only while the compact engine is actually
     /// sweeping. During Restoring an `Accept` is ignored by the engine, so
@@ -161,15 +177,26 @@ impl Scope {
     pub fn can_restart(&self) -> bool {
         self.engine.running() && self.listen.is_none()
     }
-    /// True once the bounded listen period elapsed. Clock wrap is supported.
-    pub fn listen_expired(&self, now: u32) -> bool {
-        match self.listen {
-            Some(Listen::Active { started, .. }) => now.wrapping_sub(started) >= LISTEN_TIMEOUT_MS,
-            _ => false,
+    /// Time the audio interval from confirmed RX, using the wrapping clock.
+    pub fn listen_due(&self, now: u32, interleaved: bool) -> Option<AfterListen> {
+        let Some(Listen::Active {
+            started,
+            bin,
+            automatic,
+            ..
+        }) = self.listen
+        else {
+            return None;
+        };
+        let elapsed = now.wrapping_sub(started);
+        if automatic && interleaved && elapsed >= INTERLEAVED_LISTEN_MS {
+            Some(AfterListen::Refresh(bin))
+        } else {
+            (elapsed >= LISTEN_TIMEOUT_MS).then_some(AfterListen::Resume)
         }
     }
     /// Only a confirmed restore to a selected bin can enter temporary listening.
-    pub fn begin_listen(&mut self, now: u32) -> bool {
+    pub fn begin_listen(&mut self, now: u32, automatic: bool) -> bool {
         let compact::State::Restored(compact::StopReason::Accepted { index }) = self.engine.state()
         else {
             return false;
@@ -181,6 +208,7 @@ impl Scope {
             started: now,
             sampled_at: now.wrapping_sub(LISTEN_SAMPLE_INTERVAL_MS),
             bin: index,
+            automatic,
         });
         true
     }
@@ -192,6 +220,7 @@ impl Scope {
             started,
             sampled_at,
             bin,
+            automatic,
         }) = self.listen
         else {
             return;
@@ -216,6 +245,7 @@ impl Scope {
             started,
             sampled_at: now,
             bin,
+            automatic,
         });
     }
 
@@ -249,10 +279,12 @@ impl Scope {
     }
     /// Drop stale range/plot/window after a refused start so the UI cannot
     /// present previous measurements as the new window.
+    #[inline(never)]
     pub fn discard(&mut self) {
         self.engine = compact::Engine::new();
         self.completed_plot = compact::Plot::EMPTY;
         self.skipped_bin = None;
+        self.preferred_bin = None;
         self.sweep_started_at = 0;
         self.qualified = None;
         self.original = None;
@@ -369,6 +401,7 @@ impl Scope {
             .map_err(StartError::Protocol)?;
         self.completed_plot = compact::Plot::EMPTY;
         self.skipped_bin = None;
+        self.preferred_bin = None;
         self.sweep_started_at = now;
         self.qualified = Some(qualified);
         self.original = Some(original);
@@ -383,6 +416,34 @@ impl Scope {
         Ok(())
     }
 
+    /// Repeat the qualified grid after restoring the original RX plan. Keep
+    /// the last complete plot visible until real samples replace it.
+    pub fn restart_held_window(&mut self, now: u32, bin: u8, skip: bool) -> Result<(), StartError> {
+        let reason = if skip {
+            compact::StopReason::Exit
+        } else {
+            compact::StopReason::Accepted { index: bin }
+        };
+        if self.listen.is_some() || self.engine.state() != compact::State::Restored(reason) {
+            return Err(StartError::Busy);
+        }
+        let config = self.engine.config().ok_or(StartError::Grid)?;
+        if usize::from(bin) >= config.range.len() {
+            return Err(StartError::Grid);
+        }
+        let action = self
+            .engine
+            .start(now, config)
+            .map_err(StartError::Protocol)?;
+        self.completed_plot.held_bin = None;
+        self.preferred_bin = (!skip).then_some(bin);
+        if skip {
+            self.skipped_bin = Some(bin);
+        }
+        self.pending = Some(action);
+        Ok(())
+    }
+
     pub fn set_trigger(&mut self, trigger: Option<u16>, listen: bool) {
         if !listen || trigger.is_none() {
             self.completed_plot.held_bin = None;
@@ -392,7 +453,8 @@ impl Scope {
     }
 
     pub fn resume(&mut self) {
-        if let Some(bin) = self.completed_plot.held_bin.take() {
+        let preferred = self.preferred_bin.take();
+        if let Some(bin) = self.completed_plot.held_bin.take().or(preferred) {
             self.skipped_bin = Some(bin);
         }
     }
@@ -413,6 +475,16 @@ impl Scope {
             .expect("active scope has a window")
             .range()
             .len();
+        let sweep = self.completed_plot.sweep.wrapping_add(1).max(1);
+        if sweep != plot.sweep {
+            // Retain real same-grid peaks. ClearPeaks clears both bitmaps.
+            for index in 0..len {
+                if self.completed_plot.peak_valid(index) && plot.peak_valid(index) {
+                    plot.peaks[index] = plot.peaks[index].max(self.completed_plot.peaks[index]);
+                }
+            }
+        }
+        plot.sweep = sweep;
         plot.elapsed_ms = now
             .wrapping_sub(self.sweep_started_at)
             .min(u32::from(u16::MAX)) as u16;
@@ -427,6 +499,7 @@ impl Scope {
                     target.clamp(previous.saturating_sub(4), previous + 4)
                 }),
         );
+        let preferred = self.preferred_bin.take().filter(|_| self.trigger_listens);
         if let Some(delta) = self.trigger {
             let threshold = floor.saturating_add(delta);
             if self
@@ -435,14 +508,20 @@ impl Scope {
             {
                 self.skipped_bin = None;
             }
-            plot.trigger_bin = (0..len)
+            plot.trigger_bin = (0..len as u8)
                 .filter(|&index| {
-                    (!self.trigger_listens || Some(index as u8) != self.skipped_bin)
-                        && plot.valid(index)
-                        && plot.latest[index] >= threshold
+                    let i = usize::from(index);
+                    (!self.trigger_listens || Some(index) != self.skipped_bin)
+                        && plot.fresh(i)
+                        && plot.latest[i] >= threshold
                 })
-                .max_by_key(|&index| (plot.latest[index], core::cmp::Reverse(index)))
-                .map(|index| index as u8);
+                .max_by_key(|&index| {
+                    let priority = u16::from(Some(index) == preferred) * (compact::MAX_RAW + 1);
+                    (
+                        priority + plot.latest[usize::from(index)],
+                        core::cmp::Reverse(index),
+                    )
+                });
             if self.trigger_listens {
                 plot.held_bin = plot.trigger_bin;
             }
@@ -641,6 +720,24 @@ fn lower_quartile(levels: &[u16]) -> u16 {
 #[cfg(test)]
 mod quartile_tests {
     use super::*;
+
+    #[test]
+    fn interleaved_listen_deadline_wraps_at_one_second() {
+        let started = u32::MAX - 500;
+        let mut scope = Scope::new();
+        scope.listen = Some(Listen::Active {
+            started,
+            sampled_at: started,
+            bin: 3,
+            automatic: true,
+        });
+        assert_eq!(scope.listen_due(started.wrapping_add(999), true), None);
+        assert_eq!(
+            scope.listen_due(started.wrapping_add(1000), true),
+            Some(AfterListen::Refresh(3))
+        );
+        assert_eq!(scope.listen_due(started.wrapping_add(1000), false), None);
+    }
 
     #[test]
     fn selected_floor_matches_sorted_sweeps() {

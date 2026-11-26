@@ -62,8 +62,17 @@ pub fn bind_bin(
 pub enum Intent {
     Exit,
     Listen(u8),
+    AutoListen(u8),
+    SkipListen(u8),
     AcceptVfo(u8),
     Restart,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AfterListen {
+    Exit,
+    Resume,
+    Refresh(u8),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -71,6 +80,7 @@ pub enum Action {
     BeginListen,
     AcceptVfo,
     Restart,
+    RestartSkipping(u8),
     Finish,
 }
 
@@ -80,13 +90,16 @@ pub enum Action {
 /// cancel restore this session requested; anything else finishes.
 pub fn completion(intent: Option<Intent>, reason: StopReason) -> Action {
     match (intent, reason) {
-        (Some(Intent::Listen(bin)), StopReason::Accepted { index }) if bin == index => {
+        (Some(Intent::Listen(bin) | Intent::AutoListen(bin)), StopReason::Accepted { index })
+            if bin == index =>
+        {
             Action::BeginListen
         }
         (Some(Intent::AcceptVfo(bin)), StopReason::Accepted { index }) if bin == index => {
             Action::AcceptVfo
         }
         (Some(Intent::Restart), StopReason::Exit) => Action::Restart,
+        (Some(Intent::SkipListen(bin)), StopReason::Exit) => Action::RestartSkipping(bin),
         _ => Action::Finish,
     }
 }
@@ -120,6 +133,28 @@ mod tests {
         );
         assert_eq!(
             completion(Some(Intent::Exit), StopReason::Exit),
+            Action::Finish
+        );
+        assert_eq!(
+            completion(
+                Some(Intent::AutoListen(4)),
+                StopReason::Accepted { index: 4 }
+            ),
+            Action::BeginListen
+        );
+        assert_eq!(
+            completion(Some(Intent::SkipListen(4)), StopReason::Exit),
+            Action::RestartSkipping(4)
+        );
+        assert_eq!(
+            completion(
+                Some(Intent::SkipListen(4)),
+                StopReason::Accepted { index: 4 }
+            ),
+            Action::Finish
+        );
+        assert_eq!(
+            completion(Some(Intent::SkipListen(4)), StopReason::Ptt),
             Action::Finish
         );
     }

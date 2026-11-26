@@ -49,8 +49,7 @@ class Probe:
         if self.counting:
             self.instructions += 1
 
-    def run(self, name, destination, source, length, count=False, check_bytes=True):
-        self.source, self.destination, self.length = source, destination, length
+    def call(self, name, r0, r1, r2, count=False):
         cpu = self.cpu
         cpu.mem_write(ARENA, INITIAL)
         address = self.symbols[name]["value"]
@@ -58,8 +57,8 @@ class Probe:
         for reg, value in zip(CALLEE_REGISTERS, CALLEE_VALUES):
             cpu.reg_write(reg, value)
         for reg, value in [(arm.UC_ARM_REG_SP, STACK), (arm.UC_ARM_REG_LR, RETURN_PC | 1),
-                           (arm.UC_ARM_REG_R0, destination), (arm.UC_ARM_REG_R1, source),
-                           (arm.UC_ARM_REG_R2, length)]:
+                           (arm.UC_ARM_REG_R0, r0), (arm.UC_ARM_REG_R1, r1),
+                           (arm.UC_ARM_REG_R2, r2)]:
             cpu.reg_write(reg, value)
         self.instructions = 0
         self.counting = count
@@ -67,16 +66,45 @@ class Probe:
         assert cpu.reg_read(arm.UC_ARM_REG_PC) == RETURN_PC
         assert cpu.reg_read(arm.UC_ARM_REG_SP) == STACK
         assert tuple(cpu.reg_read(reg) for reg in CALLEE_REGISTERS) == CALLEE_VALUES
+
+    def run(self, name, destination, source, length, count=False, check_bytes=True):
+        self.source, self.destination, self.length = source, destination, length
+        self.call(name, destination, source, length, count=count)
         if self.strict:
-            assert cpu.reg_read(arm.UC_ARM_REG_R0) == destination
+            assert self.cpu.reg_read(arm.UC_ARM_REG_R0) == destination
         expected = bytearray(INITIAL)
         if length:
             d, s = destination - ARENA, source - ARENA
             expected[d:d + length] = INITIAL[s:s + length]
-        matches = cpu.mem_read(ARENA, ARENA_SIZE) == expected
+        matches = self.cpu.mem_read(ARENA, ARENA_SIZE) == expected
         if check_bytes:
             assert matches
         return self.instructions, matches
+
+
+def shared_aeabi(probe):
+    lengths = (*range(33), 63, 64, 65, 127, 128, 129, 255, 256, 511, 512, 4096)
+    checked = 0
+    for length in lengths:
+        for entry, alignment in (("memclr", 1), ("memclr4", 4), ("memclr8", 8),
+                                 ("memset", 1), ("memset4", 4), ("memset8", 8), ("memcpy8", 8)):
+            for offset in range(0, 16, alignment):
+                dest = ARENA + 0x100 + offset
+                source = ARENA + 0x4000
+                for byte in ((0, 0xA5, 0xFF) if entry.startswith("memset") else (0,)):
+                    expected = bytearray(INITIAL)
+                    is_copy = entry == "memcpy8"
+                    probe.destination, probe.source, probe.length = dest, source if is_copy else dest, length
+                    if is_copy:
+                        probe.call("__wrap___aeabi_" + entry, dest, source, length)
+                        payload = INITIAL[source - ARENA:source - ARENA + length]
+                    else:
+                        probe.call("__wrap___aeabi_" + entry, dest, length, byte if entry.startswith("memset") else 0xDE)
+                        payload = bytes([byte]) * length
+                    expected[dest - ARENA:dest - ARENA + length] = payload
+                    assert probe.cpu.mem_read(ARENA, ARENA_SIZE) == expected, (entry, length, offset, byte)
+                    checked += 1
+    return checked
 
 
 def correctness(probe, names):
@@ -130,6 +158,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("candidate", type=Path)
     parser.add_argument("--baseline", type=Path)
+    parser.add_argument("--check-shared-aeabi", action="store_true")
     args = parser.parse_args()
     new = Probe(args.candidate, strict=True)
     wrappers = tuple("__wrap___aeabi_memmove" + suffix for suffix in ("", "4", "8"))
@@ -139,9 +168,13 @@ if __name__ == "__main__":
     print(f"candidate {new.sha256}")
     print(f"linked wrapper: {new.symbols[wrappers[0]]['size']} bytes")
     print(f"{correctness(new, wrappers)} overlap/alignment/length, bounds and AAPCS cases passed")
+    if args.check_shared_aeabi:
+        print(f"{shared_aeabi(new)} shared AEABI fill/clear/copy cases passed")
     if args.baseline:
         old = Probe(args.baseline, strict=False)
-        for name in ("__aeabi_memcpy", "__aeabi_memcpy4", "__aeabi_memcpy8"):
+        for name in ("__aeabi_memcpy", "__aeabi_memcpy4"):
             assert old.symbols[name]["size"] == new.symbols[name]["size"]
+        if "__wrap___aeabi_memcpy8" not in new.symbols:
+            assert old.symbols["__aeabi_memcpy8"]["size"] == new.symbols["__aeabi_memcpy8"]["size"]
         print(f"baseline {old.sha256}")
         benchmark(old, new)

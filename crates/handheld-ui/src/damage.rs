@@ -500,8 +500,15 @@ fn controller_damage(model: &Model<'_>, previous: Option<&View>, staged_home: bo
                 dirty.push(WATERFALL_TOP, WATERFALL_TICK_BOTTOM);
                 dirty.push(255, 262);
             }
-            if old.spectrum_cursor != new.spectrum_cursor {
+            if old.spectrum_rx_bin() != new.spectrum_rx_bin()
+                || old.spectrum_listening != new.spectrum_listening
+            {
                 dirty.push(48, 69);
+                if new.spectrum_menu {
+                    dirty.push(GRAPH_TOP + 21, GRAPH_TOP + 28);
+                }
+            }
+            if old.spectrum_cursor != new.spectrum_cursor {
                 dirty.push(176, 183);
                 dirty.push(255, 262);
             }
@@ -512,9 +519,10 @@ fn controller_damage(model: &Model<'_>, previous: Option<&View>, staged_home: bo
                     dirty.push(top, top + 7);
                 }
             }
-            if old.spectrum_trigger != new.spectrum_trigger
-                || old.spectrum_auto_listen != new.spectrum_auto_listen
-            {
+            if old.spectrum_capture != new.spectrum_capture {
+                dirty.push(11, 18);
+            }
+            if old.spectrum_trigger != new.spectrum_trigger {
                 dirty.push(264, 271);
             }
             if old.spectrum_menu != new.spectrum_menu {

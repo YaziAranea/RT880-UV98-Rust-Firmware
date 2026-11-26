@@ -2053,6 +2053,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert!(app.set_spectrum(history).unwrap());
         drain(&mut app);
     }
+    let manual_cursor = app.status().view.spectrum_cursor;
+    history.plot.trigger_bin = Some(42);
     history.plot.held_bin = Some(42);
     assert!(app.set_spectrum(history).unwrap());
     frames.push(capture(
@@ -2062,6 +2064,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "53a-SIMULATED-waterfall-and-peak.png",
         milliseconds.get(),
     )?);
+    assert_ne!(manual_cursor, 42);
+    assert!(app.begin_spectrum_peak_listen(42).unwrap());
+    assert!(app.confirm_spectrum_listen(42).unwrap());
+    drain(&mut app);
+    history.state = SpectrumState::Listening;
+    history.plot.held_sample = Some(uv98_spectrum::compact::HeldSample {
+        bin: 42,
+        raw: 165,
+        sequence: std::num::NonZeroU32::MIN,
+    });
+    assert!(app.set_spectrum(history).unwrap());
+    assert_eq!(app.status().view.spectrum_cursor, manual_cursor);
+    assert_eq!(app.status().view.spectrum_rx_bin(), 42);
+    frames.push(capture(
+        &mut app, &panel, output, "53b-SIMULATED-cursor-and-received-peak.png",
+        milliseconds.get(),
+    )?);
+    app.set_spectrum_listening(false).unwrap();
+    drain(&mut app);
     action = spectrum
         .handle(now, SweepEvent::Poll)
         .expect("next sweep starts explicitly");

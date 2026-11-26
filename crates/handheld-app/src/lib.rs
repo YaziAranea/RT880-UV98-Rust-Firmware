@@ -822,11 +822,6 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         {
             self.waterfall.push_held(&snapshot.plot, snapshot.len);
         }
-        if let Some(bin) = snapshot.plot.held_bin {
-            if new_window || previous.is_some_and(|old| old.plot.held_bin != Some(bin)) {
-                self.controller.place_spectrum_cursor(bin);
-            }
-        }
         if let Some(cursor) = cursor {
             self.controller
                 .place_spectrum_cursor(cursor.min(snapshot.len.saturating_sub(1)));
@@ -867,8 +862,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         }
         Ok(())
     }
-    /// Main callback after the exact restore ACK: bind the displayed bin to the
-    /// RF-confirmed bin before claiming that audio is being monitored.
+    /// Queue an automatic listen target without moving the operator's cursor.
     pub fn begin_spectrum_peak_listen(
         &mut self,
         bin: u8,
@@ -880,6 +874,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         Ok(false)
     }
 
+    /// Only the matching radio restore acknowledgement can open listening.
     pub fn confirm_spectrum_listen(&mut self, bin: u8) -> Result<bool, Error<N::Error, L::Error>> {
         if self.status.state != State::Ready {
             return Err(Error::State);
@@ -1362,6 +1357,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         let view = self.controller.view();
         if event == InputEvent::Short(Key::Digit0)
             && view.screen == Screen::Spectrum
+            && view.spectrum_capture != controller::SpectrumCapture::Interleaved
             && !view.spectrum_menu
             && !view.spectrum_listening
             && view.spectrum_pending_listen.is_none()

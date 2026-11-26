@@ -47,6 +47,27 @@ pub const SPECTRUM_MENU_CLOSE: u8 = 7;
 pub const SPECTRUM_MENU_MODULATION: u8 = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpectrumCapture {
+    Audio,
+    Sweep,
+    Interleaved,
+}
+
+impl SpectrumCapture {
+    const fn next(self) -> Self {
+        match self {
+            Self::Audio => Self::Sweep,
+            Self::Sweep => Self::Interleaved,
+            Self::Interleaved => Self::Audio,
+        }
+    }
+
+    pub const fn listens(self) -> bool {
+        !matches!(self, Self::Sweep)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SpectrumModulation {
     Auto,
     Am,
@@ -1009,7 +1030,7 @@ pub struct View {
     /// Volatile spectrum window: independent of `step_index` (the VFO step).
     pub spectrum_span_index: u8,
     pub spectrum_trigger: u8,
-    pub spectrum_auto_listen: bool,
+    pub spectrum_capture: SpectrumCapture,
     pub spectrum_modulation: SpectrumModulation,
     pub spectrum_step_index: u8,
     /// The context menu overlays the graph; it owns MENU/UP/DOWN until EXIT.
@@ -1018,6 +1039,8 @@ pub struct View {
     /// A temporary Listen session owns RF; short EXIT stops it without leaving
     /// the spectrum page or committing the original MR/VFO context.
     pub spectrum_listening: bool,
+    /// Confirmed RF bin, used only while `spectrum_listening` is true.
+    pub spectrum_listening_bin: u8,
     /// Bin submitted for Listen while the RF restore is still pending. Input
     /// cannot move the cursor until a confirmed callback clears this.
     pub spectrum_pending_listen: Option<u8>,
@@ -1062,6 +1085,14 @@ pub struct View {
 }
 
 impl View {
+    pub const fn spectrum_rx_bin(&self) -> u8 {
+        if self.spectrum_listening {
+            self.spectrum_listening_bin
+        } else {
+            self.spectrum_cursor
+        }
+    }
+
     pub fn shortcut_at(&self, index: usize) -> Option<ShortcutAction> {
         let action = *self.bindings.get(index)?;
         #[cfg(feature = "voice-keyer")]
@@ -1302,7 +1333,7 @@ impl Controller {
                 spectrum_cursor: 20,
                 spectrum_span_index: 0,
                 spectrum_trigger: 24,
-                spectrum_auto_listen: true,
+                spectrum_capture: SpectrumCapture::Audio,
                 spectrum_modulation: SpectrumModulation::Auto,
                 shortwave_khz: 6_070,
                 shortwave_fraction_hz: 0,
@@ -1321,6 +1352,7 @@ impl Controller {
                 spectrum_menu: false,
                 spectrum_option: 0,
                 spectrum_listening: false,
+                spectrum_listening_bin: 0,
                 spectrum_pending_listen: None,
                 entry: None,
                 locked: false,
@@ -2945,11 +2977,13 @@ impl Controller {
         }
         if self.view.screen == Screen::Spectrum {
             if let InputEvent::Short(key) = event {
-                if !self.view.spectrum_menu && self.view.spectrum_pending_listen.is_none() {
+                let pending = self.view.spectrum_pending_listen.is_some();
+                if !self.view.spectrum_menu && (!pending || key == Key::Digit0) {
                     match key {
                         Key::Hash => {
-                            self.view.spectrum_auto_listen = !self.view.spectrum_auto_listen;
-                            if self.view.spectrum_listening && !self.view.spectrum_auto_listen {
+                            self.view.spectrum_capture = self.view.spectrum_capture.next();
+                            if self.view.spectrum_listening && !self.view.spectrum_capture.listens()
+                            {
                                 self.queue_request(Request::StopListenSpectrum);
                             }
                             return;
@@ -2971,7 +3005,7 @@ impl Controller {
                             return;
                         }
                         Key::Digit0 => {
-                            self.queue_request(if self.view.spectrum_listening {
+                            self.queue_request(if self.view.spectrum_listening || pending {
                                 Request::StopListenSpectrum
                             } else {
                                 Request::ResumeSpectrum
@@ -3502,26 +3536,27 @@ impl Controller {
             return false;
         }
         self.view.spectrum_listening = listening;
+        if listening {
+            self.view.spectrum_listening_bin = self.view.spectrum_cursor;
+        }
         true
     }
 
-    /// Main calls this only after the RF restore completed for this exact bin.
-    /// It atomically clears the pending freeze, pins the displayed cursor to
-    /// the confirmed bin and only then marks audio as listening.
+    /// Submit a detected peak without moving the operator's cursor.
     pub fn begin_peak_listen(&mut self, bin: u8) -> bool {
         if self.view.screen != Screen::Spectrum
             || self.view.spectrum_menu
-            || !self.view.spectrum_auto_listen
+            || !self.view.spectrum_capture.listens()
             || self.view.spectrum_listening
             || self.view.spectrum_pending_listen.is_some()
         {
             return false;
         }
-        self.view.spectrum_cursor = bin;
         self.view.spectrum_pending_listen = Some(bin);
         true
     }
 
+    /// Bind the actual listening bin after its matching RF restore.
     pub fn confirm_spectrum_listen(&mut self, bin: u8) -> bool {
         let bin = bin.min(80);
         let Some(pending) = self.view.spectrum_pending_listen else {
@@ -3531,19 +3566,11 @@ impl Controller {
             return false;
         }
         self.view.spectrum_pending_listen = None;
-        let mut changed = true;
-        if self.view.screen != Screen::Spectrum {
-            return changed;
-        }
-        if self.view.spectrum_cursor != bin {
-            self.view.spectrum_cursor = bin;
-            changed = true;
-        }
-        if !self.view.spectrum_listening {
+        if self.view.screen == Screen::Spectrum {
+            self.view.spectrum_listening_bin = bin;
             self.view.spectrum_listening = true;
-            changed = true;
         }
-        changed
+        true
     }
 
     /// Cancel a submitted Listen that has not reached its ACK yet.
@@ -3594,7 +3621,7 @@ impl Controller {
             SPECTRUM_MENU_ACCEPT_VFO => {
                 self.view.spectrum_menu = false;
                 self.queue_request(Request::AcceptSpectrum {
-                    bin: self.view.spectrum_cursor,
+                    bin: self.view.spectrum_rx_bin(),
                 });
             }
             SPECTRUM_MENU_SPAN_WIDER | SPECTRUM_MENU_SPAN_NARROWER => {
@@ -5566,11 +5593,17 @@ mod tests {
         let bitmap = catalog(&[0]);
         let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
         choose_menu(&mut ui, MenuItem::Spectrum, &bitmap);
+        assert_eq!(ui.view.spectrum_capture, SpectrumCapture::Audio);
+        let cursor = ui.view.spectrum_cursor;
+        assert_ne!(cursor, 3);
         assert!(ui.begin_peak_listen(3));
-        assert_eq!(ui.view.spectrum_cursor, 3);
+        assert_eq!(ui.view.spectrum_cursor, cursor);
         assert_eq!(ui.view.spectrum_pending_listen, Some(3));
+        assert_eq!(ui.view.spectrum_rx_bin(), cursor);
         assert!(!ui.confirm_spectrum_listen(2));
         assert!(ui.confirm_spectrum_listen(3));
+        assert_eq!(ui.view.spectrum_cursor, cursor);
+        assert_eq!(ui.view.spectrum_rx_bin(), 3);
         press(&mut ui, Key::Digit5, &bitmap);
         assert_eq!(ui.view.spectrum_trigger, 20);
         assert_eq!(
@@ -5585,8 +5618,24 @@ mod tests {
             press(&mut ui, Key::Hash, &bitmap).request,
             Some(Request::StopListenSpectrum)
         );
-        assert!(!ui.view.spectrum_auto_listen);
+        assert_eq!(ui.view.spectrum_capture, SpectrumCapture::Sweep);
         assert_eq!(ui.view.spectrum_trigger, 20);
+        ui.set_spectrum_listening(false);
+        assert!(!ui.begin_peak_listen(3));
+
+        assert_eq!(press(&mut ui, Key::Hash, &bitmap).request, None);
+        assert_eq!(ui.view.spectrum_capture, SpectrumCapture::Interleaved);
+        assert!(ui.begin_peak_listen(3));
+        assert_eq!(
+            press(&mut ui, Key::Digit0, &bitmap).request,
+            Some(Request::StopListenSpectrum)
+        );
+        assert!(ui.cancel_spectrum_pending());
+        assert!(!ui.confirm_spectrum_listen(3));
+        assert!(ui.begin_peak_listen(3));
+        assert!(ui.confirm_spectrum_listen(3));
+        assert_eq!(press(&mut ui, Key::Hash, &bitmap).request, None);
+        assert_eq!(ui.view.spectrum_capture, SpectrumCapture::Audio);
     }
 
     #[test]
@@ -6809,7 +6858,7 @@ mod tests {
     }
 
     #[test]
-    fn confirmed_listen_rebinds_a_cursor_that_moved_during_pending_restore() {
+    fn confirmed_listen_keeps_a_cursor_that_moved_during_pending_restore() {
         let bitmap = catalog(&[0]);
         let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
         choose_menu(&mut ui, MenuItem::Spectrum, &bitmap);
@@ -6821,7 +6870,8 @@ mod tests {
         // A stale frame/other caller could still place the cursor elsewhere.
         ui.place_spectrum_cursor(bin + 1);
         ui.confirm_spectrum_listen(bin);
-        assert_eq!(ui.view.spectrum_cursor, bin);
+        assert_eq!(ui.view.spectrum_cursor, bin + 1);
+        assert_eq!(ui.view.spectrum_rx_bin(), bin);
         assert!(ui.view.spectrum_listening);
     }
 

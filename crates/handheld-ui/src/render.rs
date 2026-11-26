@@ -17,8 +17,8 @@ use crate::controller::{
 };
 use crate::controller::{
     menu_entries, CrossbandProbe, EntryKind, MdcDraft, Mode, Notice, ScanState, Screen, Setting,
-    Slot, SpectrumModulation, View, SHORTCUT_ACTIONS, SIDE_ACTIONS, SPECTRUM_INTERVALS,
-    SPECTRUM_MENU_LEN, SPECTRUM_MENU_MODULATION, STEP_10HZ, TX_CTCSS,
+    Slot, SpectrumCapture, SpectrumModulation, View, SHORTCUT_ACTIONS, SIDE_ACTIONS,
+    SPECTRUM_INTERVALS, SPECTRUM_MENU_LEN, SPECTRUM_MENU_MODULATION, STEP_10HZ, TX_CTCSS,
 };
 use crate::meter::{receive_segments, transmit_segments, SEGMENTS as METER_SEGMENTS};
 
@@ -831,6 +831,14 @@ fn validate(model: &Model<'_>) -> Result<(), Error> {
 fn header(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     rect(row, out, 0, 0, WIDTH, 27, color::PANEL);
     text(row, out, 12, 11, 1, page_title(model.view), color::ACCENT);
+    if model.view.screen == Screen::Spectrum {
+        let label = match model.view.spectrum_capture {
+            SpectrumCapture::Audio => "\x1f03C",
+            SpectrumCapture::Sweep => "\x1f03D",
+            SpectrumCapture::Interleaved => "\x1f1AB",
+        };
+        text(row, out, SPECTRUM_MODE_X, 11, 1, label, color::MUTED);
+    }
     if model.view.locked {
         rect(row, out, 173, 16, 60, 10, color::WARNING);
         text(row, out, 187, 18, 1, "\x1f041", color::BACKGROUND);
@@ -1333,14 +1341,14 @@ pub const VERSION: &str = "0.1.8-r54";
 #[cfg(feature = "pa5-audio")]
 pub const VERSION: &str = "R55-CT";
 #[cfg(all(feature = "voice-keyer", not(feature = "pa5-audio")))]
-pub const VERSION: &str = "R58-SC4";
+pub const VERSION: &str = "R58-SC5";
 /// Header has a fixed 42 px slot; About shows the full string.
 #[cfg(not(any(feature = "pa5-audio", feature = "voice-keyer")))]
 pub const VERSION_SHORT: &str = "R54";
 #[cfg(feature = "pa5-audio")]
 pub const VERSION_SHORT: &str = "PA5";
 #[cfg(all(feature = "voice-keyer", not(feature = "pa5-audio")))]
-pub const VERSION_SHORT: &str = "SC4";
+pub const VERSION_SHORT: &str = "SC5";
 
 fn crossband(row: u16, out: &mut Row<'_>, view: &View) {
     let (status, tint) = match view.crossband_probe {
@@ -1505,6 +1513,7 @@ const GRAPH_X: usize = 12;
 const GRAPH_WIDTH: usize = 216;
 const GRAPH_TOP: u16 = 116;
 const GRAPH_BOTTOM: u16 = 175;
+const SPECTRUM_MODE_X: usize = 110;
 const SPECTRUM_MENU_LABELS: [&str; SPECTRUM_MENU_LEN as usize] = [
     "\x1f121", "\x1f0F4", "\x1f048", "\x1f09B", "\x1f13B", "\x1f13C", "\x1f10B", "\x1f07A", "AM/FM",
 ];
@@ -1546,8 +1555,13 @@ fn spectrum_menu_value(model: &Model<'_>, view: Option<SpectrumView<'_>>, option
     match option {
         0 | 1 => {
             let mut text = Text::new();
+            let bin = if option == 1 {
+                model.view.spectrum_rx_bin()
+            } else {
+                model.view.spectrum_cursor
+            };
             let frequency = view
-                .and_then(|view| view.frequency_10hz(model.view.spectrum_cursor.min(view.len - 1)))
+                .and_then(|view| view.frequency_10hz(bin.min(view.len - 1)))
                 .map(|value| frequency(value));
             match frequency {
                 Some(value) => {
@@ -1586,36 +1600,14 @@ fn spectrum_menu_overlay(
     if row < GRAPH_TOP || row >= GRAPH_TOP + total {
         return false;
     }
-    let option = model.view.spectrum_option;
-    rect(
-        row,
-        out,
-        GRAPH_X,
-        GRAPH_TOP,
-        GRAPH_WIDTH,
-        total,
-        color::PANEL,
-    );
-    for index in 0..SPECTRUM_MENU_LABELS.len() as u16 {
-        let y = GRAPH_TOP + index * STEP;
-        let selected = index as u8 == option;
-        if selected && row >= y && row < y + BAND {
-            rect(row, out, GRAPH_X, y, GRAPH_WIDTH, BAND, color::ACCENT);
-        }
-        let foreground = if selected {
-            color::BACKGROUND
-        } else {
-            color::TEXT
-        };
-        text(
-            row,
-            out,
-            18,
-            y + 4,
-            1,
-            SPECTRUM_MENU_LABELS[index as usize],
-            foreground,
-        );
+    let index = (row - GRAPH_TOP) / STEP;
+    let y = GRAPH_TOP + index * STEP;
+    let selected = index as u8 == model.view.spectrum_option;
+    let background = if selected && row < y + BAND { color::ACCENT } else { color::PANEL };
+    out[GRAPH_X..GRAPH_X + GRAPH_WIDTH].fill(background);
+    if (y + 4..y + 11).contains(&row) {
+        let foreground = if selected { color::BACKGROUND } else { color::TEXT };
+        text(row, out, 18, y + 4, 1, SPECTRUM_MENU_LABELS[usize::from(index)], foreground);
         let value = spectrum_menu_value(model, view, index as u8);
         text(row, out, 148, y + 4, 1, value.as_str(), foreground);
     }
@@ -1681,10 +1673,14 @@ fn spectrum(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     };
     let cursor = model.view.spectrum_cursor.min(view.len - 1);
     if (48..69).contains(&row) {
-        let cursor_10hz = view.frequency_10hz(cursor).unwrap_or(0);
-        let value = frequency(cursor_10hz);
+        let bin = model.view.spectrum_rx_bin().min(view.len - 1);
+        let frequency_10hz = view.frequency_10hz(bin).unwrap_or(0);
+        let value = frequency(frequency_10hz);
         centered(row, out, 48, 3, value.as_str(), color::TEXT);
-        let (label, ink) = if model.view.spectrum_modulation.is_am(cursor_10hz) {
+        if model.view.spectrum_listening {
+            text(row, out, 12, 52, 2, "RX", color::GOOD);
+        }
+        let (label, ink) = if model.view.spectrum_modulation.is_am(frequency_10hz) {
             ("AM", color::AM_BADGE)
         } else {
             ("FM", color::FM_BADGE)
@@ -1822,12 +1818,7 @@ fn spectrum(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     }
     if !menu && (264..271).contains(&row) {
         let mut info = Text::new();
-        let mode = if model.view.spectrum_auto_listen {
-            "\x1f03C"
-        } else {
-            "\x1f03D"
-        };
-        let _ = write!(info, "{mode} \x1f000{}  4+ 5−", model.view.spectrum_trigger);
+        let _ = write!(info, "\x1f000{}  4+ 5−", model.view.spectrum_trigger);
         centered(row, out, 264, 1, info.as_str(), color::MUTED);
     }
     if menu {
@@ -3634,7 +3625,7 @@ mod tests {
             spectrum_cursor: 40,
             spectrum_span_index: 3,
             spectrum_trigger: 24,
-            spectrum_auto_listen: true,
+            spectrum_capture: SpectrumCapture::Audio,
             spectrum_modulation: SpectrumModulation::Auto,
             shortwave_khz: 6070,
             shortwave_fraction_hz: 0,
@@ -3653,6 +3644,7 @@ mod tests {
             spectrum_menu: false,
             spectrum_option: 0,
             spectrum_listening: false,
+            spectrum_listening_bin: 0,
             spectrum_pending_listen: None,
             entry: None,
             locked: false,
@@ -6155,6 +6147,23 @@ mod tests {
         air.view.spectrum_cursor = 1;
         compare_incremental(below, air);
 
+        let mut listening = below;
+        listening.view.spectrum_listening = true;
+        listening.view.spectrum_listening_bin = 1;
+        compare_incremental(below, listening);
+        for row in 48..69 {
+            let mut selected = [0; WIDTH];
+            let mut heard = [0; WIDTH];
+            render_row(row, &mut selected, &air).unwrap();
+            render_row(row, &mut heard, &listening).unwrap();
+            assert_eq!(heard[40..], selected[40..]);
+        }
+        let mut before = [0; WIDTH];
+        let mut after = [0; WIDTH];
+        render_row(176, &mut before, &below).unwrap();
+        render_row(176, &mut after, &listening).unwrap();
+        assert_eq!(before, after, "listening leaves the manual marker in place");
+
         air.view.spectrum_menu = true;
         air.view.spectrum_option = SPECTRUM_MENU_MODULATION;
         let mut forced_fm = air;
@@ -6164,6 +6173,7 @@ mod tests {
         for (model, badge) in [
             (below, color::FM_BADGE),
             (air, color::AM_BADGE),
+            (listening, color::AM_BADGE),
             (forced_fm, color::FM_BADGE),
         ] {
             let mut row = [0; WIDTH];
@@ -6223,6 +6233,30 @@ mod tests {
         );
         for y in 0..HEIGHT {
             render_row(y, &mut row, &m).unwrap();
+        }
+    }
+
+    #[test]
+    fn spectrum_capture_label_fits_and_repaints_while_listening_with_the_menu_open() {
+        let plot = Plot::EMPTY;
+        for language in [Language::Russian, Language::English, Language::German] {
+            let mut audio = model(Screen::Spectrum);
+            audio.view.language = language;
+            audio.view.spectrum_menu = true;
+            audio.view.spectrum_listening = true;
+            audio.spectrum = Some(plot_view(&plot));
+            assert!(12 + localized_width(page_title(audio.view), 1, language) <= SPECTRUM_MODE_X);
+            for (capture, label) in [
+                (SpectrumCapture::Sweep, "\x1f03D"),
+                (SpectrumCapture::Interleaved, "\x1f1AB"),
+                (SpectrumCapture::Audio, "\x1f03C"),
+            ] {
+                assert!(SPECTRUM_MODE_X + localized_width(label, 1, language) <= 173);
+                let mut updated = audio;
+                updated.view.spectrum_capture = capture;
+                assert_eq!(compare_incremental(audio, updated), WIDTH * 7);
+                audio = updated;
+            }
         }
     }
 
@@ -6442,10 +6476,12 @@ mod tests {
         listening.view.spectrum_pending_listen = None;
         listening.view.spectrum_listening = true;
         compare_incremental(pending, listening);
-        let mut restoring = listening;
-        restoring.view.spectrum_listening = false;
+        let mut left_listen = listening;
+        left_listen.view.spectrum_listening = false;
+        compare_incremental(listening, left_listen);
+        let mut restoring = left_listen;
         restoring.spectrum.as_mut().unwrap().state = SpectrumState::Restoring;
-        compare_spectrum_incremental(listening, restoring);
+        compare_spectrum_incremental(left_listen, restoring);
         let mut stopped = restoring;
         stopped.spectrum.as_mut().unwrap().state = SpectrumState::Stopped;
         compare_spectrum_incremental(restoring, stopped);

@@ -1257,7 +1257,7 @@ fn scope_autolisten_publishes_only_fresh_receive_samples_on_the_confirmed_bin() 
         })
         .expect("selected RX restored");
     assert_eq!(selected.frequency_10hz, frequency);
-    assert!(scope.begin_listen(now));
+    assert!(scope.begin_listen(now, true));
     scope.observe_listen_rssi(now, rx().frequency_10hz, 300);
     scope.observe_listen_rssi(now, frequency, 512);
     assert_eq!(scope.completed_plot().held_sample, None);
@@ -1606,7 +1606,7 @@ fn scope_temporary_listen_returns_exact_original_then_discard_removes_stale_wind
     let (mut r, mut now) = ready();
     let mut scope = scope::Scope::new();
     scope.start(&r, &cal(), rx(), 1250, now).unwrap();
-    assert!(!scope.begin_listen(now), "sweep is not restored yet");
+    assert!(!scope.begin_listen(now, false), "sweep is not restored yet");
     for _ in 0..150 {
         scope_pass(&mut r, &mut scope, &mut now);
         if scope.plot().valid(3) {
@@ -1629,11 +1629,14 @@ fn scope_temporary_listen_returns_exact_original_then_discard_removes_stale_wind
         scope.range().unwrap().frequency_10hz(3).unwrap()
     );
     assert_eq!(selected.modulation, Modulation::Am);
-    assert!(scope.begin_listen(now));
+    assert!(scope.begin_listen(now, false));
     assert!(scope.listening() && scope.active());
-    assert!(!scope.listen_expired(now));
-    assert!(!scope.listen_expired(now + 14_999));
-    assert!(scope.listen_expired(now + 15_000));
+    assert_eq!(scope.listen_due(now, true), None);
+    assert_eq!(scope.listen_due(now + 14_999, true), None);
+    assert_eq!(
+        scope.listen_due(now + 15_000, true),
+        Some(spectrum_flow::AfterListen::Resume)
+    );
 
     // Manual Listen can accept a measured bin before the first wide sweep.
     let mut monitor = audio();
@@ -1664,6 +1667,197 @@ fn scope_temporary_listen_returns_exact_original_then_discard_removes_stale_wind
     assert_eq!(scope.window(), None);
     assert!(!scope.plot().valid(0));
     assert!(!scope.active());
+}
+
+fn measure_interleaved_window(
+    radio: &mut Runtime<Mock>,
+    scope: &mut scope::Scope,
+    now: &mut u32,
+    levels: [u16; 5],
+) {
+    let range = scope.range().unwrap();
+    let words: [(u16, u16); 5] = core::array::from_fn(|bin| {
+        let frequency = range.frequency_10hz(bin).unwrap();
+        sequence::sweep::QualifiedRange::new(&cal(), frequency, frequency, frequency, 1_250)
+            .unwrap()
+            .origin_words()
+    });
+    let previous = scope.completed_plot().sweep;
+    for _ in 0..200 {
+        let tuned = (radio.io.words[0x38], radio.io.words[0x39]);
+        radio.io.words[0x67] = words
+            .iter()
+            .position(|&bin| bin == tuned)
+            .map_or(160, |bin| levels[bin]);
+        scope_pass(radio, scope, now);
+        if scope.completed_plot().sweep != previous {
+            assert_eq!(scope.completed_plot().sweep, previous + 1);
+            assert_eq!(&scope.completed_plot().latest[..levels.len()], &levels);
+            assert!((0..levels.len()).all(|bin| scope.completed_plot().fresh(bin)));
+            assert!(scope.completed_plot().held_sample.is_none());
+            return;
+        }
+    }
+    panic!("fresh full sweep did not complete");
+}
+
+#[test]
+fn scope_interleaved_prefers_a_sustained_bin_across_real_sweeps() {
+    use crate::spectrum_flow::AfterListen;
+    use uv98_handheld_ui::controller::SpectrumModulation;
+    use uv98_spectrum::compact::{Event as ScopeEvent, StopReason};
+
+    let (mut radio, mut now) = ready();
+    let mut scope = scope::Scope::new();
+    let window = uv98_spectrum::Window::centered(rx().frequency_10hz, 5_000, 1_250).unwrap();
+    scope
+        .start_window(&radio, &cal(), rx(), window, now)
+        .unwrap();
+    scope.set_trigger(Some(24), true);
+    let generation = scope.generation();
+
+    for (cycle, (levels, bin)) in [
+        ([160, 240, 160, 160, 160], 1),
+        ([160, 220, 160, 260, 160], 1),
+        ([160, 210, 160, 270, 160], 1),
+        ([160, 160, 160, 265, 160], 3),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if cycle == 2 {
+            scope.event(now, ScopeEvent::ClearPeaks);
+        }
+        measure_interleaved_window(&mut radio, &mut scope, &mut now, levels);
+        if cycle == 1 {
+            assert_eq!(scope.completed_plot().peaks[1], 240);
+        }
+        if cycle == 2 {
+            assert_eq!(scope.completed_plot().peaks[1], 210);
+        }
+        assert_eq!(scope.completed_plot().held_bin, Some(bin));
+        assert!(scope.listen_bin(now, bin, SpectrumModulation::Auto));
+        let selected = (0..200)
+            .find_map(|_| match scope_pass(&mut radio, &mut scope, &mut now) {
+                scope::Completion::Restored { request, reason } => {
+                    assert_eq!(reason, StopReason::Accepted { index: bin });
+                    Some(request)
+                }
+                scope::Completion::None => None,
+            })
+            .expect("selected frequency restored");
+        assert_eq!(
+            selected.frequency_10hz,
+            window.range().frequency_10hz(bin.into()).unwrap()
+        );
+        assert!(scope.begin_listen(now, true));
+        scope.observe_listen_rssi(now, selected.frequency_10hz, 200);
+        assert_eq!(scope.completed_plot().held_sample.unwrap().bin, bin);
+        assert_eq!(scope.listen_due(now.wrapping_add(999), true), None);
+        assert_eq!(scope.listen_due(now.wrapping_add(1_000), false), None);
+        now = now.wrapping_add(1_000);
+        assert_eq!(scope.listen_due(now, true), Some(AfterListen::Refresh(bin)));
+        assert_eq!(scope.end_listen(&mut radio, &cal(), now).unwrap(), None);
+        assert!(scope.restart_held_window(now, bin, false).is_err());
+        pump(&mut radio, &mut now, false);
+        assert_eq!(
+            scope.end_listen(&mut radio, &cal(), now).unwrap(),
+            Some(rx())
+        );
+        let previous = *scope.completed_plot();
+        scope.restart_held_window(now, bin, false).unwrap();
+        assert_eq!(scope.generation(), generation);
+        assert_eq!(scope.completed_plot().sweep, previous.sweep);
+        assert_eq!(scope.completed_plot().latest, previous.latest);
+        assert!(scope.completed_plot().held_bin.is_none());
+        assert!(scope.completed_plot().held_sample.is_none());
+    }
+
+    // Key 0 during the refresh skips the preferred carrier rather than
+    // waiting for the next handoff to claim it again.
+    scope.resume();
+    measure_interleaved_window(&mut radio, &mut scope, &mut now, [160, 225, 160, 265, 160]);
+    assert_eq!(scope.completed_plot().held_bin, Some(1));
+
+    // PTT at the end of the refresh restores the original plan.
+    scope.event(now, ScopeEvent::Ptt(true));
+    let stopped = (0..200).find_map(|_| match scope_pass(&mut radio, &mut scope, &mut now) {
+        scope::Completion::Restored { request, reason } => Some((request, reason)),
+        scope::Completion::None => None,
+    });
+    assert_eq!(stopped, Some((rx(), StopReason::Ptt)));
+    assert!(!scope.active());
+}
+
+#[test]
+fn scope_skips_a_pending_peak_after_confirmed_original_restore() {
+    use uv98_handheld_ui::controller::SpectrumModulation;
+    use uv98_spectrum::compact::{Event as ScopeEvent, StopReason};
+
+    let (mut radio, mut now) = ready();
+    let mut scope = scope::Scope::new();
+    let window = uv98_spectrum::Window::centered(rx().frequency_10hz, 5_000, 1_250).unwrap();
+    scope
+        .start_window(&radio, &cal(), rx(), window, now)
+        .unwrap();
+    scope.set_trigger(Some(24), true);
+    let levels = [160, 245, 160, 215, 160];
+    measure_interleaved_window(&mut radio, &mut scope, &mut now, levels);
+    assert_eq!(scope.completed_plot().held_bin, Some(1));
+    assert!(scope.listen_bin(now, 1, SpectrumModulation::Auto));
+    assert_eq!(
+        scope_pass(&mut radio, &mut scope, &mut now),
+        scope::Completion::None
+    );
+    scope.event(now, ScopeEvent::Stop);
+    assert!(scope.restart_held_window(now, 1, true).is_err());
+    let stopped = (0..200).find_map(|_| match scope_pass(&mut radio, &mut scope, &mut now) {
+        scope::Completion::Restored { request, reason } => Some((request, reason)),
+        scope::Completion::None => None,
+    });
+    assert_eq!(stopped, Some((rx(), StopReason::Exit)));
+    scope.restart_held_window(now, 1, true).unwrap();
+    measure_interleaved_window(&mut radio, &mut scope, &mut now, levels);
+    assert_eq!(scope.completed_plot().held_bin, Some(3));
+}
+
+#[test]
+fn scope_manual_listen_skips_the_confirmed_bin_not_the_trigger_peak() {
+    use uv98_handheld_ui::controller::SpectrumModulation;
+    use uv98_spectrum::compact::StopReason;
+
+    let (mut radio, mut now) = ready();
+    let mut scope = scope::Scope::new();
+    let window = uv98_spectrum::Window::centered(rx().frequency_10hz, 5_000, 1_250).unwrap();
+    scope
+        .start_window(&radio, &cal(), rx(), window, now)
+        .unwrap();
+    scope.set_trigger(Some(24), true);
+    measure_interleaved_window(&mut radio, &mut scope, &mut now, [160, 245, 160, 215, 160]);
+    assert_eq!(scope.completed_plot().held_bin, Some(1));
+    assert!(scope.listen_bin(now, 3, SpectrumModulation::Auto));
+    assert!((0..200).any(|_| matches!(
+        scope_pass(&mut radio, &mut scope, &mut now),
+        scope::Completion::Restored {
+            reason: StopReason::Accepted { index: 3 },
+            ..
+        }
+    )));
+    assert!(scope.begin_listen(now, false));
+    assert_eq!(scope.listened_bin(), Some(3));
+    assert_eq!(scope.end_listen(&mut radio, &cal(), now).unwrap(), None);
+    pump(&mut radio, &mut now, false);
+    let skip = scope.listened_bin().unwrap();
+    assert_eq!(
+        scope.end_listen(&mut radio, &cal(), now).unwrap(),
+        Some(rx())
+    );
+    scope
+        .start_window(&radio, &cal(), rx(), window, now)
+        .unwrap();
+    scope.suppress_bin_until_below(skip);
+    measure_interleaved_window(&mut radio, &mut scope, &mut now, [160, 205, 160, 260, 160]);
+    assert_eq!(scope.completed_plot().held_bin, Some(1));
 }
 
 #[test]
@@ -1725,7 +1919,7 @@ fn scope_listen_uses_selected_bin_and_keeps_ordinary_vfo_modulation() {
             window.range().frequency_10hz(bin.into()).unwrap()
         );
         assert_eq!(selected.modulation, listen_mode);
-        assert!(scope.begin_listen(now));
+        assert!(scope.begin_listen(now, false));
         let listening = policy::listen_profile(selected, settings);
         assert!(listening.transmit.is_none());
         assert!(radio.observe(listening.audio, 0).unwrap().audio_open);

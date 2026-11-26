@@ -220,3 +220,60 @@ fn spectrum_row(capture: &RefCell<CapturedFrame>, row: usize) -> [u16; render::W
         .try_into()
         .unwrap()
 }
+
+#[test]
+fn automatic_capture_at_the_edge_preserves_the_manual_cursor_and_its_arrow() {
+    let capture = Rc::new(RefCell::new(CapturedFrame::new()));
+    let panel = Panel {
+        capture: Some(capture.clone()),
+        ..Panel::default()
+    };
+    let mut app = App::new(
+        Memory::new(), panel, NoDelay, Timing::new(30, 600).unwrap(),
+        PRESERVED_CALIBRATION_SHA256,
+    );
+    app.start(0).unwrap();
+    menu(&mut app, controller::MenuItem::Spectrum);
+    let mut grid = SpectrumSnapshot {
+        state: SpectrumState::Sweeping,
+        window_id: 1,
+        start_10hz: 86_802_500,
+        center_10hz: 86_807_500,
+        step_10hz: 2_500,
+        len: 5,
+        plot: Plot::EMPTY,
+    };
+    grid.plot.valid[0] = 0b11111;
+    grid.plot.sweep = 1;
+    grid.plot.latest[..5].copy_from_slice(&[103, 54, 50, 51, 52]);
+    assert!(app.set_spectrum(grid).unwrap());
+    drain_spectrum_rows(&mut app);
+    let arrow = spectrum_row(&capture, 176);
+    assert_eq!(app.status.view.spectrum_cursor, 2);
+    assert_eq!(arrow[120], render::color::ACCENT);
+
+    grid.plot.sweep = 2;
+    grid.plot.trigger_bin = Some(0);
+    grid.plot.held_bin = Some(0);
+    assert!(app.set_spectrum(grid).unwrap());
+    drain_spectrum_rows(&mut app);
+    assert!(app.begin_spectrum_peak_listen(0).unwrap());
+    assert!(!app.confirm_spectrum_listen(2).unwrap());
+    assert!(app.confirm_spectrum_listen(0).unwrap());
+    assert_eq!(app.status.view.spectrum_rx_bin(), 0);
+    drain_spectrum_rows(&mut app);
+    grid.state = SpectrumState::Listening;
+    grid.plot.held_sample = Some(HeldSample {
+        bin: 0, raw: 57, sequence: NonZeroU32::MIN,
+    });
+    assert!(app.set_spectrum(grid).unwrap());
+    drain_spectrum_rows(&mut app);
+    assert_eq!(app.status.view.spectrum_cursor, 2);
+    assert_eq!(spectrum_row(&capture, 176), arrow);
+    assert_eq!(
+        event(&mut app, InputEvent::Short(Key::Star)).request,
+        Some(Request::AcceptSpectrum { bin: 0 })
+    );
+    app.set_spectrum_listening(false).unwrap();
+    assert_eq!(app.status.view.spectrum_rx_bin(), 2);
+}

@@ -48,7 +48,8 @@ def build_locale(language, target_dir, stage, profile="channel-tx"):
     elf = image / f"UV98-diag-{VERSION}.elf"
     tool("check_diag_preinit.py", elf, "--report", image / "early-machine-code-check.json")
     tool("check_device_profile.py", elf, "--report", image / "device-profile-check.json")
-    tool("check_diag_memmove.py", elf)
+    flags = ["--check-shared-aeabi"] if profile == "voice-keyer" else []
+    tool("check_diag_memmove.py", elf, *flags)
     if profile == "voice-keyer":
         for name in ("config", "clip", "stream_irq"):
             tool(f"check_voice_{name}.py", elf, "--report", image / f"voice-{name}.json")
