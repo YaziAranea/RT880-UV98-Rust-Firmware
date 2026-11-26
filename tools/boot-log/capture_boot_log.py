@@ -45,6 +45,7 @@ STAGES = {
     0x174: "receive_signal_status_agc",
     0x175: "receive_gain_audio_registers",
     0x176: "loop_work_and_redraw_backlog",
+    0x177: "ui_page_paint",
     0xE001: "error_watchdog_feed", 0xE002: "error_zero_constant",
     0xE00F: "error_early_quiesce", 0xE010: "error_initialize",
     0xE011: "error_mcu_peripherals_taken", 0xE012: "error_core_peripherals_taken",
@@ -148,6 +149,8 @@ def parse_frame(raw):
     elif code == 0x176:
         result["decoded_details"] = {"loop_count": a, "active_loop_us": b,
             "max_redraw_backlog_ms": c}
+    elif code == 0x177:
+        result["decoded_details"] = {"screen": a, "first_render_batch_ms": b, "drained_ms": c}
     return result
 
 

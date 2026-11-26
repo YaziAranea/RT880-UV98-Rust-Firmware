@@ -1,8 +1,11 @@
 extern crate std;
+mod home_scan_lcd;
+mod navigation_lcd;
 mod ptt_reply;
 mod render_batch;
 mod scan_coordinator;
 mod shortwave_redraw;
+mod spectrum_redraw;
 
 use super::*;
 use std::vec;

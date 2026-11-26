@@ -52,6 +52,9 @@ impl Registers for Fake {
     }
 }
 fn engine() -> Engine<Fake, Timing> {
+    engine_with_budget(3)
+}
+fn engine_with_budget(polls: u32) -> Engine<Fake, Timing> {
     let events = Rc::new(RefCell::new(Vec::new()));
     Engine::new(
         Fake {
@@ -60,7 +63,7 @@ fn engine() -> Engine<Fake, Timing> {
             events: events.clone(),
         },
         Timing(events),
-        NonZeroU32::new(3).unwrap(),
+        NonZeroU32::new(polls).unwrap(),
     )
 }
 fn registers(seed: u32) -> GpioRegisters {
@@ -489,6 +492,47 @@ fn faults_before_every_row_byte_and_final_completion_abort_and_poison() {
         assert_eq!(bus.data(&[0]), Err(Error::Poisoned));
         assert_eq!(*bus.registers.events.borrow(), log);
     }
+}
+
+#[test]
+fn pixel_byte_retries_spend_only_the_remaining_budget() {
+    let mut single_poll = engine_with_budget(1);
+    single_poll.registers.statuses = [2, 2, 0, 2].into();
+    assert_eq!(
+        single_poll.pixels_rgb565(&[0x12ab]),
+        Err(Error::Timeout(Wait::TransmitEmpty))
+    );
+    assert_eq!(single_poll.registers.statuses, VecDeque::from([2]));
+    assert!(single_poll
+        .registers
+        .events
+        .borrow()
+        .contains(&Event::Tx(0x12)));
+    assert!(!single_poll
+        .registers
+        .events
+        .borrow()
+        .contains(&Event::Tx(0xab)));
+    assert_eq!(single_poll.pixels_rgb565(&[0x12ab]), Err(Error::Poisoned));
+
+    let mut ready_on_last_poll = engine();
+    ready_on_last_poll.registers.statuses = [2, 0, 0, 2, 2, 2, 2].into();
+    ready_on_last_poll.pixels_rgb565(&[0x12ab]).unwrap();
+    assert!(ready_on_last_poll.registers.statuses.is_empty());
+
+    let mut fault_on_retry = engine();
+    fault_on_retry.registers.statuses = [2, 0, 10, 2].into();
+    assert_eq!(
+        fault_on_retry.pixels_rgb565(&[0x12ab]),
+        Err(Error::Status(10))
+    );
+    assert_eq!(fault_on_retry.registers.statuses, VecDeque::from([2]));
+    assert!(!fault_on_retry
+        .registers
+        .events
+        .borrow()
+        .iter()
+        .any(|event| matches!(event, Event::Tx(_))));
 }
 
 #[test]

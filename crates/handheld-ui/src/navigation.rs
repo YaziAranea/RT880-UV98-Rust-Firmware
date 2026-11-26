@@ -336,6 +336,8 @@ pub fn menu_label(item: MenuItem) -> &'static str {
         MenuItem::About => "\x1f0C3",
         MenuItem::Reverse => "\x1f102",
         MenuItem::Scan => "\x1f118",
+        MenuItem::ScanRange => super::scan_pages::RANGE_TITLE,
+        MenuItem::ScanJournal => super::scan_pages::JOURNAL_TITLE,
         MenuItem::ScanPriority => "\x1f176",
         MenuItem::Shortcuts => "\x1f06D",
         MenuItem::Power => "\x1f0A1",
@@ -456,7 +458,9 @@ pub(super) fn menu(row: u16, out: &mut Row<'_>, model: &Model<'_>, cache: &mut M
             Some(MenuItem::Mode | MenuItem::Modulation) => Symbol::Wave,
             Some(MenuItem::Cb | MenuItem::Channels | MenuItem::ChannelDetails) => Symbol::Channels,
             Some(MenuItem::Zones) => Symbol::Bank,
-            Some(MenuItem::Scan | MenuItem::Spectrum) => Symbol::Scan,
+            Some(MenuItem::Scan | MenuItem::ScanRange | MenuItem::ScanJournal | MenuItem::Spectrum) => {
+                Symbol::Scan
+            }
             Some(MenuItem::Monitor) => Symbol::Monitor,
             Some(MenuItem::Power) => Symbol::Power,
             Some(MenuItem::Reverse) => Symbol::Reverse,

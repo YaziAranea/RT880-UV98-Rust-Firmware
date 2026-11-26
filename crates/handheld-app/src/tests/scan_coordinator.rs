@@ -26,10 +26,106 @@ fn start(app: &mut TestApp, scanner: &mut Scanner, now: u32) -> bool {
 }
 
 fn tick(app: &mut TestApp, scanner: &mut Scanner, now: u32, state: RadioState, open: bool) -> bool {
-    let retune = scanner.advance(app, now, state, open).unwrap();
+    let retune = scanner.advance(app, now, state, open, None).unwrap();
     // On the board, a requested retune stops the old RX before pause is published.
     app.set_scan_paused(scanner.paused()).unwrap();
     retune
+}
+
+#[test]
+fn hardware_sample_reaches_the_journal_and_marked_first_vfo_point_is_not_tuned() {
+    use uv98_radio_runtime::{Audio, Signal};
+    use uv98_rf_sequence::Modulation;
+
+    let mut app = app(Memory::new(), PRESERVED_CALIBRATION_SHA256);
+    app.start(0).unwrap();
+    event(&mut app, InputEvent::Hold(Key::Menu));
+    menu(&mut app, controller::MenuItem::ScanRange);
+    for key in [
+        Key::Menu,
+        Key::Down,
+        Key::Digit1,
+        Key::Digit4,
+        Key::Digit4,
+        Key::Digit0,
+        Key::Digit0,
+        Key::Digit0,
+        Key::Menu,
+        Key::Down,
+        Key::Digit1,
+        Key::Digit4,
+        Key::Digit6,
+        Key::Digit0,
+        Key::Digit0,
+        Key::Digit0,
+        Key::Menu,
+        Key::Down,
+        Key::Down,
+        Key::Menu,
+    ] {
+        event(&mut app, InputEvent::Short(key));
+    }
+    event(&mut app, InputEvent::Hold(Key::Exit));
+    let range = app.scan_range().expect("saved receive window");
+    assert_eq!(
+        (range.lower_10hz, range.upper_10hz),
+        (14_400_000, 14_600_000)
+    );
+    let mut scanner = Scanner::new();
+    assert!(start(&mut app, &mut scanner, 1));
+    assert_eq!(app.view_ref().vfo_10hz, range.lower_10hz);
+    let audio = Audio {
+        modulation: Modulation::Fm,
+        gain: 4,
+        dac: 4,
+        squelch: 2,
+        monitor: false,
+        tone_required: false,
+    };
+    let signal = Signal {
+        rssi: 170,
+        squelch_open: true,
+        audio_open: true,
+        status_0c: 2,
+        am_gain_index: 0,
+    };
+    for (time, raw) in [(1_200, 170), (2_210, 217), (3_100, 193)] {
+        let observation = scan::FindSample::measured(
+            range.lower_10hz,
+            Signal {
+                rssi: raw,
+                ..signal
+            },
+            audio,
+        );
+        assert!(!scanner
+            .advance(
+                &mut app,
+                time,
+                RadioState::Receiving,
+                true,
+                Some(observation)
+            )
+            .unwrap());
+    }
+    scanner.cancel(&mut app).unwrap();
+    menu(&mut app, controller::MenuItem::ScanJournal);
+    let page = app.view_ref().scan_journal_page.unwrap();
+    let found = page.entry.unwrap();
+    assert_eq!(
+        (
+            page.count,
+            found.frequency_10hz,
+            found.peak_raw_rssi,
+            found.detections,
+            found.last_opened_s
+        ),
+        (1, range.lower_10hz, 217, 1, 1)
+    );
+    event(&mut app, InputEvent::Short(Key::Hash));
+    event(&mut app, InputEvent::Hold(Key::Exit));
+    assert!(start(&mut app, &mut scanner, 3_110));
+    assert_eq!(app.view_ref().vfo_10hz, range.lower_10hz + range.step_10hz);
 }
 
 #[test]
@@ -54,8 +150,10 @@ fn priority_visit_waits_for_closed_audio_and_can_be_skipped_until_restart() {
     let mut scanner = Scanner::new();
     assert!(start(&mut app, &mut scanner, 0));
     assert_eq!(app.status().view.channel, Some(0));
+    assert!(scanner.awaiting_tune());
     assert!(!tick(&mut app, &mut scanner, 1, RadioState::Off, false));
     assert_eq!(app.status().view.scan, ScanState::Requested);
+    assert!(scanner.awaiting_tune());
     assert!(!tick(
         &mut app,
         &mut scanner,
@@ -64,6 +162,7 @@ fn priority_visit_waits_for_closed_audio_and_can_be_skipped_until_restart() {
         false
     ));
     assert_eq!(app.status().view.scan, ScanState::Running);
+    assert!(!scanner.awaiting_tune());
     for now in [3, 155, 2000] {
         assert!(!tick(
             &mut app,

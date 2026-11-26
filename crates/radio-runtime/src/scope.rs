@@ -3,9 +3,12 @@
 //! This adapter has no transmit operation and never acknowledges work by time
 //! alone. The caller continues Runtime::tick and supplies a fresh clock.
 
+use core::num::NonZeroU32;
+
 use crate::{Error, Fault, Io, Runtime, State};
 use uv98_calibration::Calibration;
-use uv98_rf_sequence::{self as sequence, RxRequest, Width};
+use uv98_handheld_ui::controller::SpectrumModulation;
+use uv98_rf_sequence::{self as sequence, Modulation, RxRequest, Width};
 use uv98_spectrum::{compact, Range, Ticket, Timing, Window, WindowError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -48,16 +51,17 @@ enum Waiting {
 /// Bounded temporary listening on one measured bin. The adapter keeps the
 /// original receive plan for the return and never commits UI context.
 pub const LISTEN_TIMEOUT_MS: u32 = 15_000;
+pub(crate) const LISTEN_SAMPLE_INTERVAL_MS: u32 = 125;
 
 #[derive(Clone, Copy)]
 enum Listen {
     Active {
         started: u32,
+        sampled_at: u32,
+        bin: u8,
     },
     /// Original RX plan is already submitted; wait for its full completion.
-    Restoring {
-        original: RxRequest,
-    },
+    Restoring { original: RxRequest },
 }
 
 pub struct Scope {
@@ -71,6 +75,7 @@ pub struct Scope {
     original: Option<RxRequest>,
     window: Option<Window>,
     generation: u32,
+    listen_modulation: Option<SpectrumModulation>,
     listen: Option<Listen>,
     pending: Option<compact::Action>,
     waiting: Option<Waiting>,
@@ -95,6 +100,7 @@ impl Scope {
             original: None,
             window: None,
             generation: 0,
+            listen_modulation: None,
             listen: None,
             pending: None,
             waiting: None,
@@ -118,6 +124,39 @@ impl Scope {
     pub fn can_accept_bin_action(&self) -> bool {
         self.engine.running() && self.listen.is_none()
     }
+
+    /// Snapshot the temporary demodulator when the engine accepts this bin.
+    pub fn listen_bin(&mut self, now: u32, bin: u8, modulation: SpectrumModulation) -> bool {
+        if !self.can_accept_bin_action() {
+            return false;
+        }
+        self.event(now, compact::Event::Accept { index: bin });
+        if self.engine.state()
+            == compact::State::Restoring(compact::StopReason::Accepted { index: bin })
+        {
+            self.listen_modulation = Some(modulation);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Ordinary VFO acceptance uses the saved receiver's policy, even when
+    /// the active Listen used a different demodulator.
+    pub fn vfo_modulation(&self, frequency_10hz: u32) -> Modulation {
+        if crate::policy::aviation_band(frequency_10hz) {
+            Modulation::Am
+        } else if let Some(original) = self.original {
+            if crate::policy::aviation_band(original.frequency_10hz) {
+                Modulation::Fm
+            } else {
+                original.modulation
+            }
+        } else {
+            Modulation::Fm
+        }
+    }
+
     /// Restart may cancel only a running sweep, never an in-flight restore.
     pub fn can_restart(&self) -> bool {
         self.engine.running() && self.listen.is_none()
@@ -125,21 +164,61 @@ impl Scope {
     /// True once the bounded listen period elapsed. Clock wrap is supported.
     pub fn listen_expired(&self, now: u32) -> bool {
         match self.listen {
-            Some(Listen::Active { started }) => now.wrapping_sub(started) >= LISTEN_TIMEOUT_MS,
+            Some(Listen::Active { started, .. }) => now.wrapping_sub(started) >= LISTEN_TIMEOUT_MS,
             _ => false,
         }
     }
-    /// Only a completed sweep restoration can enter temporary listening.
+    /// Only a confirmed restore to a selected bin can enter temporary listening.
     pub fn begin_listen(&mut self, now: u32) -> bool {
-        if self.listen.is_some()
-            || self.original.is_none()
-            || !matches!(self.engine.state(), compact::State::Restored(_))
-        {
+        let compact::State::Restored(compact::StopReason::Accepted { index }) = self.engine.state()
+        else {
+            return false;
+        };
+        if self.listen.is_some() || self.original.is_none() {
             return false;
         }
-        self.listen = Some(Listen::Active { started: now });
+        self.listen = Some(Listen::Active {
+            started: now,
+            sampled_at: now.wrapping_sub(LISTEN_SAMPLE_INTERVAL_MS),
+            bin: index,
+        });
         true
     }
+
+    /// Use the ordinary RX observation of the accepted frequency. Throttle
+    /// publication without adding RF transactions or changing the wide sweep.
+    pub fn observe_listen_rssi(&mut self, now: u32, frequency_10hz: u32, raw: u16) {
+        let Some(Listen::Active {
+            started,
+            sampled_at,
+            bin,
+        }) = self.listen
+        else {
+            return;
+        };
+        if now.wrapping_sub(started) >= LISTEN_TIMEOUT_MS
+            || now.wrapping_sub(sampled_at) < LISTEN_SAMPLE_INTERVAL_MS
+            || raw > compact::MAX_RAW
+            || self
+                .range()
+                .and_then(|r| r.frequency_10hz(usize::from(bin)))
+                != Some(frequency_10hz)
+        {
+            return;
+        }
+        let sequence = self
+            .completed_plot
+            .held_sample
+            .and_then(|sample| sample.sequence.checked_add(1))
+            .unwrap_or(NonZeroU32::MIN);
+        self.completed_plot.held_sample = Some(compact::HeldSample { sequence, bin, raw });
+        self.listen = Some(Listen::Active {
+            started,
+            sampled_at: now,
+            bin,
+        });
+    }
+
     /// Submit the original full RX plan once, then report completion exactly
     /// when the runtime is Receiving again.
     pub fn end_listen<I: Io>(
@@ -153,6 +232,7 @@ impl Scope {
                 let original = self.original.ok_or_else(|| radio.fail(Error::State))?;
                 radio.stop()?;
                 radio.receive(calibration, original, now)?;
+                self.completed_plot.held_sample = None;
                 self.listen = Some(Listen::Restoring { original });
                 Ok(None)
             }
@@ -177,6 +257,7 @@ impl Scope {
         self.qualified = None;
         self.original = None;
         self.window = None;
+        self.listen_modulation = None;
         self.listen = None;
         self.pending = None;
         self.waiting = None;
@@ -297,6 +378,7 @@ impl Scope {
             self.generation = 1;
         }
         self.waiting = None;
+        self.listen_modulation = None;
         self.pending = Some(action);
         Ok(())
     }
@@ -504,15 +586,13 @@ impl Scope {
             } => {
                 radio.stop()?;
                 let mut request = self.original.ok_or_else(|| radio.fail(Error::State))?;
+                let listen_modulation = self.listen_modulation.take();
                 if matches!(reason, compact::StopReason::Accepted { .. }) {
-                    // Explicit accept enters VFO, whose ordinary policy is
-                    // wide/no tone/no channel-only option. Apply aviation
-                    // mode to the selected bin, including at a band edge.
-                    if crate::policy::aviation_band(frequency_10hz) {
-                        request.modulation = sequence::Modulation::Am;
-                    } else if crate::policy::aviation_band(request.frequency_10hz) {
-                        request.modulation = sequence::Modulation::Fm;
-                    }
+                    request.modulation = match listen_modulation {
+                        Some(mode) if mode.is_am(frequency_10hz) => Modulation::Am,
+                        Some(_) => Modulation::Fm,
+                        None => self.vfo_modulation(frequency_10hz),
+                    };
                     request.frequency_10hz = frequency_10hz;
                     request.width = Width::Wide;
                     request.tone = 0;

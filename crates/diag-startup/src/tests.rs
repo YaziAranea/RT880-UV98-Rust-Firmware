@@ -710,3 +710,36 @@ fn millis_wraps_output_like_embedded_deadline_counters() {
     clock.milliseconds = u32::MAX - 1;
     assert_eq!(clock.sample(3), Ok(1));
 }
+
+#[test]
+fn fixed_millis_matches_runtime_rate_at_fractional_and_wrap_boundaries() {
+    fn check<const HZ: u32>() {
+        let mut cycle = u32::MAX - 47_998;
+        let mut reference = CycleMillis::new(cycle, NonZeroU32::new(HZ).unwrap()).unwrap();
+        let mut fixed = FixedCycleMillis::<HZ>::new(cycle);
+        reference.milliseconds = u32::MAX - 1;
+        fixed.milliseconds = u32::MAX - 1;
+        for delta in [
+            0,
+            1,
+            HZ / 1000 - 1,
+            1,
+            HZ / 1000 + 1,
+            (1 << 31) - 1,
+            1 << 31,
+            u32::MAX,
+            48_000,
+        ] {
+            let next = cycle.wrapping_add(delta);
+            let expected = reference.sample(next);
+            assert_eq!(fixed.sample(next), expected, "at {HZ} Hz, delta {delta}");
+            if expected.is_ok() {
+                cycle = next;
+            }
+        }
+    }
+
+    check::<1_000>();
+    check::<48_000_000>();
+    check::<4_294_967_000>();
+}

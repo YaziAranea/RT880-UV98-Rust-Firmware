@@ -212,19 +212,41 @@ impl Record {
         raw: [0xff; CHANNEL_LEN],
     };
     fn view(&self) -> ChannelView<'_> {
-        let channel = Channel::parse(&self.raw).expect("fixed size record");
-        ChannelView {
-            index: self.index,
-            name: channel.name_raw(),
-            rx_10hz: channel.rx_frequency_code(),
-            tx_10hz: channel.tx_frequency_code(),
-            active: channel.is_active(),
-            rx_tone_raw: channel.rx_tone_raw(),
-            tx_tone_raw: channel.tx_tone_raw(),
-            bandwidth_raw: channel.bandwidth_raw(),
-            power_raw: channel.power_raw(),
-        }
+        self.view_with_tone(None)
     }
+    fn view_with_tone(&self, rx_tone: Option<u16>) -> ChannelView<'_> {
+        let channel = Channel::parse(&self.raw).expect("fixed size record");
+        channel_view(channel, self.index, rx_tone)
+    }
+}
+
+#[cfg_attr(target_arch = "arm", inline(never))]
+fn channel_view(channel: Channel<'_>, index: usize, rx_tone: Option<u16>) -> ChannelView<'_> {
+    ChannelView {
+        index,
+        name: channel.name_raw(),
+        rx_10hz: channel.rx_frequency_code(),
+        tx_10hz: channel.tx_frequency_code(),
+        active: channel.is_active(),
+        rx_tone_raw: rx_tone.unwrap_or_else(|| channel.rx_tone_raw()),
+        tx_tone_raw: channel.tx_tone_raw(),
+        bandwidth_raw: channel.bandwidth_raw(),
+        power_raw: channel.power_raw(),
+    }
+}
+
+#[cfg_attr(target_arch = "arm", inline(never))]
+fn selected_channel_view<'a>(
+    diagnostic: &'a Diagnostic,
+    view: &View,
+    rx_tone: Option<u16>,
+) -> Option<ChannelView<'a>> {
+    if !matches!(view.screen, Screen::Home | Screen::ChannelDetails) {
+        return None;
+    }
+    let snapshot = diagnostic.snapshot()?;
+    (Some(snapshot.index() as u16) == view.channel)
+        .then(|| channel_view(snapshot.channel, snapshot.index(), rx_tone))
 }
 
 pub struct App<N, L, D> {
@@ -258,8 +280,15 @@ pub struct App<N, L, D> {
     priority_rows: PendingRows,
     pending_outlines: u8,
     priority_run: u16,
-    menu_priority: [(u16, u16); 3],
+    menu_priority: [(u16, u16); 4],
     menu_run: u16,
+    // Home reuses the preferred ranges as progressing cursors. Once a
+    // channel starts painting, those ranges keep its record until completion.
+    home_channel_paint: Option<Record>,
+    home_channel_before: Option<Record>,
+    home_channel_frequency: u32,
+    home_channel_digits: u8,
+    home_channel_column: u16,
     menu_cache: render::MenuCache,
     row_cursor: u16,
     render_page: Option<Screen>,
@@ -331,8 +360,13 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             priority_rows: PendingRows::default(),
             pending_outlines: 0,
             priority_run: 0,
-            menu_priority: [(0, 0); 3],
+            menu_priority: [(0, 0); 4],
             menu_run: 0,
+            home_channel_paint: None,
+            home_channel_before: None,
+            home_channel_frequency: 0,
+            home_channel_digits: 0,
+            home_channel_column: 0,
             menu_cache: render::MenuCache::new(),
             row_cursor: 0,
             render_page: None,
@@ -353,7 +387,6 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
     pub fn status(&self) -> Status {
         self.status
     }
-    #[cfg(feature = "voice-keyer")]
     pub fn view_ref(&self) -> &controller::View {
         &self.status.view
     }
@@ -726,30 +759,30 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         if self.status.state != State::Ready {
             return Err(Error::State);
         }
-        if self.spectrum == Some(snapshot) && cursor.is_none() {
+        let previous = self.spectrum.as_ref();
+        if cursor.is_none() && previous == Some(&snapshot) {
             return Ok(true);
         }
         if self.status.view.screen == Screen::Spectrum
-            && self.spectrum.is_some()
+            && previous.is_some()
             && self.pending_rows.any()
         {
             return Ok(false);
         }
+        let geometry_changed = previous.is_none_or(|old| {
+            old.start_10hz != snapshot.start_10hz
+                || old.step_10hz != snapshot.step_10hz
+                || old.len != snapshot.len
+        });
         if snapshot.len > 0 {
             let new_len = snapshot.len;
             let old_cursor = self.status.view.spectrum_cursor;
             self.controller.clamp_spectrum_cursor(new_len - 1);
-            let new_last = snapshot
-                .start_10hz
-                .saturating_add(snapshot.step_10hz.saturating_mul(u32::from(new_len - 1)));
-            let previous = self.spectrum;
-            let window_changed = previous.is_some_and(|old| {
-                old.start_10hz != snapshot.start_10hz
-                    || old.step_10hz != snapshot.step_10hz
-                    || old.len != snapshot.len
-            });
-            if let (Some(old), true) = (previous, window_changed) {
+            if let (Some(old), true) = (previous, geometry_changed) {
                 if old.len > 0 {
+                    let new_last = snapshot
+                        .start_10hz
+                        .saturating_add(snapshot.step_10hz.saturating_mul(u32::from(new_len - 1)));
                     let cursor = old_cursor.min(old.len - 1);
                     let frequency = old
                         .start_10hz
@@ -769,12 +802,6 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
                 self.controller.place_spectrum_cursor((new_len - 1) / 2);
             }
         }
-        let previous = self.spectrum.as_ref();
-        let geometry_changed = previous.is_none_or(|old| {
-            old.start_10hz != snapshot.start_10hz
-                || old.step_10hz != snapshot.step_10hz
-                || old.len != snapshot.len
-        });
         let new_window =
             geometry_changed || previous.is_some_and(|old| old.window_id != snapshot.window_id);
         if geometry_changed {
@@ -785,6 +812,16 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         {
             self.waterfall.push(&snapshot.plot, snapshot.len);
         }
+        if snapshot.state == SpectrumState::Listening
+            && self.status.view.spectrum_listening
+            && snapshot.plot.held_sample.is_some_and(|sample| {
+                new_window
+                    || previous.and_then(|old| old.plot.held_sample.map(|sample| sample.sequence))
+                        != Some(sample.sequence)
+            })
+        {
+            self.waterfall.push_held(&snapshot.plot, snapshot.len);
+        }
         if let Some(bin) = snapshot.plot.held_bin {
             if new_window || previous.is_some_and(|old| old.plot.held_bin != Some(bin)) {
                 self.controller.place_spectrum_cursor(bin);
@@ -794,7 +831,6 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             self.controller
                 .place_spectrum_cursor(cursor.min(snapshot.len.saturating_sub(1)));
         }
-        self.status.view = self.controller.view();
         self.spectrum = Some(snapshot);
         if self.spectrum_error.is_failure() {
             self.last_rendered = None;
@@ -892,6 +928,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         }
         self.controller.cancel_spectrum_pending();
         self.spectrum = None;
+        self.waterfall = render::Waterfall::new();
         self.redraw_ready()
     }
     /// Only call after successful backend restoration and range/bin validation.
@@ -946,6 +983,14 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         self.controller.scan_zone_priority(&self.bitmap)
     }
     pub fn set_radio_view(&mut self, radio: RadioView) -> Result<(), Error<N::Error, L::Error>> {
+        self.set_scan_radio_view(radio, false)
+    }
+
+    pub fn set_scan_radio_view(
+        &mut self,
+        radio: RadioView,
+        awaiting_tune: bool,
+    ) -> Result<(), Error<N::Error, L::Error>> {
         if self.status.state != State::Ready {
             return Err(Error::State);
         }
@@ -954,7 +999,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             radio.monitor,
             radio.modulation == render::Modulation::Am,
         );
-        if self.radio == radio {
+        if self.radio == radio && (awaiting_tune || self.last_radio == radio) {
             return Ok(());
         }
         let old_slot = self.radio.transmitting_slot();
@@ -962,6 +1007,17 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             self.update_tx_status(old_slot, None);
         }
         self.radio = radio;
+        // Home holds its last confirmed channel across an MR retune. Keep RF
+        // state current for input and diagnostics while the LCD is ineligible.
+        // The next drawable report is diffed against the last scheduled view.
+        if awaiting_tune
+            && self.status.view.screen == Screen::Home
+            && self.status.view.mode == Mode::Channel
+            && matches!(radio.state, render::RadioState::Starting | render::RadioState::Unavailable)
+            && old_slot.is_none()
+        {
+            return Ok(());
+        }
         self.redraw_ready()
     }
 
@@ -1087,6 +1143,16 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
     }
     pub fn scan_cursor_held(&self) -> bool {
         self.status.view.screen == Screen::Home && self.input.short_star_pending()
+    }
+    pub fn scan_range(&self) -> Option<controller::ScanRange> {
+        self.controller.scan_range()
+    }
+    pub fn scan_frequency_ignored(&self, frequency_10hz: u32) -> bool {
+        self.controller.scan_frequency_ignored(frequency_10hz)
+    }
+    pub fn record_scan_find(&mut self, frequency_10hz: u32, raw: u16, opened: bool, now_ms: u32) {
+        self.controller
+            .record_scan_find(frequency_10hz, raw, opened, now_ms);
     }
     pub fn reject_radio_request(
         &mut self,
@@ -1351,6 +1417,14 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         }
         let view = self.controller.view();
         let peer_cb_changed = view.active_slot == Slot::B && self.status.view.cb != view.cb;
+        if change.channel_changed && self.home_channel_paint.is_none() {
+            self.home_channel_before = self.diagnostic.snapshot().and_then(|snapshot| {
+                (self.status.view.channel == Some(snapshot.index() as u16)).then_some(Record {
+                    index: snapshot.index(),
+                    raw: *snapshot.channel.raw(),
+                })
+            });
+        }
         self.status.view = view;
         if change.channel_changed || change.slot_changed || change.zone_changed || peer_cb_changed {
             if let Some(index) = self.status.view.channel {
@@ -1394,7 +1468,12 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         (self.nor, self.display)
     }
     pub fn render_pending(&self) -> bool {
-        self.pending_outlines != 0 || self.pending_rows.any()
+        self.pending_outlines != 0 || self.pending_rows.any() || self.home_channel_paint.is_some()
+    }
+
+    /// The radio may admit a longer batch of short windows for a channel card.
+    pub fn home_channel_paint_pending(&self) -> bool {
+        self.home_channel_paint.is_some()
     }
 
     /// Send up to max_rows full-row equivalents from the current model.
@@ -1435,9 +1514,18 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         // makes the fairness batch useful even if it would otherwise land on
         // the same repeatedly invalidated banner. The normal cursor is not
         // advanced by priority work.
-        let ordinary = self.pending_rows.without(&self.priority_rows);
+        let home = self.home_channel_paint.is_some();
+        let mut ordinary = self.pending_rows.without(&self.priority_rows);
+        if home {
+            // The ordinary painter can service surrounding rows while a newer
+            // selection is queued. Leave the channel regions to the snapshot.
+            for (start, end) in render::home_channel_rows(self.status.view.active_slot) {
+                ordinary.clear(start, end);
+            }
+        }
         let normal_start = ordinary.next(self.row_cursor);
-        let admit_priority = normal_start.is_none() || self.priority_run < PRIORITY_BURST_ROWS;
+        let has_normal = home || normal_start.is_some();
+        let admit_priority = !has_normal || self.priority_run < PRIORITY_BURST_ROWS;
         let priority = admit_priority && self.priority_rows.any();
         // One narrow transfer makes confirmed TX visible even when an older
         // pop-up spent the priority budget. Everything else keeps its quota.
@@ -1466,31 +1554,69 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             self.priority_run = self.priority_run.saturating_add(1);
             return Ok(self.finish_render_step(1));
         }
-        let menu = if !priority && self.menu_run < MENU_BURST_ROWS {
-            self.menu_priority.iter().find_map(|&(start, end)| {
-                if start >= end {
-                    return None;
-                }
-                ordinary
-                    .next(start)
-                    .filter(|row| (start..end).contains(row))
-                    .map(|row| (row, end - row))
-            })
+        if home && !priority && self.home_channel_digits != 0 {
+            let place = self.home_channel_digits.trailing_zeros() as u8;
+            let first = self.home_channel_column;
+            let count = (render::HOME_DIGIT_WIDTH - first)
+                .min(max_rows.saturating_mul(render::HOME_DIGIT_COLUMNS_PER_ROW));
+            self.status.state = State::Failed;
+            render::render_home_channel_digit(
+                &mut self.display,
+                self.status.view.active_slot,
+                self.home_channel_frequency,
+                place,
+                first,
+                count,
+            )
+            .map_err(Error::Render)?;
+            self.home_channel_column += count;
+            if self.home_channel_column == render::HOME_DIGIT_WIDTH {
+                self.home_channel_digits &= !(1 << place);
+                self.home_channel_column = 0;
+            }
+            let rows = count.div_ceil(render::HOME_DIGIT_COLUMNS_PER_ROW);
+            self.menu_run += rows;
+            self.priority_run = 0;
+            return Ok(self.finish_render_step(rows));
+        }
+        let menu_limit = if home && normal_start.is_none() {
+            max_rows
+        } else {
+            let burst = if home {
+                render::HOME_CHANNEL_PAINT_ROWS
+            } else {
+                MENU_BURST_ROWS
+            };
+            burst.saturating_sub(self.menu_run)
+        };
+        let menu = if !priority && menu_limit != 0 {
+            self.menu_priority
+                .iter()
+                .enumerate()
+                .find_map(|(i, &(start, end))| {
+                    if start >= end {
+                        return None;
+                    }
+                    let row = if home {
+                        Some(start)
+                    } else {
+                        ordinary.next(start)
+                    };
+                    row.filter(|row| (start..end).contains(row))
+                        .map(|row| (i, row, end - row))
+                })
         } else {
             None
         };
         let (start, limit) = if priority {
-            let limit = if normal_start.is_some() {
+            let limit = if has_normal {
                 max_rows.min(PRIORITY_BURST_ROWS - self.priority_run)
             } else {
                 max_rows
             };
             (self.priority_rows.next(0), limit)
-        } else if let Some((start, remaining)) = menu {
-            (
-                Some(start),
-                max_rows.min(remaining).min(MENU_BURST_ROWS - self.menu_run),
-            )
+        } else if let Some((_, start, remaining)) = menu {
+            (Some(start), max_rows.min(remaining).min(menu_limit))
         } else {
             (normal_start, max_rows)
         };
@@ -1501,25 +1627,46 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             });
         };
         let mut end = start + 1;
+        let paint_home = home && menu.is_some();
         while end - start < limit
             && if priority {
                 self.priority_rows.has(end)
             } else {
-                ordinary.has(end)
+                paint_home || ordinary.has(end)
             }
         {
             end += 1;
         }
         self.status.state = State::Failed;
-        self.paint_rows(start, end)?;
-        self.pending_rows.clear(start, end);
+        let staged = home && (paint_home || priority);
+        let columns = if paint_home {
+            [14..226, 14..206, 56..80, 16..220][menu.unwrap().0].clone()
+        } else {
+            0..render::WIDTH
+        };
+        self.paint_rows(start, end, staged, columns)?;
+        let painted_current = self
+            .home_channel_paint
+            .is_none_or(|record| self.status.view.channel == Some(record.index as u16));
+        if !paint_home && (!staged || painted_current) {
+            self.pending_rows.clear(start, end);
+        }
         self.priority_rows.clear(start, end);
         if priority {
             self.priority_run = self.priority_run.saturating_add(end - start);
         } else {
             self.priority_run = 0;
-            if menu.is_some() {
-                self.menu_run += end - start;
+            if let Some((i, _, _)) = menu {
+                self.menu_run = self.menu_run.saturating_add(end - start);
+                if paint_home {
+                    self.menu_priority[i].0 = end;
+                    if self.menu_priority.iter().all(|&(start, end)| start == end) {
+                        self.home_channel_before = self.home_channel_paint.take();
+                        if !painted_current {
+                            self.stage_home_channel();
+                        }
+                    }
+                }
             } else {
                 self.menu_run = 0;
                 self.row_cursor = if end == render::HEIGHT { 0 } else { end };
@@ -1543,6 +1690,56 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         RenderProgress {
             rows,
             pending: self.render_pending(),
+        }
+    }
+
+    fn stage_home_channel(&mut self) {
+        let slot = self.status.view.active_slot;
+        let reverse = self.status.view.reverse;
+        let target = self.status.view.channel;
+        if let Some(snapshot) = self
+            .diagnostic
+            .snapshot()
+            .filter(|snapshot| Some(snapshot.index() as u16) == target)
+        {
+            let new = snapshot.channel;
+            let (rx, tx, tone) = home_mr_setup(new, reverse);
+            let mut old_rx = 0;
+            let mut regions = render::home_channel_rows(slot);
+            regions[0].0 = render::home_frequency_rows(slot).1 + 2;
+            if let Some(old) = self.home_channel_before.as_ref() {
+                let old = Channel::parse(&old.raw).expect("fixed size record");
+                let (previous_rx, previous_tx, previous_tone) = home_mr_setup(old, reverse);
+                old_rx = previous_rx;
+                if old.name_raw() == new.name_raw() {
+                    regions[1] = (0, 0);
+                }
+                let tone_override = self.rx_tones[usize::from(slot == Slot::B)].is_some();
+                if (!reverse || !tone_override)
+                    && home_mr_tx_line(old_rx, previous_tx, previous_tone)
+                        == home_mr_tx_line(rx, tx, tone)
+                {
+                    regions[0] = (0, 0);
+                }
+                if !tone_override
+                    && old.bandwidth_raw() == new.bandwidth_raw()
+                    && old.rx_tone_raw() == new.rx_tone_raw()
+                    && old.tx_tone_raw() == new.tx_tone_raw()
+                    && home_mr_offset(old_rx, previous_tx) == home_mr_offset(rx, tx)
+                    && old.is_active() == new.is_active()
+                {
+                    regions[3] = (0, 0);
+                }
+            }
+            self.home_channel_frequency = rx;
+            self.home_channel_digits = home_mr_changed_digits(old_rx, rx);
+            self.home_channel_column = 0;
+            self.home_channel_paint = Some(Record {
+                index: snapshot.index(),
+                raw: *new.raw(),
+            });
+            self.menu_priority = regions;
+            self.menu_run = 0;
         }
     }
 
@@ -1866,8 +2063,10 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             self.priority_rows = PendingRows::default();
             self.pending_outlines = 0;
             self.priority_run = 0;
-            self.menu_priority = [(0, 0); 3];
+            self.menu_priority = [(0, 0); 4];
             self.menu_run = 0;
+            self.home_channel_paint = None;
+            self.home_channel_before = None;
             self.row_cursor = 0;
             self.render_page = Some(self.status.view.screen);
         }
@@ -1878,23 +2077,49 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             && self.render_pending()
             && radio_controls_equal(self.last_radio, self.radio);
         let screen = self.status.view.screen;
-        let snapshot = matches!(screen, Screen::Home | Screen::ChannelDetails)
-            .then(|| self.diagnostic.snapshot())
-            .flatten()
-            .filter(|snapshot| Some(snapshot.index() as u16) == self.status.view.channel);
-        let channel = snapshot.as_ref().map(|s| ChannelView {
-            index: s.index(),
-            name: s.channel.name_raw(),
-            rx_10hz: s.channel.rx_frequency_code(),
-            tx_10hz: s.channel.tx_frequency_code(),
-            active: s.channel.is_active(),
-            rx_tone_raw: self
-                .rx_tone_override(self.status.view)
-                .unwrap_or_else(|| s.channel.rx_tone_raw()),
-            tx_tone_raw: s.channel.tx_tone_raw(),
-            bandwidth_raw: s.channel.bandwidth_raw(),
-            power_raw: s.channel.power_raw(),
-        });
+        let home_channel = screen == Screen::Home
+            && view.mode == Mode::Channel
+            && view.channel.is_some()
+            && view.entry.is_none()
+            && self.radio.transmitting_slot().is_none()
+            && self.last_rendered.as_ref().is_some_and(|old| {
+                old.screen == Screen::Home
+                    && old.mode == Mode::Channel
+                    && old.active_slot == view.active_slot
+                    && old.zone == view.zone
+                    && old.entry.is_none()
+                    && old.reverse == view.reverse
+                    && old.language() == view.language()
+            });
+        if home_channel {
+            let unstarted = self.home_channel_paint.is_none() || self.menu_run == 0;
+            if unstarted
+                && self
+                    .last_rendered
+                    .as_ref()
+                    .is_some_and(|old| old.channel != view.channel)
+            {
+                let (start, end) = render::home_frequency_rows(view.active_slot);
+                // An interrupted full repaint might have left different
+                // digits on the LCD from the previous logical channel.
+                if self.home_channel_paint.is_some()
+                    || self
+                        .pending_rows
+                        .next(start)
+                        .is_none_or(|row| !(start..end).contains(&row))
+                {
+                    self.stage_home_channel();
+                }
+            }
+        } else if self.home_channel_paint.take().is_some() {
+            self.menu_priority = [(0, 0); 4];
+            self.menu_run = 0;
+            self.home_channel_before = None;
+            for (start, end) in render::home_channel_rows(view.active_slot) {
+                self.pending_rows.mark(start, end);
+            }
+        }
+        let channel = selected_channel_view(&self.diagnostic, &view, self.rx_tone_override(view));
         let list_views: [ChannelView<'_>; 7];
         let list = if screen == Screen::Channels {
             list_views = core::array::from_fn(|i| self.list[i].view());
@@ -1941,13 +2166,19 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             spectrum_error: self.spectrum_error,
             shortwave_scope: Some(&self.shortwave_scope),
         };
-        let damage = render::plan_damage(
+        let damage = render::plan_damage_with_staged_home(
             &model,
             self.last_rendered.as_ref(),
             self.last_radio,
             self.last_spectrum.as_ref().map(SpectrumSnapshot::view),
+            self.home_channel_paint.is_some(),
         )
         .map_err(|e| Error::Render(render::RenderError::Model(e)))?;
+        if page_changed && !matches!(screen, Screen::Home | Screen::Menu) {
+            // A new page identifies itself before repainting the older body.
+            // RF/TX priority still runs ahead of these ordinary ranges.
+            self.menu_priority = [(11, 18), render::page_control_rows(&model), (0, 0), (0, 0)];
+        }
         for &(start, end) in damage.controller.ranges() {
             self.pending_rows.mark(start, end);
         }
@@ -1971,7 +2202,12 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             // Keep the title of a new group and the latest selected item
             // ahead of older body damage. Clear a same-page previous selection
             // next. New input replaces the ordering, retaining all damage.
-            self.menu_priority = [(11, 18), render::menu_item_rows(view.menu_index), previous];
+            self.menu_priority = [
+                (11, 18),
+                render::menu_item_rows(view.menu_index),
+                previous,
+                (0, 0),
+            ];
         }
         for &(start, end) in damage.spectrum.ranges() {
             self.pending_rows.mark(start, end);
@@ -2037,7 +2273,13 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
         self.priority_rows.mark(start, end);
     }
 
-    fn paint_rows(&mut self, start: u16, end: u16) -> Result<(), Error<N::Error, L::Error>> {
+    fn paint_rows(
+        &mut self,
+        start: u16,
+        end: u16,
+        staged: bool,
+        columns: core::ops::Range<usize>,
+    ) -> Result<(), Error<N::Error, L::Error>> {
         let screen = self.status.view.screen;
         #[cfg(feature = "pa5-audio")]
         if screen == Screen::About {
@@ -2050,23 +2292,13 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             )
             .map_err(Error::Render);
         }
-        let snapshot = matches!(screen, Screen::Home | Screen::ChannelDetails)
-            .then(|| self.diagnostic.snapshot())
-            .flatten()
-            .filter(|snapshot| Some(snapshot.index() as u16) == self.status.view.channel);
-        let channel = snapshot.as_ref().map(|s| ChannelView {
-            index: s.index(),
-            name: s.channel.name_raw(),
-            rx_10hz: s.channel.rx_frequency_code(),
-            tx_10hz: s.channel.tx_frequency_code(),
-            active: s.channel.is_active(),
-            rx_tone_raw: self
-                .rx_tone_override(self.status.view)
-                .unwrap_or_else(|| s.channel.rx_tone_raw()),
-            tx_tone_raw: s.channel.tx_tone_raw(),
-            bandwidth_raw: s.channel.bandwidth_raw(),
-            power_raw: s.channel.power_raw(),
-        });
+        let mut view = self.status.view;
+        let channel = if let Some(record) = self.home_channel_paint.as_ref().filter(|_| staged) {
+            view.channel = Some(record.index as u16);
+            Some(record.view_with_tone(self.rx_tone_override(view)))
+        } else {
+            selected_channel_view(&self.diagnostic, &view, self.rx_tone_override(view))
+        };
         let list_views: [ChannelView<'_>; 7];
         let list = if screen == Screen::Channels {
             list_views = core::array::from_fn(|i| self.list[i].view());
@@ -2094,7 +2326,7 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             )
         });
         let model = Model {
-            view: self.status.view,
+            view,
             channel,
             list,
             calibration_matches: self.status.calibration_matches_backup,
@@ -2119,9 +2351,61 @@ impl<N: Bus, L: DisplayBus, D: Delay> App<N, L, D> {
             spectrum_error: self.spectrum_error,
             shortwave_scope: Some(&self.shortwave_scope),
         };
-        render::render_rows_cached(&mut self.display, &model, start, end, &mut self.menu_cache)
-            .map_err(Error::Render)
+        render::render_window_cached(
+            &mut self.display,
+            &model,
+            columns,
+            start,
+            end,
+            &mut self.menu_cache,
+        )
+        .map_err(Error::Render)
     }
+}
+
+fn home_mr_setup(channel: Channel<'_>, reverse: bool) -> (u32, u32, u16) {
+    if !channel.is_active() {
+        return (0, 0, 0);
+    }
+    if reverse {
+        (
+            channel.tx_frequency_code(),
+            channel.rx_frequency_code(),
+            channel.rx_tone_raw(),
+        )
+    } else {
+        (
+            channel.rx_frequency_code(),
+            channel.tx_frequency_code(),
+            channel.tx_tone_raw(),
+        )
+    }
+}
+
+fn home_mr_tx_line(rx: u32, tx: u32, tone: u16) -> Option<(u32, u16)> {
+    (tx > 0 && tx <= 99_999_999 && (rx != tx || tone != 0)).then_some((tx, tone))
+}
+
+fn home_mr_offset(rx: u32, tx: u32) -> Option<core::cmp::Ordering> {
+    (rx.min(tx) != 0 && rx.max(tx) <= 99_999_999).then(|| rx.cmp(&tx))
+}
+
+fn home_mr_changed_digits(mut old: u32, mut new: u32) -> u8 {
+    if old == new {
+        return 0;
+    }
+    if old == 0 || new == 0 || old > 99_999_999 || new > 99_999_999 {
+        return u8::MAX;
+    }
+    let mut mask = 0;
+    for place in (0..8).rev() {
+        if old % 10 != new % 10 {
+            mask |= 1 << place;
+        }
+        old /= 10;
+        new /= 10;
+    }
+    mask
 }
 
 /// RSSI and squelch observations may coalesce. Runtime state/selected settings

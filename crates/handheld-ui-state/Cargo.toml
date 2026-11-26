@@ -14,6 +14,7 @@ voice-keyer = []
 renderer-tests = []
 
 [dependencies]
+uv98-band-plan = { path = "../band-plan" }
 uv98-codeplug = { path = "../codeplug" }
 uv98-keys = { path = "../keys" }
 uv98-signaling = { path = "../signaling" }

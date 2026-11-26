@@ -8,15 +8,15 @@
 
 [English](README.md) · [Deutsch](README.de.md) · **Русский**
 
-[**Выпуск R57**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r57) · [**Начать здесь — бэкап и установка**](docs/GETTING-STARTED.ru.md)
+[**Выпуск R58**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r58) · [**Начать здесь — бэкап и установка**](docs/GETTING-STARTED.ru.md)
 
-[**Полный комплект R57 (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/R57-RT880-UV98.zip) · [**CPS 0.11.0 для Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-CPS-0.11.0.zip)
+[**Полный комплект R58 (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/R58-RT880-UV98.zip) · [**CPS 0.11.0 для Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-CPS-0.11.0.zip)
 
-BIN R57 [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-r57-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-r57-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-r57-de.bin) · [Диагностика PA5 RX-only (ZIP, русский)](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/R54-PA5-RX-only.zip)
+BIN R58 [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-de.bin) · [Диагностика PA5 RX-only (ZIP, русский)](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/R54-PA5-RX-only.zip)
 
-> **Экспериментальная прошивка для исследованного профиля платы AT32F423.** Сначала проверьте совместимость платы. Перед записью подготовьте в CPS персональный образ R57 по проверенному NOR-бэкапу своей станции. CPS привяжет образ к вашим заводским калибровкам. [Инструкция резервирования и подготовки](docs/GETTING-STARTED.ru.md#4-проверьте-совместимость-перед-прошивкой)
+> **Экспериментальная прошивка для исследованного профиля платы AT32F423.** Сначала проверьте совместимость платы. Перед записью подготовьте в CPS персональный образ R58 по проверенному NOR-бэкапу своей станции. CPS привяжет образ к вашим заводским калибровкам. [Инструкция резервирования и подготовки](docs/GETTING-STARTED.ru.md#4-проверьте-совместимость-перед-прошивкой)
 
-Долгое нажатие цифры передаёт записанную фразу. В Windows CPS можно назначить цифру, задать задержку от включения TX до речи (0–3000 мс) и прослушать выбранный фрагмент MP3 или WAV. [Заметки R57](RELEASE-NOTES-R57.md#русский)
+R58 раньше выводит выбранный пункт меню, сокращает обмен с LCD при сканировании зоны и добавляет окно VFO-скана и журнал находок. В спектре водопад продолжает обновляться во время прослушивания. Для частоты курсора доступны AUTO, AM и FM. [Заметки R58](RELEASE-NOTES-R58.md#русский) · [Настройка голосовой кнопки](RELEASE-NOTES-R57.md#русский)
 
 ## CPS 0.11.0 для Windows
 
@@ -92,13 +92,13 @@ BIN R57 [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/
 1. Оставьте стоковую прошивку и сохраните исходный `.880dmf` / `.98pdmf` своей станции.
 2. Через нашу CPS считайте **калибровки**, **4 МиБ NOR** и **секции настроек/каналов**. Каждая операция читает данные дважды и сравнивает их.
 3. Сохраните целые папки снимков и подходящий заводской BIN в двух местах. Публичный комплект не содержит прошивку производителя.
-4. Проверьте совместимость платы, затем подготовьте в CPS персональный образ R57 по проверенному снимку NOR. Компилятор Rust для этого не нужен.
+4. Проверьте совместимость платы, затем подготовьте в CPS персональный образ R58 по проверенному снимку NOR. Компилятор Rust для этого не нужен.
 
 В [пошаговой инструкции](docs/GETTING-STARTED.ru.md) указаны кнопки CPS, ожидаемые файлы, проверка результата и откат. **Дамп NOR 4 МиБ не содержит прошивку MCU и загрузчик.**
 
 ## Текущие границы
 
-R57 проверена на ПК и в модели Cortex-M4. Задержку и разборчивость фразы на реальном репитере предстоит проверить. [История R53](RELEASE-NOTES-R53.md) · [Результаты проверки R54](AUDIT-R54.ru.md)
+Отрисовка LCD, управление сканированием и выбор режима приёма в спектре проверены на ПК и в модели Cortex-M4. Время реакции панели, приём и задержку ответа репитера проверяйте на рации. [История R53](RELEASE-NOTES-R53.md) · [Результаты проверки R54](AUDIT-R54.ru.md)
 
 - Dual Watch поочерёдно слушает A/B. Одновременного звука двух BK4819 нет.
 - КВ-водопад перестраивает единственный Si4732 и прерывает звук на время обзора. Это не FFT.

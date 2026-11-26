@@ -92,6 +92,8 @@ mod tests {
     #[test]
     fn packed_rows_reconstruct_every_original_pixel() {
         for (index, source) in SOURCE.chunks_exact(SOURCE_BYTES).enumerate() {
+            // Home's narrow digit windows omit the two transparent left pixels.
+            assert_eq!(source[0] & 0x0f, 0);
             let glyph = index / HOME_DIGIT_HEIGHT as usize;
             let y = index % HOME_DIGIT_HEIGHT as usize;
             assert_eq!(row(glyph, y), &source[..INK_BYTES]);

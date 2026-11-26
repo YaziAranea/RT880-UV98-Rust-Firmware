@@ -1,5 +1,10 @@
 //! Incremental LCD damage planning. Row composition and transfers are separate.
 use super::*;
+use crate::controller::ScanRangeField;
+use scan_pages::{
+    range_field_top, JOURNAL_ACTION_Y, JOURNAL_COUNT_Y, JOURNAL_FREQUENCY_Y, JOURNAL_INDEX_Y,
+    JOURNAL_LAST_OPENED_Y, JOURNAL_METRICS_Y, RANGE_ERROR_Y, RANGE_HINT_Y,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DamagePlan {
@@ -16,9 +21,20 @@ pub fn plan_damage(
     previous_radio: RadioView,
     previous_spectrum: Option<SpectrumView<'_>>,
 ) -> Result<DamagePlan, Error> {
+    plan_damage_with_staged_home(model, previous, previous_radio, previous_spectrum, false)
+}
+
+/// A staged Home channel supplies its own clipped identity regions.
+pub fn plan_damage_with_staged_home(
+    model: &Model<'_>,
+    previous: Option<&View>,
+    previous_radio: RadioView,
+    previous_spectrum: Option<SpectrumView<'_>>,
+    staged_home: bool,
+) -> Result<DamagePlan, Error> {
     validate(model)?;
     Ok(DamagePlan {
-        controller: controller_damage(model, previous),
+        controller: controller_damage(model, previous, staged_home),
         radio: radio_damage(model, previous_radio),
         spectrum: spectrum_damage(model, previous_spectrum),
     })
@@ -100,11 +116,11 @@ impl DirtyRanges {
 /// Passing None invalidates the whole frame, including external model fields.
 pub fn dirty_ranges(model: &Model<'_>, previous: Option<View>) -> Result<DirtyRanges, Error> {
     validate(model)?;
-    Ok(controller_damage(model, previous.as_ref()))
+    Ok(controller_damage(model, previous.as_ref(), false))
 }
 
 #[inline(never)]
-fn controller_damage(model: &Model<'_>, previous: Option<&View>) -> DirtyRanges {
+fn controller_damage(model: &Model<'_>, previous: Option<&View>, staged_home: bool) -> DirtyRanges {
     let mut dirty = DirtyRanges::new();
     let Some(old) = previous else {
         dirty.push(0, HEIGHT);
@@ -315,7 +331,7 @@ fn controller_damage(model: &Model<'_>, previous: Option<&View>) -> DirtyRanges 
                 dirty.push(a, b);
                 return dirty;
             }
-            if old.channel != new.channel {
+            if old.channel != new.channel && !staged_home {
                 dirty.push(top + 7, top + 14);
                 dirty.push(top + HOME_NAME_Y, top + HOME_NAME_Y + 14);
                 let (a, b) = home_frequency_rows(new.active_slot);
@@ -348,6 +364,8 @@ fn controller_damage(model: &Model<'_>, previous: Option<&View>) -> DirtyRanges 
                 }
             }
         }
+        Screen::ScanRange => scan_range_damage(&mut dirty, old, new),
+        Screen::ScanJournal => scan_journal_damage(&mut dirty, old, new),
         Screen::AprsRx => {
             if old.aprs_rx_stats != new.aprs_rx_stats {
                 dirty.push(270, 289);
@@ -478,10 +496,21 @@ fn controller_damage(model: &Model<'_>, previous: Option<&View>) -> DirtyRanges 
                 dirty.push(28, 48);
                 dirty.push(269, 320);
             }
+            if !new.spectrum_menu && old.spectrum_listening != new.spectrum_listening {
+                dirty.push(WATERFALL_TOP, WATERFALL_TICK_BOTTOM);
+                dirty.push(255, 262);
+            }
             if old.spectrum_cursor != new.spectrum_cursor {
                 dirty.push(48, 69);
                 dirty.push(176, 183);
                 dirty.push(255, 262);
+            }
+            if old.spectrum_modulation != new.spectrum_modulation {
+                dirty.push(48, 69);
+                if new.spectrum_menu {
+                    let top = GRAPH_TOP + u16::from(SPECTRUM_MENU_MODULATION) * 17 + 4;
+                    dirty.push(top, top + 7);
+                }
             }
             if old.spectrum_trigger != new.spectrum_trigger
                 || old.spectrum_auto_listen != new.spectrum_auto_listen
@@ -555,6 +584,84 @@ fn controller_damage(model: &Model<'_>, previous: Option<&View>) -> DirtyRanges 
         }
     }
     dirty
+}
+
+#[inline(never)]
+fn scan_range_damage(dirty: &mut DirtyRanges, old: &View, new: &View) {
+    let Some((old, new)) = old.scan_range_page.zip(new.scan_range_page) else {
+        if old.scan_range_page != new.scan_range_page {
+            dirty.push(56, 267);
+            dirty.push(305, 312);
+        }
+        return;
+    };
+    if old.manual != new.manual {
+        dirty.push(
+            range_field_top(ScanRangeField::Mode),
+            range_field_top(ScanRangeField::Step) + ITEM_PAINT_HEIGHT,
+        );
+    }
+    for (field, changed) in [
+        (ScanRangeField::Lower, old.lower_10hz != new.lower_10hz),
+        (ScanRangeField::Upper, old.upper_10hz != new.upper_10hz),
+        (ScanRangeField::Step, old.step_10hz != new.step_10hz),
+        (old.field, old.field != new.field || old.entry != new.entry),
+        (new.field, old.field != new.field),
+    ] {
+        if changed {
+            let y = range_field_top(field);
+            dirty.push(y, y + ITEM_PAINT_HEIGHT);
+        }
+    }
+    if old.error != new.error || old.manual != new.manual {
+        dirty.push(RANGE_ERROR_Y, RANGE_ERROR_Y + 7);
+    }
+    if old.field != new.field || old.entry.is_some() != new.entry.is_some() {
+        dirty.push(RANGE_HINT_Y, RANGE_HINT_Y + 22);
+        dirty.push(305, 312);
+    }
+}
+
+#[inline(never)]
+fn scan_journal_damage(dirty: &mut DirtyRanges, old: &View, new: &View) {
+    let scan_changed = old.scan != new.scan;
+    let ptt_changed = old.ptt_down != new.ptt_down;
+    let Some((old, new)) = old.scan_journal_page.zip(new.scan_journal_page) else {
+        if old.scan_journal_page != new.scan_journal_page {
+            dirty.push(68, 268);
+            dirty.push(305, 312);
+        }
+        return;
+    };
+    let Some((old_entry, new_entry)) = old.entry.zip(new.entry) else {
+        if old.entry.is_some() != new.entry.is_some() {
+            dirty.push(68, 268);
+            dirty.push(305, 312);
+        }
+        return;
+    };
+    if old.index != new.index || old.count != new.count {
+        dirty.push(JOURNAL_INDEX_Y, JOURNAL_INDEX_Y + 7);
+    }
+    if old_entry.frequency_10hz != new_entry.frequency_10hz {
+        dirty.push(JOURNAL_FREQUENCY_Y, JOURNAL_FREQUENCY_Y + 21);
+    }
+    if old_entry.peak_raw_rssi != new_entry.peak_raw_rssi
+        || old_entry.detections != new_entry.detections
+    {
+        dirty.push(JOURNAL_METRICS_Y, JOURNAL_COUNT_Y + 14);
+    }
+    if old_entry.last_opened_s != new_entry.last_opened_s {
+        dirty.push(JOURNAL_LAST_OPENED_Y, JOURNAL_LAST_OPENED_Y + 14);
+    }
+    if old.target != new.target || old_entry.ignored != new_entry.ignored {
+        dirty.push(JOURNAL_ACTION_Y, 268);
+    } else if scan_changed {
+        dirty.push(JOURNAL_ACTION_Y, JOURNAL_ACTION_Y + 7);
+    }
+    if old.target.is_some() != new.target.is_some() || scan_changed || ptt_changed {
+        dirty.push(305, 312);
+    }
 }
 
 /// Metadata changes use much smaller regions than screen navigation. In
@@ -676,12 +783,48 @@ fn spectrum_damage(model: &Model<'_>, previous: Option<SpectrumView<'_>>) -> Dir
                 && old.step_10hz == new.step_10hz
                 && old.len == new.len =>
         {
-            if old.plot != new.plot {
-                dirty.push(94, 176);
-                dirty.push(WATERFALL_TOP, 262);
-                if old.plot.held_bin != new.plot.held_bin {
-                    dirty.push(274, 281);
+            let before = old.plot;
+            let after = new.plot;
+            let menu = model.view.spectrum_menu;
+            let new_window = old.window_id != new.window_id;
+            let wide_changed = new_window && after.sweep != 0
+                || before.sweep != after.sweep
+                || before.latest != after.latest
+                || before.peaks != after.peaks
+                || before.valid != after.valid
+                || before.fresh != after.fresh
+                || before.peak_valid != after.peak_valid
+                || before.trigger_bin != after.trigger_bin
+                || before.display_floor != after.display_floor
+                || before.elapsed_ms != after.elapsed_ms;
+            if wide_changed {
+                dirty.push(94, if menu { 111 } else { 176 });
+                if !menu {
+                    dirty.push(WATERFALL_TOP, 262);
                 }
+            } else if !menu
+                && model.view.spectrum_listening
+                && (before.held_sample != after.held_sample
+                    || new_window && after.held_sample.is_some())
+            {
+                let bottom = if after.held_sample.is_some()
+                    && new
+                        .waterfall
+                        .is_none_or(|history| usize::from(history.repeats) < WATERFALL_ROWS)
+                {
+                    WATERFALL_BOTTOM
+                } else {
+                    WATERFALL_TICK_BOTTOM
+                };
+                dirty.push(WATERFALL_TOP, bottom);
+                if before.held_sample.map(|sample| sample.raw)
+                    != after.held_sample.map(|sample| sample.raw)
+                {
+                    dirty.push(255, 262);
+                }
+            }
+            if !menu && before.held_bin != after.held_bin {
+                dirty.push(274, 281);
             }
             if old.state != new.state {
                 dirty.push(28, 48);

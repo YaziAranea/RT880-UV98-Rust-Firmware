@@ -10,7 +10,7 @@ import build_release
 
 class ReleaseMatrixTests(unittest.TestCase):
     def run_matrix(self, destination, failing=None):
-        def build(language, target_dir, stage):
+        def build(language, target_dir, stage, profile):
             folder = stage / language
             folder.mkdir()
             (folder / "test.bin").write_bytes(language.encode())

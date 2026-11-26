@@ -103,10 +103,7 @@ impl CycleMillis {
 
     /// On an ambiguous jump, state is unchanged and callers must stop/rebase.
     pub fn sample(&mut self, cycles: u32) -> Result<u32, CycleTimeError> {
-        let delta = cycles.wrapping_sub(self.previous);
-        if delta >= (1 << 31) {
-            return Err(CycleTimeError::AmbiguousDelta);
-        }
+        let delta = cycle_delta(self.previous, cycles)?;
         let scaled = u64::from(delta) * 1000 + self.remainder;
         self.milliseconds = self
             .milliseconds
@@ -114,6 +111,45 @@ impl CycleMillis {
         self.remainder = scaled % u64::from(self.hz);
         self.previous = cycles;
         Ok(self.milliseconds)
+    }
+}
+
+/// Milliseconds from a wrapping cycle counter at a fixed whole-kilohertz rate.
+/// Uses the same sampling contract as `CycleMillis`.
+pub struct FixedCycleMillis<const HZ: u32> {
+    previous: u32,
+    remainder: u32,
+    milliseconds: u32,
+}
+
+impl<const HZ: u32> FixedCycleMillis<HZ> {
+    pub const fn new(start_cycles: u32) -> Self {
+        const { assert!(HZ >= 1000 && HZ % 1000 == 0) };
+        Self {
+            previous: start_cycles,
+            remainder: 0,
+            milliseconds: 0,
+        }
+    }
+
+    pub fn sample(&mut self, cycles: u32) -> Result<u32, CycleTimeError> {
+        let delta = cycle_delta(self.previous, cycles)?;
+        let per_ms = HZ / 1000;
+        // delta < 2^31 and remainder < u32::MAX / 1000, so their sum fits.
+        let elapsed = delta + self.remainder;
+        self.milliseconds = self.milliseconds.wrapping_add(elapsed / per_ms);
+        self.remainder = elapsed % per_ms;
+        self.previous = cycles;
+        Ok(self.milliseconds)
+    }
+}
+
+fn cycle_delta(previous: u32, cycles: u32) -> Result<u32, CycleTimeError> {
+    let delta = cycles.wrapping_sub(previous);
+    if delta >= 1 << 31 {
+        Err(CycleTimeError::AmbiguousDelta)
+    } else {
+        Ok(delta)
     }
 }
 

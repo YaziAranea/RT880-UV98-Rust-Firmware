@@ -26,6 +26,7 @@ pub fn cancels_scan(input: ptt::Input, adc: u16, bindings: [SideAction; 2]) -> b
 pub struct Scanner {
     scheduler: scan::Scheduler,
     zone_order: Option<scan::ZoneOrder>,
+    ignore_current: bool,
 }
 
 impl Scanner {
@@ -33,6 +34,7 @@ impl Scanner {
         Self {
             scheduler: scan::Scheduler::new(),
             zone_order: None,
+            ignore_current: false,
         }
     }
 
@@ -44,16 +46,20 @@ impl Scanner {
         self.scheduler.paused()
     }
 
+    pub fn awaiting_tune(&self) -> bool {
+        self.scheduler.status().phase == scan::Phase::AwaitingTune
+    }
+
     pub fn start<N: Bus, L: DisplayBus, D: Delay>(
         &mut self,
         app: &mut App<N, L, D>,
         now: u32,
     ) -> Result<Action, UiError<N, L>> {
-        let view = app.status().view;
+        let view = app.view_ref();
         self.zone_order = app
             .scan_zone_priority()
             .map(|priority| scan::ZoneOrder::new(priority, view.channel));
-        if let Some(action) = policy::scan_target(view)
+        if let Some(action) = policy::scan_target_with_range(view, app.scan_range())
             .ok()
             .and_then(|target| self.scheduler.start(target, now).ok())
         {
@@ -105,7 +111,7 @@ impl Scanner {
         if self.active()
             && (cancel_input
                 || matches!(
-                    app.status().view.scan,
+                    app.view_ref().scan,
                     ScanState::Stopped | ScanState::Stopping
                 ))
         {
@@ -113,7 +119,7 @@ impl Scanner {
         } else if skip && self.paused() {
             action = self
                 .scheduler
-                .skip_current(sample_time(), app.status().view.channel)
+                .skip_current(sample_time(), app.view_ref().channel)
                 .unwrap_or(Action::Stop);
         }
         if action == Action::None {
@@ -134,6 +140,7 @@ impl Scanner {
         now: u32,
         radio: RadioState,
         audio_open: bool,
+        sample: Option<scan::FindSample>,
     ) -> Result<bool, UiError<N, L>> {
         if let Some(ticket) = self.scheduler.status().ticket {
             match self.scheduler.tune_ack(ticket, now, radio) {
@@ -144,10 +151,18 @@ impl Scanner {
                 Err(_) => self.reject(app)?,
             }
         }
-        match self
-            .scheduler
-            .tick_with_cursor_hold(now, audio_open, app.scan_cursor_held())
-        {
+        if let Some(sample) = sample {
+            let hz = sample.frequency_10hz;
+            self.ignore_current = audio_open && app.scan_frequency_ignored(hz);
+            if let Some((raw, opened)) = self.scheduler.observe_find(sample) {
+                app.record_scan_find(hz, raw, opened, now);
+            }
+        }
+        match self.scheduler.tick_with_cursor_hold(
+            now,
+            audio_open && !self.ignore_current,
+            app.scan_cursor_held(),
+        ) {
             Ok(Action::None) => {}
             Ok(action) => {
                 if self.apply(app, action, false)? {
@@ -167,25 +182,29 @@ impl Scanner {
         action: Action,
         force_ordinary: bool,
     ) -> Result<bool, UiError<N, L>> {
+        self.ignore_current = false;
+        let action = self
+            .scheduler
+            .omit_marked_vfo(action, |hz| app.scan_frequency_ignored(hz));
         match action {
             Action::NextChannel => {
                 let skipped = self.scheduler.skipped_channels();
                 let target = if let Some(order) = &mut self.zone_order {
                     order.next(
-                        app.status().view.channel,
+                        app.view_ref().channel,
                         skipped,
                         force_ordinary,
                         |cursor, priority| app.next_scan_channel_after(cursor, skipped, priority),
                     )
                 } else {
                     app.next_scan_channel(skipped)
-                        .filter(|&channel| Some(channel) != app.status().view.channel)
+                        .filter(|&channel| Some(channel) != app.view_ref().channel)
                 };
                 if let Some(index) = target {
                     app.select_scan_channel(index)?;
                     Ok(true)
                 } else {
-                    if self.zone_order.is_none() && app.status().view.scan == ScanState::Requested {
+                    if self.zone_order.is_none() && app.view_ref().scan == ScanState::Requested {
                         app.reject_radio_request(Request::StartScan)?;
                     } else {
                         app.acknowledge_scan_stopped()?;

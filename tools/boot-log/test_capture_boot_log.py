@@ -74,6 +74,12 @@ class DecoderTests(unittest.TestCase):
             "loop_count": 215, "active_loop_us": 1_500_000, "max_redraw_backlog_ms": 310})
         self.assertEqual(records[0]["label"], "loop_work_and_redraw_backlog")
 
+    def test_page_timing_preserves_completed_batch_and_drained_intervals(self):
+        record = capture.StreamDecoder().feed(frame(0x177, 4, 8, 123), 0)[0]
+        self.assertEqual(record["label"], "ui_page_paint")
+        self.assertEqual(record["decoded_details"], {
+            "screen": 4, "first_render_batch_ms": 8, "drained_ms": 123})
+
     def test_radio018_rx_signal_and_register_readbacks(self):
         d = capture.StreamDecoder()
         records = d.feed(frame(0x174,12640000,(167<<16)|0x0402,7|(90<<8)) +

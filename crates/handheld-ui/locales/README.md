@@ -41,9 +41,12 @@ The generator verifies row structure, ID bounds, remaining untranslated Russian
 literals in production screen code, and the maximum bounded decoder depth.
 The three `messages-{ru,en,de}.bin` files are checked in, so Cargo builds need
 no Python. Each catalog contains a BMP character alphabet, a byte-pair
-dictionary, offsets and packed message bytes. Decoding uses a 24-byte work stack and a 256-byte UTF-8 message
-buffer; no heap, storage writes or language-specific RF behavior. Unmarked
-numeric/technical labels bypass decompression.
+dictionary, a table of message offsets including the end of the pool, and
+packed message bytes. The table stores each offset's low byte followed by the
+high byte of the first offset in each group of 16. The generator verifies
+every offset can be reconstructed with at most one carry within its group.
+Decoding uses a 24-byte work stack and a 256-byte UTF-8 message buffer.
+Unmarked numeric and technical labels bypass decompression.
 
 Tests compare all packed strings with the reviewed TSV, check glyphs and
 menu widths, and compare full and incremental rendering in each language.

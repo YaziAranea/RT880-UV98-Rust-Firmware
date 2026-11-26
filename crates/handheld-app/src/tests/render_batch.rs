@@ -1,6 +1,238 @@
 use super::*;
 
 #[test]
+fn page_open_draws_title_and_control_before_body() {
+    use controller::MenuItem;
+
+    for (item, screen) in [
+        (MenuItem::Monitor, Screen::Setting),
+        (MenuItem::Step, Screen::Step),
+        (MenuItem::Channels, Screen::Channels),
+        (MenuItem::ScanRange, Screen::ScanRange),
+    ] {
+        let capture = Rc::new(RefCell::new(CapturedFrame::new()));
+        let panel = Panel {
+            capture: Some(capture.clone()),
+            ..Panel::default()
+        };
+        let windows = panel.windows.clone();
+        let mut app = App::new(
+            Memory::new(),
+            panel,
+            NoDelay,
+            Timing::new(30, 600).unwrap(),
+            PRESERVED_CALIBRATION_SHA256,
+        );
+        app.start(0).unwrap();
+        let before = capture.borrow().pixels.clone();
+        windows.borrow_mut().clear();
+        menu(&mut app, item);
+        assert_eq!(app.status.view.screen, screen);
+        assert!(windows.borrow().is_empty());
+
+        let control_top = match screen {
+            Screen::Setting => 123,
+            Screen::Step => 70 + u16::from(app.status.view.step_index) * 33,
+            Screen::Channels => 57,
+            Screen::ScanRange => 64,
+            _ => unreachable!(),
+        };
+        let title = 11 * render::WIDTH..18 * render::WIDTH;
+        let control =
+            usize::from(control_top) * render::WIDTH..usize::from(control_top + 14) * render::WIDTH;
+        assert_eq!(app.render_batch(7, || true).unwrap().rows, 7);
+        assert!(windows
+            .borrow()
+            .iter()
+            .all(|&(y, end)| y >= 11 && end <= 18));
+        assert_ne!(
+            capture.borrow().pixels[title.clone()],
+            before[title.clone()]
+        );
+        assert_eq!(
+            capture.borrow().pixels[control.clone()],
+            before[control.clone()]
+        );
+        windows.borrow_mut().clear();
+
+        assert_eq!(app.render_batch(14, || true).unwrap().rows, 14);
+        assert!(windows
+            .borrow()
+            .iter()
+            .all(|&(y, end)| y >= control_top && end <= control_top + 14));
+        let visible = capture.borrow().pixels.clone();
+        assert_ne!(visible[control.clone()], before[control.clone()]);
+        assert!(app.render_pending());
+
+        assert_matches_complete_frame(&mut app, &capture);
+        let complete = capture.borrow();
+        assert_eq!(complete.pixels[title.clone()], visible[title]);
+        assert_eq!(complete.pixels[control.clone()], visible[control]);
+    }
+}
+
+#[test]
+fn home_mr_repaint_finishes_one_channel_identity_before_the_next() {
+    fn fixture(
+        slot: Slot,
+        panel: Panel,
+        capture: &Rc<RefCell<CapturedFrame>>,
+    ) -> App<Memory, Panel, NoDelay> {
+        let mut memory = Memory::new();
+        for (index, frequency, name) in [(1, 43_280_000, b"ZONE A"), (2, 43_407_500, b"RELAYB")] {
+            add_channel(&mut memory, index, frequency);
+            let start = 0x4000 + (index + 1) * CHANNEL_LEN - 16;
+            memory.bytes[start..start + name.len()].copy_from_slice(name);
+            if index == 1 {
+                let raw = &mut memory.bytes[0x4000 + index * CHANNEL_LEN..];
+                raw[10..14].copy_from_slice(&43_360_000u32.to_le_bytes());
+                raw[14..16].copy_from_slice(&0x1302u16.to_le_bytes());
+            }
+        }
+        let mut app = App::new(
+            memory,
+            panel,
+            NoDelay,
+            Timing::new(30, 600).unwrap(),
+            PRESERVED_CALIBRATION_SHA256,
+        );
+        app.start(0).unwrap();
+        app.select_slot(slot).unwrap();
+        assert_matches_complete_frame(&mut app, capture);
+        app
+    }
+
+    for slot in [Slot::A, Slot::B] {
+        let reference_capture = Rc::new(RefCell::new(CapturedFrame::new()));
+        let reference_panel = Panel {
+            capture: Some(reference_capture.clone()),
+            ..Panel::default()
+        };
+        let mut reference = fixture(slot, reference_panel, &reference_capture);
+        event(&mut reference, InputEvent::Short(Key::Down));
+        assert_eq!(reference.status.view.channel, Some(1));
+        assert_matches_complete_frame(&mut reference, &reference_capture);
+        let first_frame = reference_capture.borrow().pixels.clone();
+
+        let capture = Rc::new(RefCell::new(CapturedFrame::new()));
+        let panel = Panel {
+            capture: Some(capture.clone()),
+            ..Panel::default()
+        };
+        let windows = panel.windows.clone();
+        let writes = panel.observed_writes.clone();
+        let mut app = fixture(slot, panel, &capture);
+        let initial = capture.borrow().pixels.clone();
+        windows.borrow_mut().clear();
+        let before = writes.get();
+        event(&mut app, InputEvent::Short(Key::Down));
+        assert_eq!(app.status.view.channel, Some(1));
+        assert!(app.home_channel_paint_pending());
+        assert_eq!(app.render_batch(16, || false).unwrap().rows, 0);
+        assert_eq!(capture.borrow().pixels, initial);
+        app.mark_priority((3, 4));
+        app.priority_run = PRIORITY_BURST_ROWS;
+        let place = app.home_channel_digits.trailing_zeros() as usize;
+        let mut admissions = 0;
+        assert_eq!(
+            app.render_batch(16, || {
+                admissions += 1;
+                admissions == 1
+            })
+            .unwrap()
+            .rows,
+            5
+        );
+        let (first, end) = render::home_frequency_rows(slot);
+        assert_eq!(*windows.borrow(), [(first, end)]);
+        let x = 8 + place * 27 + usize::from(place >= 3) * 12;
+        for row in first..end {
+            let start = usize::from(row) * render::WIDTH + x;
+            let range = start..start + usize::from(render::HOME_DIGIT_WIDTH);
+            assert_eq!(capture.borrow().pixels[range.clone()], first_frame[range]);
+        }
+        app.pending_rows.clear(3, 4);
+        app.priority_rows.clear(3, 4);
+        event(&mut app, InputEvent::Short(Key::Down));
+        assert_eq!(app.status.view.channel, Some(2));
+        let reads = app.nor.reads;
+        while app
+            .home_channel_paint
+            .as_ref()
+            .is_some_and(|record| record.index == 1)
+        {
+            let step = app.render_step(6).unwrap();
+            assert!(step.rows != 0);
+        }
+        let sent = windows.borrow();
+        assert!(
+            writes.get() - before
+                < usize::from(render::HOME_CHANNEL_PAINT_ROWS) * render::WIDTH * 4 / 3
+        );
+        assert!(sent
+            .iter()
+            .all(|&(start, stop)| (start, stop) == (first, end) || stop - start <= 6));
+        // Stop before the next snapshot starts. Its channel is already the
+        // controller target, but all visible identity regions are the first one.
+        {
+            let frame = capture.borrow();
+            for (start, end) in render::home_channel_rows(slot) {
+                let bounds = usize::from(start) * render::WIDTH..usize::from(end) * render::WIDTH;
+                assert_eq!(frame.pixels[bounds.clone()], first_frame[bounds]);
+            }
+            let (start, end) = render::home_slot_rows(slot.other());
+            let bounds = usize::from(start) * render::WIDTH..usize::from(end) * render::WIDTH;
+            assert_eq!(frame.pixels[bounds.clone()], initial[bounds]);
+        }
+        drop(sent);
+        let mut batches = 0;
+        while app.render_pending() {
+            let budget = [1, 2, 4][batches % 3];
+            let bytes = writes.get();
+            let progress = app.render_batch(budget, || true).unwrap();
+            assert!((1..=budget).contains(&progress.rows));
+            assert!(writes.get() - bytes <= usize::from(budget) * (render::WIDTH * 2 + 11));
+            batches += 1;
+            assert!(batches < 128);
+        }
+        assert_matches_complete_frame(&mut app, &capture);
+        assert!(!app.home_channel_paint_pending());
+        assert_eq!(app.nor.reads, reads);
+
+        // A reverse/entry/page or confirmed TX change may invalidate an
+        // in-flight channel independently from the next scan hop.
+        for control in [
+            InputEvent::Hold(Key::Digit4),
+            InputEvent::Short(Key::Digit1),
+            InputEvent::Short(Key::Menu),
+            InputEvent::Ptt(true),
+        ] {
+            let capture = Rc::new(RefCell::new(CapturedFrame::new()));
+            let panel = Panel {
+                capture: Some(capture.clone()),
+                ..Panel::default()
+            };
+            let mut app = fixture(slot, panel, &capture);
+            event(&mut app, InputEvent::Short(Key::Down));
+            assert!(app.home_channel_paint_pending());
+            assert_eq!(app.render_batch(1, || true).unwrap().rows, 1);
+            event(&mut app, control);
+            if control == InputEvent::Ptt(true) {
+                assert!(app.render_batch(2, || true).unwrap().rows <= 2);
+                app.set_radio_view(RadioView {
+                    state: render::RadioState::Transmitting,
+                    tx_slot: Some(slot),
+                    ..RadioView::OFF
+                })
+                .unwrap();
+            }
+            assert!(!app.home_channel_paint_pending(), "{control:?}");
+            assert_matches_complete_frame(&mut app, &capture);
+        }
+    }
+}
+
+#[test]
 fn manual_tx_status_repaints_only_the_confirmed_slots_meter_labels() {
     let capture = Rc::new(RefCell::new(CapturedFrame::new()));
     let panel = Panel {

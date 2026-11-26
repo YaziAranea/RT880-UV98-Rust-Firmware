@@ -16,6 +16,7 @@ import struct
 ROOT = Path(__file__).resolve().parents[1]
 DIRECTORY = ROOT / "crates/handheld-ui/locales"
 LANGUAGES = ("ru", "en", "de")
+OFFSET_GROUP = 16
 
 
 def audit_sources(rows):
@@ -63,6 +64,20 @@ def read_source():
     return rows
 
 
+def pack_offsets(offsets):
+    """Pack absolute low bytes and one high-byte checkpoint per group."""
+    checkpoints = offsets[::OFFSET_GROUP]
+    lows = bytes(offset & 0xff for offset in offsets)
+    highs = bytes(offset >> 8 for offset in checkpoints)
+    for index, offset in enumerate(offsets):
+        group = index // OFFSET_GROUP
+        first_low = lows[group * OFFSET_GROUP]
+        low = lows[index]
+        decoded = ((highs[group] + (low < first_low)) << 8) | low
+        assert decoded == offset, f"message offsets exceed 255 bytes in group {group}"
+    return lows + highs
+
+
 def pack(messages):
     alphabet = sorted(set("".join(messages)))
     assert len(alphabet) < 256 and all(ord(c) <= 0xffff for c in alphabet)
@@ -89,7 +104,7 @@ def pack(messages):
     result = struct.pack("<HBB", len(messages), len(alphabet), len(pairs))
     result += b"".join(struct.pack("<H", ord(char)) for char in alphabet)
     result += bytes(value for pair in pairs for value in pair)
-    result += b"".join(struct.pack("<H", offset) for offset in offsets)
+    result += pack_offsets(offsets)
     result += b"".join(encoded)
     return result, max(depths)
 

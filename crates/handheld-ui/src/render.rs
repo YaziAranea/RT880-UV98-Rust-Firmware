@@ -17,7 +17,8 @@ use crate::controller::{
 };
 use crate::controller::{
     menu_entries, CrossbandProbe, EntryKind, MdcDraft, Mode, Notice, ScanState, Screen, Setting,
-    Slot, View, SHORTCUT_ACTIONS, SIDE_ACTIONS, SPECTRUM_INTERVALS, STEP_10HZ, TX_CTCSS,
+    Slot, SpectrumModulation, View, SHORTCUT_ACTIONS, SIDE_ACTIONS, SPECTRUM_INTERVALS,
+    SPECTRUM_MENU_LEN, SPECTRUM_MENU_MODULATION, STEP_10HZ, TX_CTCSS,
 };
 use crate::meter::{receive_segments, transmit_segments, SEGMENTS as METER_SEGMENTS};
 
@@ -29,7 +30,8 @@ pub const NAME_POPUP_PRIORITY_ROWS: (u16, u16) = signaling_popup::NAME_PRIORITY_
 #[path = "damage.rs"]
 mod damage;
 pub use damage::{
-    dirty_ranges, plan_damage, radio_dirty_ranges, spectrum_dirty_ranges, DamagePlan, DirtyRanges,
+    dirty_ranges, plan_damage, plan_damage_with_staged_home, radio_dirty_ranges,
+    spectrum_dirty_ranges, DamagePlan, DirtyRanges,
 };
 #[path = "navigation.rs"]
 mod navigation;
@@ -42,6 +44,8 @@ use navigation::{current_setting_label, setting_options, MENU_LABEL_X, SHIFT_TX_
 pub use navigation::{
     menu_group_label, menu_item_rows, menu_label, shortcut_label, side_action_label, MenuCache,
 };
+#[path = "scan_pages.rs"]
+mod scan_pages;
 #[path = "font.rs"]
 mod font;
 #[path = "frequency_font.rs"]
@@ -80,6 +84,9 @@ const HOME_HEADER_END: u16 = 28;
 const HOME_NAME_Y: u16 = 30;
 const HOME_FREQUENCY_Y: u16 = 54;
 const HOME_DIGIT_HEIGHT: u16 = 48;
+const HOME_DIGIT_LEFT_MARGIN: u16 = 2;
+pub const HOME_DIGIT_WIDTH: u16 = frequency_font::INK_BYTES as u16 * 4 - HOME_DIGIT_LEFT_MARGIN;
+pub const HOME_DIGIT_COLUMNS_PER_ROW: u16 = WIDTH as u16 / HOME_DIGIT_HEIGHT;
 pub const HOME_METER_Y: u16 = 112;
 const HOME_META_Y: u16 = 130;
 const LIST_Y: u16 = 54;
@@ -507,7 +514,59 @@ pub const fn home_frequency_rows(slot: Slot) -> (u16, u16) {
     )
 }
 
-fn home_ham_rows(slot: Slot) -> (u16, u16) {
+pub const HOME_CHANNEL_PAINT_ROWS: u16 = HOME_DIGIT_HEIGHT + 9 + 14 + 7 + 14;
+
+/// Give the channel's digits, name and radio settings one ordered repaint pass.
+pub const fn home_channel_rows(slot: Slot) -> [(u16, u16); 4] {
+    let top = home_slot_rows(slot).0;
+    let (frequency_start, frequency_end) = home_frequency_rows(slot);
+    [
+        (frequency_start, frequency_end + 9),
+        (top + HOME_NAME_Y, top + HOME_NAME_Y + 14),
+        (top + 7, top + 14),
+        home_ham_rows(slot),
+    ]
+}
+
+pub fn render_home_channel_digit<B: DisplayBus, D: Delay>(
+    display: &mut Display<B, D>,
+    slot: Slot,
+    value: u32,
+    place: u8,
+    first: u16,
+    count: u16,
+) -> Result<(), RenderError<B::Error>> {
+    if place >= 8 || count == 0 || first.saturating_add(count) > HOME_DIGIT_WIDTH {
+        return Err(RenderError::Model(Error::InvalidRange));
+    }
+    // The eight digits and fixed decimal point occupy 228 centered pixels.
+    // Neither slot's frequency region intersects the signaling popup.
+    let dot = u16::from(place >= 3);
+    let x = 6 + HOME_DIGIT_LEFT_MARGIN + u16::from(place) * 27 + dot * 12;
+    let top = home_frequency_rows(slot).0;
+    let byte = frequency(value).bytes[usize::from(place) + usize::from(dot)];
+    let glyph = if byte == b'-' { 11 } else { usize::from(byte - b'0') };
+    // Four raster lines fit in 176 bytes and share one synchronous SPI burst.
+    const LINES: usize = 4;
+    const { assert!(HOME_DIGIT_HEIGHT as usize % LINES == 0) };
+    let mut pixels = [0u16; HOME_DIGIT_WIDTH as usize * LINES];
+    let tile = &mut pixels[..usize::from(count) * LINES];
+    display
+        .begin_window(x + first, top, count, HOME_DIGIT_HEIGHT)
+        .map_err(RenderError::Display)?;
+    for y in (0..usize::from(HOME_DIGIT_HEIGHT)).step_by(LINES) {
+        for (dy, line) in tile.chunks_exact_mut(usize::from(count)).enumerate() {
+            let bitmap = frequency_font::row(glyph, y + dy);
+            for (dx, pixel) in line.iter_mut().enumerate() {
+                *pixel = home_digit_pixel(bitmap, usize::from(first + HOME_DIGIT_LEFT_MARGIN) + dx, &ACTIVE_DIGITS);
+            }
+        }
+        display.write_pixels(tile).map_err(RenderError::Display)?;
+    }
+    display.finish_pixels().map_err(RenderError::Display)
+}
+
+const fn home_ham_rows(slot: Slot) -> (u16, u16) {
     let top = home_slot_rows(slot).0;
     (top + HOME_META_Y - 3, top + HOME_META_Y + 11)
 }
@@ -558,15 +617,31 @@ pub fn render_rows_cached<B: DisplayBus, D: Delay>(
     end_y: u16,
     menu_cache: &mut MenuCache,
 ) -> Result<(), RenderError<B::Error>> {
+    render_window_cached(display, model, 0..WIDTH, start_y, end_y, menu_cache)
+}
+
+pub fn render_window_cached<B: DisplayBus, D: Delay>(
+    display: &mut Display<B, D>,
+    model: &Model<'_>,
+    columns: core::ops::Range<usize>,
+    start_y: u16,
+    end_y: u16,
+    menu_cache: &mut MenuCache,
+) -> Result<(), RenderError<B::Error>> {
     validate(model).map_err(RenderError::Model)?;
-    if start_y > end_y || end_y > HEIGHT {
+    if start_y > end_y || end_y > HEIGHT || columns.is_empty() || columns.end > WIDTH {
         return Err(RenderError::Model(Error::InvalidRange));
     }
     if start_y == end_y {
         return Ok(());
     }
     display
-        .begin_window(0, start_y, WIDTH as u16, end_y - start_y)
+        .begin_window(
+            columns.start as u16,
+            start_y,
+            columns.len() as u16,
+            end_y - start_y,
+        )
         .map_err(RenderError::Display)?;
     let mut pixels = [0u16; WIDTH];
     for y in start_y..end_y {
@@ -575,7 +650,7 @@ pub fn render_rows_cached<B: DisplayBus, D: Delay>(
         // every row in an incremental batch.
         render_validated_row(y, &mut pixels, model, menu_cache);
         display
-            .write_pixels(&pixels)
+            .write_pixels(&pixels[columns.clone()])
             .map_err(RenderError::Display)?;
     }
     display.finish_pixels().map_err(RenderError::Display)
@@ -644,6 +719,8 @@ fn render_validated_row(
             Screen::SideKeys => side_keys(row, out, model),
             Screen::ShortcutAction | Screen::SideAction => actions(row, out, model),
             Screen::Setting => setting(row, out, model),
+            Screen::ScanRange => scan_pages::range(row, out, &model.view),
+            Screen::ScanJournal => scan_pages::journal(row, out, &model.view),
             Screen::Spectrum => spectrum(row, out, model),
             Screen::Shortwave => shortwave(row, out, model),
             Screen::Crossband => crossband(row, out, &model.view),
@@ -695,6 +772,9 @@ fn validate(model: &Model<'_>) -> Result<(), Error> {
             if spectrum
                 .frequency_10hz(spectrum.middle_index())
                 .is_none_or(|middle| middle != spectrum.center_10hz)
+                || spectrum.plot.held_sample.is_some_and(|sample| {
+                    sample.bin >= spectrum.len || sample.raw > uv98_spectrum::compact::MAX_RAW
+                })
             {
                 return Err(Error::InvalidView);
             }
@@ -767,6 +847,43 @@ pub fn radio_banner_rows(screen: Screen) -> (u16, u16) {
     } else {
         (28, 48)
     }
+}
+
+/// Visible text of the focused control, without its surrounding panel.
+pub fn page_control_rows(model: &Model<'_>) -> (u16, u16) {
+    let view = &model.view;
+    let top = match view.screen {
+        Screen::Setting => {
+            let Some(setting) = view.setting else {
+                return (0, 0);
+            };
+            let (start, pitch, height) = setting_geometry(setting);
+            let first = if setting.choice_count() > LIST_ROWS as u8 {
+                menu_start(view.setting_index)
+            } else {
+                0
+            };
+            start + (u16::from(view.setting_index) - first as u16) * pitch + (height - 14) / 2
+        }
+        Screen::Step => 70 + u16::from(view.step_index) * 33,
+        Screen::Channels => match model
+            .list
+            .iter()
+            .position(|channel| Some(channel.index as u16) == view.list_channel)
+        {
+            Some(offset) => LIST_Y + offset as u16 * LIST_ROW_HEIGHT + 3,
+            None if model.list.is_empty() => 128,
+            None => return (0, 0),
+        },
+        Screen::ScanRange => {
+            let Some(page) = view.scan_range_page else {
+                return (0, 0);
+            };
+            scan_pages::range_field_top(page.field) + 8
+        }
+        _ => return (0, 0),
+    };
+    (top, top + 14)
 }
 
 /// Rounded decivolts and approximate voltage bands for a two-cell pack.
@@ -924,6 +1041,8 @@ fn page_title(view: View) -> &'static str {
         Screen::SideKeys => "\x1f047",
         Screen::SideAction => "\x1f068",
         Screen::Setting => view.setting.map(setting_title).unwrap_or("\x1f0AC"),
+        Screen::ScanRange => scan_pages::RANGE_TITLE,
+        Screen::ScanJournal => scan_pages::JOURNAL_TITLE,
         Screen::Spectrum => "\x1f124",
         Screen::Shortwave => "\x1f0FD",
         Screen::Crossband => "\x1f097",
@@ -1214,14 +1333,14 @@ pub const VERSION: &str = "0.1.8-r54";
 #[cfg(feature = "pa5-audio")]
 pub const VERSION: &str = "R55-CT";
 #[cfg(all(feature = "voice-keyer", not(feature = "pa5-audio")))]
-pub const VERSION: &str = "R57-VK";
+pub const VERSION: &str = "R58-SC3";
 /// Header has a fixed 42 px slot; About shows the full string.
 #[cfg(not(any(feature = "pa5-audio", feature = "voice-keyer")))]
 pub const VERSION_SHORT: &str = "R54";
 #[cfg(feature = "pa5-audio")]
 pub const VERSION_SHORT: &str = "PA5";
 #[cfg(all(feature = "voice-keyer", not(feature = "pa5-audio")))]
-pub const VERSION_SHORT: &str = "VK3";
+pub const VERSION_SHORT: &str = "R58";
 
 fn crossband(row: u16, out: &mut Row<'_>, view: &View) {
     let (status, tint) = match view.crossband_probe {
@@ -1288,6 +1407,8 @@ fn crossband(row: u16, out: &mut Row<'_>, view: &View) {
 const WATERFALL_ROWS: usize = 16;
 const WATERFALL_TOP: u16 = 190;
 const WATERFALL_BOTTOM: u16 = WATERFALL_TOP + 4 * WATERFALL_ROWS as u16;
+const WATERFALL_TICK_SLOTS: usize = 4;
+const WATERFALL_TICK_BOTTOM: u16 = WATERFALL_TOP + 4 * WATERFALL_TICK_SLOTS as u16;
 const WATERFALL_COLORS: [u16; 8] = [
     color::BACKGROUND,
     0x6000,
@@ -1303,6 +1424,9 @@ const WATERFALL_COLORS: [u16; 8] = [
 pub struct Waterfall {
     rows: [[u8; SPECTRUM_BINS]; WATERFALL_ROWS],
     newest: usize,
+    last_held: u16,
+    // Consecutive advances that left the newest band's pixels unchanged.
+    repeats: u8,
 }
 
 impl Default for Waterfall {
@@ -1316,6 +1440,8 @@ impl Waterfall {
         Self {
             rows: [[0; SPECTRUM_BINS]; WATERFALL_ROWS],
             newest: 0,
+            last_held: 0,
+            repeats: 0,
         }
     }
 
@@ -1323,14 +1449,40 @@ impl Waterfall {
         let Some((floor, _)) = spectrum_bounds(plot) else {
             return;
         };
-        self.newest = (self.newest + 1) % WATERFALL_ROWS;
-        self.rows[self.newest].fill(0);
+        let row = self.next_row();
         for index in 0..usize::from(len).min(SPECTRUM_BINS) {
             if plot.valid(index) {
-                let level = plot.latest[index].saturating_sub(floor);
-                self.rows[self.newest][index] = 1 + (level / 8).min(6) as u8;
+                row[index] = waterfall_level(plot.latest[index], floor);
             }
         }
+        self.last_held = 0;
+    }
+
+    pub fn push_held(&mut self, plot: &Plot, len: u8) {
+        if let Some(sample) = plot.held_sample.filter(|sample| {
+            sample.bin < len.min(SPECTRUM_BINS as u8)
+                && sample.raw <= uv98_spectrum::compact::MAX_RAW
+        }) {
+            // A manual Listen can start before the first complete sweep.
+            let floor = spectrum_bounds(plot).map_or(128, |(floor, _)| floor);
+            let level = waterfall_level(sample.raw, floor);
+            self.next_row()[usize::from(sample.bin)] = level;
+            let held = (u16::from(sample.bin) << 3) | u16::from(level);
+            self.repeats = if self.last_held == held {
+                self.repeats.saturating_add(1)
+            } else {
+                0
+            };
+            self.last_held = held;
+        }
+    }
+
+    #[inline(never)]
+    fn next_row(&mut self) -> &mut [u8; SPECTRUM_BINS] {
+        self.newest = (self.newest + 1) % WATERFALL_ROWS;
+        let row = &mut self.rows[self.newest];
+        row.fill(0);
+        row
     }
 
     fn row(&self, age: usize) -> &[u8; SPECTRUM_BINS] {
@@ -1338,12 +1490,16 @@ impl Waterfall {
     }
 }
 
+fn waterfall_level(raw: u16, floor: u16) -> u8 {
+    1 + (raw.saturating_sub(floor) / 8).min(6) as u8
+}
+
 const GRAPH_X: usize = 12;
 const GRAPH_WIDTH: usize = 216;
 const GRAPH_TOP: u16 = 116;
 const GRAPH_BOTTOM: u16 = 175;
-const SPECTRUM_MENU_LABELS: [&str; 8] = [
-    "\x1f121", "\x1f0F4", "\x1f048", "\x1f09B", "\x1f13B", "\x1f13C", "\x1f10B", "\x1f07A",
+const SPECTRUM_MENU_LABELS: [&str; SPECTRUM_MENU_LEN as usize] = [
+    "\x1f121", "\x1f0F4", "\x1f048", "\x1f09B", "\x1f13B", "\x1f13C", "\x1f10B", "\x1f07A", "AM/FM",
 ];
 
 fn spectrum_bin_x(index: usize, len: usize) -> usize {
@@ -1398,6 +1554,15 @@ fn spectrum_menu_value(model: &Model<'_>, view: Option<SpectrumView<'_>>, option
         }
         2 | 3 => khz(step.saturating_mul(intervals)),
         4 | 5 => khz(step),
+        SPECTRUM_MENU_MODULATION => {
+            let mut text = Text::new();
+            let _ = text.write_str(match model.view.spectrum_modulation {
+                SpectrumModulation::Auto => "AUTO",
+                SpectrumModulation::Am => "AM",
+                SpectrumModulation::Fm => "FM",
+            });
+            text
+        }
         _ => Text::new(),
     }
 }
@@ -1509,8 +1674,15 @@ fn spectrum(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
     };
     let cursor = model.view.spectrum_cursor.min(view.len - 1);
     if (48..69).contains(&row) {
-        let value = frequency(view.frequency_10hz(cursor).unwrap_or(0));
+        let cursor_10hz = view.frequency_10hz(cursor).unwrap_or(0);
+        let value = frequency(cursor_10hz);
         centered(row, out, 48, 3, value.as_str(), color::TEXT);
+        let (label, ink) = if model.view.spectrum_modulation.is_am(cursor_10hz) {
+            ("AM", color::AM_BADGE)
+        } else {
+            ("FM", color::FM_BADGE)
+        };
+        text(row, out, 205, 52, 2, label, ink);
     }
     spectrum_geometry(row, out, view.step_10hz, view.span_10hz().unwrap_or(0));
     if (104..111).contains(&row) {
@@ -1598,26 +1770,44 @@ fn spectrum(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
             text(row, out, x, 183, 1, label, color::TEXT);
         }
     }
+    let listening = model.view.spectrum_listening;
     if !menu && (WATERFALL_TOP..WATERFALL_BOTTOM).contains(&row) {
         if let Some(history) = view.waterfall {
-            let levels = history.row(usize::from((row - WATERFALL_TOP) / 4));
+            let age = usize::from((row - WATERFALL_TOP) / 4);
+            let levels = history.row(age);
             let bins = usize::from(view.len);
             for (index, &level) in levels[..bins].iter().enumerate() {
                 let start = GRAPH_X + index * GRAPH_WIDTH / bins;
                 let end = GRAPH_X + (index + 1) * GRAPH_WIDTH / bins;
                 out[start..end].fill(WATERFALL_COLORS[usize::from(level)]);
             }
+            // The marker advances once per published measurement, even when
+            // a steady carrier produces identical rows throughout the history.
+            if listening
+                && view.plot.held_sample.is_some()
+                && age == history.newest % WATERFALL_TICK_SLOTS
+            {
+                out[5..8].fill(color::ACCENT);
+            }
         }
     }
     if !menu && (255..262).contains(&row) {
         let index = usize::from(cursor);
         let mut reading = Text::new();
-        if view.plot.valid(index) {
-            let _ = write!(
-                reading,
-                "RSSI {:3}   {} \x1f0A2   {} \x1f134",
-                view.plot.latest[index], view.plot.elapsed_ms, view.len
-            );
+        let raw = if listening {
+            view.plot.held_sample.map(|sample| sample.raw)
+        } else {
+            view.plot.valid(index).then(|| view.plot.latest[index])
+        };
+        if let Some(raw) = raw {
+            let _ = write!(reading, "RSSI {raw:3}");
+            if !listening {
+                let _ = write!(
+                    reading,
+                    "   {} \x1f0A2   {} \x1f134",
+                    view.plot.elapsed_ms, view.len
+                );
+            }
         } else {
             let _ = reading.write_str("\x1f038");
         }
@@ -1719,108 +1909,109 @@ fn shortwave(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
         return;
     }
     rect(row, out, 12, 55, 216, 178, color::PANEL);
-    let mut band = Text::new();
-    let _ = write!(
-        band,
-        "VFO   {}   {}",
-        view.shortwave_mode.label(),
-        SW_BANDS[usize::from(view.shortwave_band)].0
-    );
-    centered(row, out, 63, 1, band.as_str(), color::ACCENT);
+    let fm = view.shortwave_mode == ShortwaveMode::Fm && view.shortwave_entry.is_none();
     let mut line = Text::new();
-    let khz = view.shortwave_entry.unwrap_or(view.shortwave_khz);
-    let fm = view.shortwave_mode == ShortwaveMode::Fm;
-    if fm && view.shortwave_entry.is_none() {
-        let _ = write!(line, "{}.{:03}", khz / 1000, khz % 1000);
-    } else if view.shortwave_mode.is_ssb() && view.shortwave_entry.is_none() {
-        let _ = write!(line, "{khz}.{:03}", view.shortwave_fraction_hz);
-    } else {
-        let _ = write!(line, "{khz}");
-    }
-    centered(row, out, 86, 4, line.as_str(), color::TEXT);
-    centered(
-        row,
-        out,
-        132,
-        2,
-        if fm && view.shortwave_entry.is_none() {
-            "\x1f09A"
-        } else {
-            "\x1f08E"
-        },
-        color::MUTED,
-    );
-    let mut hint = Text::new();
-    if view.shortwave_entry.is_some() {
-        let _ = hint.write_str("\x1f025");
-    } else {
-        let step = view.shortwave_step_hz(view.shortwave_scan);
-        let label = if view.shortwave_scan {
-            "\x1f13E"
-        } else {
-            "\x1f145"
-        };
-        if step < 1000 {
-            let _ = write!(hint, "{label} {step} \x1f065");
-        } else if step % 1000 == 0 {
-            let _ = write!(hint, "{label} {} \x1f08E", step / 1000);
-        } else {
+    let (top, scale, ink, label) = match row {
+        63..=69 => {
             let _ = write!(
-                hint,
-                "{label} {}.{} \x1f08E",
-                step / 1000,
-                step % 1000 / 100
+                line,
+                "VFO   {}   {}",
+                view.shortwave_mode.label(),
+                SW_BANDS[usize::from(view.shortwave_band)].0
             );
+            (63, 1, color::ACCENT, line.as_str())
         }
-    }
-    centered(row, out, 155, 1, hint.as_str(), color::ACCENT);
-    if view.shortwave_mode.is_ssb() {
-        let mut bfo = Text::new();
-        let _ = write!(bfo, "BFO {:+} \x1f065", view.shortwave_bfo);
-        centered(row, out, 167, 1, bfo.as_str(), color::MUTED);
-    }
-    let mut signal = Text::new();
-    let (state, foreground) = match view.shortwave_status {
-        ShortwaveStatus::Recovering(code) => {
-            let _ = write!(signal, "\x1f096 {code:02X}");
-            ("\x1f0E2", color::WARNING)
+        86..=113 => {
+            let khz = view.shortwave_entry.unwrap_or(view.shortwave_khz);
+            if fm || (view.shortwave_mode.is_ssb() && view.shortwave_entry.is_none()) {
+                let (whole, fraction) = if fm {
+                    (khz / 1000, khz % 1000)
+                } else {
+                    (khz, u32::from(view.shortwave_fraction_hz))
+                };
+                let _ = write!(line, "{whole}.{fraction:03}");
+            } else {
+                let _ = write!(line, "{khz}");
+            }
+            (86, 4, color::TEXT, line.as_str())
         }
-        ShortwaveStatus::Patching(percent) => {
-            let _ = write!(signal, "{percent}%   SI4732");
-            ("\x1f079", color::WARNING)
+        132..=145 => (132, 2, color::MUTED, if fm { "\x1f09A" } else { "\x1f08E" }),
+        155..=161 => {
+            if view.shortwave_entry.is_some() {
+                let _ = line.write_str("\x1f025");
+            } else {
+                let step = view.shortwave_step_hz(view.shortwave_scan);
+                let label = if view.shortwave_scan {
+                    "\x1f13E"
+                } else {
+                    "\x1f145"
+                };
+                if step < 1000 {
+                    let _ = write!(line, "{label} {step} \x1f065");
+                } else if step % 1000 == 0 {
+                    let _ = write!(line, "{label} {} \x1f08E", step / 1000);
+                } else {
+                    let _ = write!(
+                        line,
+                        "{label} {}.{} \x1f08E",
+                        step / 1000,
+                        step % 1000 / 100
+                    );
+                }
+            }
+            (155, 1, color::ACCENT, line.as_str())
         }
-        ShortwaveStatus::Starting | ShortwaveStatus::Listening { .. } if view.shortwave_scan => {
-            ("\x1f118", color::ACCENT)
+        167..=173 if view.shortwave_mode.is_ssb() => {
+            let _ = write!(line, "BFO {:+} \x1f065", view.shortwave_bfo);
+            (167, 1, color::MUTED, line.as_str())
         }
-        ShortwaveStatus::Starting => ("\x1f0AD", color::MUTED),
-        ShortwaveStatus::Listening { part, rssi, snr } => {
-            let _ = write!(signal, "ID {part:02X}   RSSI {rssi}   SNR {snr}");
-            ("\x1f0EF", color::GOOD)
+        184..=197 | 213..=219 => {
+            let (state, ink) = match view.shortwave_status {
+                ShortwaveStatus::Recovering(code) => {
+                    let _ = write!(line, "\x1f096 {code:02X}");
+                    ("\x1f0E2", color::WARNING)
+                }
+                ShortwaveStatus::Patching(percent) => {
+                    let _ = write!(line, "{percent}%   SI4732");
+                    ("\x1f079", color::WARNING)
+                }
+                ShortwaveStatus::Starting | ShortwaveStatus::Listening { .. }
+                    if view.shortwave_scan =>
+                {
+                    ("\x1f118", color::ACCENT)
+                }
+                ShortwaveStatus::Starting => ("\x1f0AD", color::MUTED),
+                ShortwaveStatus::Listening { part, rssi, snr } => {
+                    let _ = write!(line, "ID {part:02X}   RSSI {rssi}   SNR {snr}");
+                    ("\x1f0EF", color::GOOD)
+                }
+                ShortwaveStatus::Fault(code) => {
+                    let _ = write!(line, "\x1f096 {code:02X}   \x1f023");
+                    ("\x1f0DA", color::BAD)
+                }
+            };
+            if row < 213 {
+                (184, 2, ink, state)
+            } else {
+                (213, 1, color::MUTED, line.as_str())
+            }
         }
-        ShortwaveStatus::Fault(code) => {
-            let _ = write!(signal, "\x1f096 {code:02X}   \x1f023");
-            ("\x1f0DA", color::BAD)
+        238..=244 => return shortwave_processing_label(row, out, view, 238),
+        252..=258 => (252, 1, color::ACCENT, "\x1f002"),
+        266..=272 => {
+            let label = if view.shortwave_mode == ShortwaveMode::Am {
+                "\x1f070"
+            } else if view.shortwave_mode.is_ssb() {
+                "\x1f071"
+            } else {
+                "\x1f072"
+            };
+            (266, 1, color::MUTED, label)
         }
+        280..=286 => (280, 1, color::ACCENT, "\x1f093"),
+        _ => return,
     };
-    centered(row, out, 184, 2, state, foreground);
-    centered(row, out, 213, 1, signal.as_str(), color::MUTED);
-    shortwave_processing_label(row, out, view, 238);
-    centered(row, out, 252, 1, "\x1f002", color::ACCENT);
-    centered(
-        row,
-        out,
-        266,
-        1,
-        if view.shortwave_mode == ShortwaveMode::Am {
-            "\x1f070"
-        } else if view.shortwave_mode.is_ssb() {
-            "\x1f071"
-        } else {
-            "\x1f072"
-        },
-        color::MUTED,
-    );
-    centered(row, out, 280, 1, "\x1f093", color::ACCENT);
+    centered(row, out, top, scale, label, ink);
 }
 
 fn home(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
@@ -2047,8 +2238,7 @@ fn slot_card(row: u16, out: &mut Row<'_>, model: &Model<'_>, slot: Slot) {
             out,
             frequency_start,
             digits,
-            if active { color::ACCENT } else { color::TEXT },
-            background,
+            if active { &ACTIVE_DIGITS } else { &PEER_DIGITS },
         );
     }
     if entry.is_some() {
@@ -2775,6 +2965,8 @@ fn footer(row: u16, out: &mut Row<'_>, model: &Model<'_>) {
             Screen::SideKeys => ("\x1f01F", "\x1f012"),
             Screen::SideAction => ("\x1f027", "\x1f013"),
             Screen::Setting => ("\x1f024", "\x1f013"),
+            Screen::ScanRange => (scan_pages::range_action(&model.view), "\x1f013"),
+            Screen::ScanJournal => scan_pages::journal_actions(&model.view),
             Screen::Spectrum if model.view.spectrum_menu => ("\x1f027", "\x1f012"),
             Screen::Spectrum if model.view.spectrum_pending_listen.is_some() => {
                 ("\x1f022", "\x1f013")
@@ -3098,18 +3290,30 @@ fn frequency(value: u32) -> FrequencyText {
     result
 }
 
+const fn home_digit_palette(ink: u16, base: u16) -> [u16; 4] {
+    const fn component(ink: u16, base: u16, opacity: u16, shift: u32, mask: u16) -> u16 {
+        ((((ink >> shift) & mask) * opacity + ((base >> shift) & mask) * (3 - opacity) + 1) / 3)
+            << shift
+    }
+    const fn blend(ink: u16, base: u16, opacity: u16) -> u16 {
+        component(ink, base, opacity, 11, 31)
+            | component(ink, base, opacity, 5, 63)
+            | component(ink, base, opacity, 0, 31)
+    }
+    [base, blend(ink, base, 1), blend(ink, base, 2), ink]
+}
+
+const ACTIVE_DIGITS: [u16; 4] = home_digit_palette(color::ACCENT, color::PANEL);
+const PEER_DIGITS: [u16; 4] = home_digit_palette(color::TEXT, color::BACKGROUND);
+
+fn home_digit_pixel(bitmap: &[u8; frequency_font::INK_BYTES], column: usize, palette: &[u16; 4]) -> u16 {
+    palette[usize::from(bitmap[column / 4] >> ((column % 4) * 2) & 3)]
+}
+
 #[inline(never)]
-fn home_digits(row: u16, out: &mut Row<'_>, top: u16, value: &str, ink: u16, base: u16) {
+fn home_digits(row: u16, out: &mut Row<'_>, top: u16, value: &str, palette: &[u16; 4]) {
     // Chakra Petch SemiBold, SIL OFL 1.1. Four pixels per byte.
     const INK_WIDTH: usize = frequency_font::INK_BYTES * 4;
-    let blend = |opacity: u16| {
-        let component = |shift: u32, mask: u16| {
-            (((ink >> shift) & mask) * opacity + ((base >> shift) & mask) * (3 - opacity) + 1) / 3
-                << shift
-        };
-        component(11, 31) | component(5, 63) | component(0, 31)
-    };
-    let palette = [base, blend(1), blend(2), ink];
     let glyph_row = usize::from(row - top);
     let width: usize = value.bytes().map(|b| if b == b'.' { 12 } else { 27 }).sum();
     let mut x = (WIDTH - width) / 2;
@@ -3122,10 +3326,9 @@ fn home_digits(row: u16, out: &mut Row<'_>, top: u16, value: &str, ink: u16, bas
         };
         let bitmap_row = frequency_font::row(glyph, glyph_row);
         for column in 0..count {
-            let bit = column + left;
-            let alpha = bitmap_row[bit / 4] >> ((bit % 4) * 2) & 3;
-            if alpha != 0 {
-                out[x + column] = palette[usize::from(alpha)];
+            let pixel = home_digit_pixel(bitmap_row, column + left, palette);
+            if pixel != palette[0] {
+                out[x + column] = pixel;
             }
         }
         x += advance;
@@ -3397,6 +3600,7 @@ mod tests {
             spectrum_span_index: 3,
             spectrum_trigger: 24,
             spectrum_auto_listen: true,
+            spectrum_modulation: SpectrumModulation::Auto,
             shortwave_khz: 6070,
             shortwave_fraction_hz: 0,
             shortwave_step: crate::controller::ShortwaveMode::Am.default_step_index(),
@@ -3444,6 +3648,8 @@ mod tests {
             },
             setting_index: 0,
             scan_priority_enabled: false,
+            scan_range_page: None,
+            scan_journal_page: None,
             rx_tone_search: None,
             dtmf_memory_page: (screen == Screen::DtmfMemory)
                 .then(crate::controller::DtmfMemoryPage::default),
@@ -3536,6 +3742,122 @@ mod tests {
                 editing: true,
             });
             compare_incremental(before, after);
+        }
+    }
+
+    #[test]
+    fn scan_range_editor_redraws_entry_error_step_and_save_in_each_language() {
+        use crate::controller::{ScanRangeError, ScanRangeField, ScanRangePage};
+
+        for language in [Language::Russian, Language::English, Language::German] {
+            let mut auto = model(Screen::ScanRange);
+            auto.view.language = language;
+            let mut page = ScanRangePage {
+                lower_10hz: 14_500_000,
+                upper_10hz: 14_600_000,
+                step_10hz: 1250,
+                manual: false,
+                field: ScanRangeField::Mode,
+                entry: None,
+                error: None,
+            };
+            auto.view.scan_range_page = Some(page);
+
+            let mut custom = auto;
+            page.manual = true;
+            custom.view.scan_range_page = Some(page);
+            compare_incremental(auto, custom);
+
+            let mut editing = custom;
+            page.field = ScanRangeField::Lower;
+            page.entry = Some(Entry {
+                kind: EntryKind::Frequency,
+                value: 14500,
+                digits: 5,
+            });
+            page.error = Some(ScanRangeError::Entry);
+            editing.view.scan_range_page = Some(page);
+            compare_incremental(custom, editing);
+
+            let mut step = editing;
+            page.field = ScanRangeField::Step;
+            page.entry = None;
+            page.error = None;
+            page.step_10hz = 250;
+            step.view.scan_range_page = Some(page);
+            compare_incremental(editing, step);
+
+            let mut save = step;
+            page.field = ScanRangeField::Save;
+            page.error = Some(ScanRangeError::TooMany);
+            save.view.scan_range_page = Some(page);
+            compare_incremental(step, save);
+        }
+    }
+
+    #[test]
+    fn scan_journal_redraws_observations_and_explicit_slot_selection_in_each_language() {
+        use crate::controller::{ScanJournalEntry, ScanJournalPage};
+
+        for language in [Language::Russian, Language::English, Language::German] {
+            let mut empty = model(Screen::ScanJournal);
+            empty.view.language = language;
+            empty.view.scan_journal_page = Some(ScanJournalPage::default());
+
+            let mut first = empty;
+            first.view.scan_journal_page = Some(ScanJournalPage {
+                index: 0,
+                count: 2,
+                entry: Some(ScanJournalEntry {
+                    frequency_10hz: 14_550_625,
+                    peak_raw_rssi: 217,
+                    detections: 3,
+                    last_opened_s: 65,
+                    ignored: false,
+                }),
+                target: None,
+            });
+            compare_incremental(empty, first);
+            let mut second = first;
+            second.view.scan_journal_page.as_mut().unwrap().index = 1;
+            second.view.scan_journal_page.as_mut().unwrap().entry = Some(ScanJournalEntry {
+                frequency_10hz: 14_553_125,
+                peak_raw_rssi: 202,
+                detections: 1,
+                last_opened_s: 312,
+                ignored: true,
+            });
+            compare_incremental(first, second);
+
+            let mut later = first;
+            let mut entry = later.view.scan_journal_page.unwrap().entry.unwrap();
+            entry.last_opened_s += 2;
+            later.view.scan_journal_page.as_mut().unwrap().entry = Some(entry);
+            assert_eq!(compare_incremental(first, later), 14 * WIDTH);
+            let time_y = scan_pages::JOURNAL_LAST_OPENED_Y;
+            for row in time_y..time_y + 14 {
+                let mut actual = [0; WIDTH];
+                render_row(row, &mut actual, &later).unwrap();
+                let mut expected = [color::PANEL; WIDTH];
+                let mut out = Row {
+                    pixels: &mut expected,
+                    language,
+                };
+                text(row, &mut out, 156, time_y, 2, "1:07", color::TEXT);
+                assert_eq!(&actual[156..228], &expected[156..228]);
+            }
+
+            let mut target = second;
+            target.view.scan_journal_page.as_mut().unwrap().target = Some(Slot::B);
+            compare_incremental(second, target);
+            let mut blocked = target;
+            blocked.view.scan = ScanState::Stopping;
+            compare_incremental(target, blocked);
+            compare_incremental(blocked, empty);
+
+            let mut pixels = [0; WIDTH];
+            render_row(239, &mut pixels, &target).unwrap();
+            assert_eq!((pixels[12], pixels[122]), (color::PANEL, color::ACCENT));
         }
     }
 
@@ -5780,6 +6102,40 @@ mod tests {
             let count = compare_incremental(old, new);
             assert!(count <= WIDTH * 35, "cursor must not repaint the graph");
             old = new;
+        }
+    }
+
+    #[test]
+    fn spectrum_badge_follows_cursor_and_manual_mode_with_incremental_damage() {
+        let plot = Plot::EMPTY;
+        let mut below = model(Screen::Spectrum);
+        below.spectrum = Some(SpectrumView {
+            start_10hz: 11_798_750,
+            center_10hz: 11_800_000,
+            len: 3,
+            ..plot_view(&plot)
+        });
+        below.view.spectrum_cursor = 0;
+        let mut air = below;
+        air.view.spectrum_cursor = 1;
+        compare_incremental(below, air);
+
+        air.view.spectrum_menu = true;
+        air.view.spectrum_option = SPECTRUM_MENU_MODULATION;
+        let mut forced_fm = air;
+        forced_fm.view.spectrum_modulation = SpectrumModulation::Fm;
+        assert!(compare_incremental(air, forced_fm) <= WIDTH * 28);
+
+        for (model, badge) in [
+            (below, color::FM_BADGE),
+            (air, color::AM_BADGE),
+            (forced_fm, color::FM_BADGE),
+        ] {
+            let mut row = [0; WIDTH];
+            assert!((52..66).any(|y| {
+                render_row(y, &mut row, &model).unwrap();
+                row[205..].contains(&badge)
+            }));
         }
     }
 

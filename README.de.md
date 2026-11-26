@@ -8,15 +8,15 @@ Die quelloffene Rust-Firmware für Radtel RT-880 (RT880) und iRadio UV-98 Plus (
 
 [English](README.md) · **Deutsch** · [Русский](README.ru.md)
 
-[**Version R57**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r57) · [**Hier beginnen — Sicherung und Installation**](docs/GETTING-STARTED.de.md)
+[**Version R58**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r58) · [**Hier beginnen — Sicherung und Installation**](docs/GETTING-STARTED.de.md)
 
-[**R57-Komplettpaket (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/R57-RT880-UV98.zip) · [**CPS 0.11.0 für Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-CPS-0.11.0.zip)
+[**R58-Komplettpaket (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/R58-RT880-UV98.zip) · [**CPS 0.11.0 für Windows (ZIP)**](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-CPS-0.11.0.zip)
 
-R57-BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-r57-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-r57-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-r57-de.bin) · [PA5-Empfangsdiagnose (ZIP, Russisch)](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/R54-PA5-RX-only.zip)
+R58-BIN [Русский](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-ru.bin) · [English](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-en.bin) · [Deutsch](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-de.bin) · [PA5-Empfangsdiagnose (ZIP, Russisch)](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r54/R54-PA5-RX-only.zip)
 
-> **Experimentelle Firmware für das untersuchte AT32F423-Platinenprofil.** Zuerst die Platinenkompatibilität prüfen. Vor dem Flashen mit CPS ein persönliches R57-Image aus der geprüften NOR-Sicherung des eigenen Geräts erstellen. CPS bindet das Image an die eigenen Werkskalibrierungen. [Sicherungs- und Vorbereitungsanleitung](docs/GETTING-STARTED.de.md#4-kompatibilität-vor-dem-flashen-prüfen)
+> **Experimentelle Firmware für das untersuchte AT32F423-Platinenprofil.** Zuerst die Platinenkompatibilität prüfen. Vor dem Flashen mit CPS ein persönliches R58-Image aus der geprüften NOR-Sicherung des eigenen Geräts erstellen. CPS bindet das Image an die eigenen Werkskalibrierungen. [Sicherungs- und Vorbereitungsanleitung](docs/GETTING-STARTED.de.md#4-kompatibilität-vor-dem-flashen-prüfen)
 
-Eine lang gedrückte Ziffer sendet eine kurze Sprachaufnahme. In der Windows-CPS lassen sich die Ziffer und die Verzögerung ab Sendebeginn (0–3000 ms) einstellen und ein MP3- oder WAV-Ausschnitt vorhören. [Versionshinweise R57](RELEASE-NOTES-R57.md#deutsch)
+R58 zeigt das ausgewählte Bedienelement früher an, überträgt beim Zonensuchlauf weniger LCD-Daten und ergänzt den VFO-Suchlauf um einen einstellbaren Bereich und ein Trefferprotokoll. Beim Abhören läuft der Wasserfall weiter. Für die Cursorfrequenz stehen AUTO, AM und FM zur Wahl. [Versionshinweise R58](RELEASE-NOTES-R58.md#deutsch) · [Sprachtaste einrichten](RELEASE-NOTES-R57.md#deutsch)
 
 ## Windows-CPS 0.11.0
 
@@ -92,13 +92,13 @@ Der originale Modus „800 MHz“ beginnt bei **840 MHz**. Die Vorgabe wählt 85
 1. Die Originalfirmware beibehalten und die ursprüngliche `.880dmf`-/`.98pdmf`-Datei des eigenen Geräts sichern.
 2. Mit unserer CPS **Kalibrierung**, **4 MiB NOR** sowie **Einstellungs-/Kanalsektionen** lesen. Jeder Vorgang liest zweimal und vergleicht die Daten.
 3. Die vollständigen Sicherungsordner und eine passende originale Wiederherstellungsdatei an zwei Orten aufbewahren. Das öffentliche Paket enthält keine Herstellerfirmware.
-4. Die Platinenkompatibilität prüfen und anschließend in CPS ein persönliches R57-Image aus der geprüften NOR-Sicherung erstellen. Dafür wird kein Rust-Compiler benötigt.
+4. Die Platinenkompatibilität prüfen und anschließend in CPS ein persönliches R58-Image aus der geprüften NOR-Sicherung erstellen. Dafür wird kein Rust-Compiler benötigt.
 
 Die [Schritt-für-Schritt-Anleitung](docs/GETTING-STARTED.de.md) nennt die CPS-Schaltflächen, erwarteten Dateien, Prüfkriterien und den Rückweg. **Der 4-MiB-NOR-Dump enthält weder MCU-Firmware noch Bootloader.**
 
 ## Aktuelle Grenzen
 
-R57 wurde in Software einschließlich der Wiedergabe im Cortex-M4-Modell geprüft. Verzögerung und Sprachverständlichkeit am realen Relais sind noch zu prüfen. [Versionshistorie R53](RELEASE-NOTES-R53.md) · [Prüfergebnisse R54 (Russisch)](AUDIT-R54.ru.md)
+Die Prüfungen am Rechner und im Cortex-M4-Modell decken LCD-Ausgabe, Suchlaufsteuerung und die Modulationswahl im Spektrum ab. Reaktionszeit, Empfang und Relaisverzögerung am Funkgerät prüfen. [Versionshistorie R53](RELEASE-NOTES-R53.md) · [Prüfergebnisse R54 (Russisch)](AUDIT-R54.ru.md)
 
 - Dual Watch hört A/B abwechselnd ab. Gleichzeitige Audiowiedergabe beider BK4819-Empfänger ist nicht implementiert.
 - Der KW-Wasserfall stimmt den einzigen Si4732 nacheinander ab und unterbricht dabei die Audiowiedergabe. Er ist keine FFT.

@@ -48,10 +48,11 @@ use cortex_m_rt::entry;
 use uv98_boot_log::error_text::ErrorText;
 use uv98_boot_log::hardware::{RawMmio, TxLogger};
 use uv98_boot_log::{Frame, Logger, RegisterIo};
-use uv98_clock_profile::hardware::CycleDelay;
-use uv98_diag_startup::{hardware as startup, CycleMillis, CORE_NOMINAL_HZ, CORE_UPPER_HZ};
+use uv98_diag_startup::{hardware as startup, FixedCycleMillis, CORE_NOMINAL_HZ, CORE_UPPER_HZ};
 use uv98_display::DisplayBus;
-use uv98_handheld_app::{App, InputSample, SpectrumSnapshot, PRESERVED_CALIBRATION_SHA256};
+use uv98_handheld_app::{App, InputSample, SpectrumSnapshot};
+#[cfg(not(feature = "voice-keyer"))]
+use uv98_handheld_app::PRESERVED_CALIBRATION_SHA256;
 use uv98_handheld_ui::{
     controller::{
         CrossbandProbe, Request, RxToneSource, ScanState, Screen, ShortwaveStatus, Slot, View,
@@ -100,10 +101,14 @@ pub static UV98_CALIBRATION_PROFILE: [u8; 48] = {
         profile[index] = magic[index];
         index += 1;
     }
-    index = 0;
-    while index < 32 {
-        profile[16 + index] = PRESERVED_CALIBRATION_SHA256[index];
-        index += 1;
+    // Public voice-keyer images are templates. CPS supplies the radio-specific digest.
+    #[cfg(not(feature = "voice-keyer"))]
+    {
+        index = 0;
+        while index < 32 {
+            profile[16 + index] = PRESERVED_CALIBRATION_SHA256[index];
+            index += 1;
+        }
     }
     profile
 };
@@ -242,7 +247,7 @@ fn require<T, E>(result: Result<T, E>, fault: u32) -> T {
 // Keep one clock conversion and terminal error path for the foreground.
 // Callers still sample at each RF, input, and rendering deadline.
 #[inline(never)]
-fn sample_time(time: &mut CycleMillis) -> u32 {
+fn sample_time(time: &mut FixedCycleMillis<CORE_NOMINAL_HZ>) -> u32 {
     require(time.sample(DWT::cycle_count()), 0xE016)
 }
 
@@ -275,22 +280,31 @@ fn service_aprs_rx<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
     Ok(())
 }
 
-struct Timing(CycleDelay);
+struct Timing;
 impl Timing {
     fn new() -> Self {
-        // SAFETY: startup selected and checked nominal 48 MHz. The 50 MHz upper
-        // bound remains an explicit, unmeasured reference-board assumption.
-        Self(unsafe { CycleDelay::from_core_upper_bound(nz(CORE_UPPER_HZ)) })
+        Self
     }
-    fn us(&mut self, us: u32) {
+
+    fn wait_us<const US: u32>(&mut self) {
+        // Startup selects nominal 48 MHz. Use the same assumed 50 MHz upper
+        // bound as before, expressed in whole cycles per microsecond.
+        let cycles = const {
+            assert!(CORE_UPPER_HZ % 1_000_000 == 0 && US > 0);
+            (CORE_UPPER_HZ / 1_000_000) * US
+        };
+        cortex_m::asm::delay(cycles);
+    }
+
+    fn us<const US: u32>(&mut self) {
         feed();
-        self.0.wait_us(us);
+        self.wait_us::<US>();
     }
 }
 impl uv98_display::Delay for Timing {
     fn delay_ms(&mut self, ms: u32) {
         for _ in 0..ms {
-            self.us(1000);
+            self.us::<1000>();
         }
     }
 }
@@ -299,12 +313,12 @@ impl uv98_lcd_at32::BusTiming for Timing {
         // Serviced feeds once before each bounded LCD transaction. Keep the
         // same minimum CS/DC timing without rereading watchdog state at each
         // of the three bus phases.
-        self.0.wait_us(1);
+        self.wait_us::<1>();
     }
 }
 impl uv98_keyscan_at32::ScanTiming for Timing {
     fn settle(&mut self, _: uv98_keyscan_at32::SettlePhase) {
-        self.us(100);
+        self.us::<100>();
     }
 }
 impl uv98_rf_bus::Delay for Timing {
@@ -314,13 +328,13 @@ impl uv98_rf_bus::Delay for Timing {
         // checks at every bit edge. Transactions are bounded (at most 49
         // waits); the foreground feeds between bounded operations. A stuck
         // transaction must remain visible to the independent watchdog.
-        self.0.wait_us(10);
+        self.wait_us::<10>();
     }
 }
 
 impl uv98_sidekeys_at32::PollTiming for Timing {
     fn wait_poll(&mut self) -> Result<(), uv98_sidekeys_at32::Error> {
-        self.us(1);
+        self.us::<1>();
         Ok(())
     }
 }
@@ -393,12 +407,13 @@ fn voice_authorized(
     }
 }
 
+#[inline(never)]
 fn radio_settings<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
     app: &App<N, L, D>,
 ) -> Option<policy::Settings> {
     app.radio_config().map(|cfg| policy::Settings {
         squelch: cfg.squelch,
-        mic_gain: app.status().view.microphone_gain,
+        mic_gain: app.view_ref().microphone_gain,
         fm_volume: cfg.fm_volume,
         am_volume: cfg.am_volume,
         squelch_delay: cfg.squelch_delay,
@@ -418,11 +433,12 @@ fn apply_saved_name<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
     app.apply_microphone_gain(settings.microphone_gain.unwrap_or(stock_microphone_gain));
     #[cfg(feature = "voice-keyer")]
     app.restore_voice_shortcut(image_voice_key, settings.voice_shortcut);
-    settings.microphone_gain = Some(app.status().view.microphone_gain);
+    settings.microphone_gain = Some(app.view_ref().microphone_gain);
     // Keep unsupported stock encodings untouched in external NOR.
     settings.name = name.map_or([0xff; 16], |name| name.payload());
 }
 
+#[inline(never)]
 fn profile<N: Bus, L: DisplayBus, D: uv98_display::Delay>(
     app: &App<N, L, D>,
     settings: &[policy::Overrides; 2],
@@ -578,7 +594,7 @@ fn stop_secondary<B: uv98_diag_quiesce::RegisterIo>(secondary: &mut B) {
 /// The window is always centred on the confirmed receive frequency; refused
 /// combinations never reach the protocol engine.
 fn spectrum_window(
-    view: uv98_handheld_ui::controller::View,
+    view: &uv98_handheld_ui::controller::View,
     center_10hz: u32,
 ) -> Option<uv98_spectrum::Window> {
     let step = STEP_10HZ
@@ -680,10 +696,7 @@ fn main() -> ! {
     if !DWT::cycle_counter_enabled() || DWT::cycle_count() == start {
         stop(0xE014);
     }
-    let mut time = require(
-        CycleMillis::new(DWT::cycle_count(), nz(CORE_NOMINAL_HZ)),
-        0xE015,
-    );
+    let mut time = FixedCycleMillis::<CORE_NOMINAL_HZ>::new(DWT::cycle_count());
 
     let pins = uv98_board_pins::BoardPins::split(p.GPIOA, p.GPIOB, p.GPIOC, p.GPIOD);
     let rf = pins.reserved.with_rf(p.GPIOF);
@@ -990,7 +1003,7 @@ fn main() -> ! {
         stored.unwrap_or(uv98_settings_store::Settings {
             name: stock_name,
             roger_enabled: stock_roger[0] == 3,
-            microphone_gain: Some(app.status().view.microphone_gain),
+            microphone_gain: Some(app.view_ref().microphone_gain),
             positions: None,
             voice_shortcut: None,
         })
@@ -1114,6 +1127,10 @@ fn main() -> ! {
     let mut ui_log_len = 0;
     let mut ui_log_sent = 0;
     let mut throughput_log = None;
+    // Time page changes on the actual board. A newer page supersedes an
+    // unfinished one. Send one record after the last LCD batch, while idle.
+    let mut page_timing = None;
+    let mut completed_page = None;
     loop {
         let loop_started = DWT::cycle_count();
         feed();
@@ -1183,6 +1200,8 @@ fn main() -> ! {
             Screen::Shortwave
                 | Screen::Crossband
                 | Screen::RxToneSearch
+                | Screen::ScanRange
+                | Screen::ScanJournal
                 | Screen::DtmfMemory
                 | Screen::AprsRx
         ) || tuner_repower_at.is_some();
@@ -1743,6 +1762,30 @@ fn main() -> ! {
         }
         scope.event(now, spectrum::Event::Ptt(side_activity));
         let update = checked(&mut log, app.sample(input_at, sample), 0xE032);
+        if app.view_ref().screen != view.screen {
+            page_timing = Some((app.view_ref().screen, input_at, None));
+            // Show the new page title before the rest of this foreground RX
+            // pass. One short LCD window leaves the queue resumable on input.
+            if update.request.is_none()
+                && app.view_ref().screen != Screen::Home
+                && raw == Some((0, false))
+                && ptt::side_idle(adc.raw)
+                && radio.state() == RfState::Receiving
+                && !scanner.active()
+                && !scope.active()
+                && !beacon.active()
+                && !packet_rx.listening()
+                && !relay_active
+            {
+                let progress = checked(&mut log, app.render_step(4), 0xE032);
+                if progress.rows != 0 {
+                    let first = sample_time(&mut time).wrapping_sub(input_at);
+                    page_timing = Some((app.view_ref().screen, input_at, Some(first)));
+                }
+            }
+        } else if update.rendered {
+            page_timing = None;
+        }
         if reply_window.active() {
             if reply_input_quiet
                 && current.is_some()
@@ -1756,7 +1799,7 @@ fn main() -> ! {
                 // The first status can precede the repeater's carrier or tone.
                 // Keep polling before LCD/UART work until audio opens or the
                 // window expires. The normal input path still runs every pass.
-                idle.us(100);
+                idle.us::<100>();
                 continue;
             }
             reply_window = reply::ReplyWindow::Idle;
@@ -1873,8 +1916,8 @@ fn main() -> ! {
         }
         #[cfg(feature = "pa5-audio")]
         {
-            let allowed = app.status().view.screen == Screen::About
-                && !app.status().view.locked
+            let allowed = app.view_ref().screen == Screen::About
+                && !app.view_ref().locked
                 && !upper
                 && ptt::side_idle(adc.raw)
                 && radio.state() == RfState::Receiving
@@ -1921,7 +1964,7 @@ fn main() -> ! {
                 checked(&mut log, app.select_slot(slot), 0xE032);
             }
         }
-        let index = if app.status().view.active_slot == Slot::A {
+        let index = if app.view_ref().active_slot == Slot::A {
             0
         } else {
             1
@@ -1949,7 +1992,7 @@ fn main() -> ! {
         let auto_fix = if smart.armed()
             && !beacon.active()
             && quiet_input
-            && app.status().view.aprs_auto_armed
+            && app.view_ref().aprs_auto_armed
             && update.request.is_none()
             && radio.state() == RfState::Receiving
             && current == guarded_profile
@@ -1983,7 +2026,7 @@ fn main() -> ! {
                         None => stop(0xE050),
                     };
                     let started = match profile(&app, &settings).ok().and_then(|p| p.receive) {
-                        Some(rx) => match spectrum_window(app.status().view, rx.frequency_10hz) {
+                        Some(rx) => match spectrum_window(app.view_ref(), rx.frequency_10hz) {
                             Some(window) => {
                                 scope.start_window(&radio, &calibration, rx, window, now)
                             }
@@ -2050,7 +2093,7 @@ fn main() -> ! {
                         let started = match profile(&app, &settings).ok().and_then(|p| p.receive) {
                             Some(rx) => {
                                 match spectrum_window(
-                                    app.status().view,
+                                    app.view_ref(),
                                     spectrum_center.unwrap_or(rx.frequency_10hz),
                                 ) {
                                     Some(window) => scope.start_panned_window(
@@ -2101,7 +2144,7 @@ fn main() -> ! {
                             } else {
                                 base.checked_sub(delta)?
                             };
-                            let window = spectrum_window(app.status().view, center)?;
+                            let window = spectrum_window(app.view_ref(), center)?;
                             let original = profile(&app, &settings).ok()?.receive?;
                             let calibration = app.calibration_view()?;
                             scope::Scope::qualify_window(&calibration, original, window).ok()?;
@@ -2155,12 +2198,10 @@ fn main() -> ! {
                     let bound =
                         spectrum_flow::bind_bin(published, scope.window(), scope.generation(), bin);
                     if bound.is_ok()
-                        && scope.can_accept_bin_action()
-                        && scope.plot().valid(usize::from(bin))
+                        && scope.listen_bin(now, bin, app.view_ref().spectrum_modulation)
                     {
                         spectrum_intent = Some(SpectrumIntent::Listen(bin));
                         listen_after = None;
-                        scope.event(now, spectrum::Event::Accept { index: bin });
                     } else {
                         let reason = if bound.is_err() {
                             render::SpectrumError::Stale
@@ -2203,14 +2244,15 @@ fn main() -> ! {
                     let listened = current.and_then(|profile| profile.receive).filter(|rx| {
                         scope.listening()
                             && listen_after.is_none()
-                            && app.status().view.spectrum_listening
+                            && app.view_ref().spectrum_listening
                             && bound
                                 .as_ref()
                                 .is_ok_and(|frequency| *frequency == rx.frequency_10hz)
                     });
                     if let Some(rx) = listened {
                         if !policy::aviation_band(rx.frequency_10hz) {
-                            settings[index].modulation = Some(rx.modulation);
+                            settings[index].modulation =
+                                Some(scope.vfo_modulation(rx.frequency_10hz));
                         }
                         checked(
                             &mut log,
@@ -2437,7 +2479,7 @@ fn main() -> ! {
                                         None => stop(0xE050),
                                     };
                                     match spectrum_window(
-                                        app.status().view,
+                                        app.view_ref(),
                                         spectrum_center.unwrap_or(request.frequency_10hz),
                                     ) {
                                         Some(window) => scope
@@ -2512,7 +2554,7 @@ fn main() -> ! {
                     if resume {
                         let target = spectrum_center
                             .or_else(|| window.map(|window| window.center_10hz()))
-                            .and_then(|center| spectrum_window(app.status().view, center));
+                            .and_then(|center| spectrum_window(app.view_ref(), center));
                         let started = {
                             let calibration = match app.calibration_view() {
                                 Some(c) => c,
@@ -2605,15 +2647,18 @@ fn main() -> ! {
                             && scope.plot().valid(usize::from(bin))
                             && checked(&mut log, app.begin_spectrum_peak_listen(bin), 0xE032)
                         {
-                            spectrum_intent = Some(SpectrumIntent::Listen(bin));
-                            listen_after = None;
-                            scope.event(now, spectrum::Event::Accept { index: bin });
+                            if scope.listen_bin(now, bin, app.view_ref().spectrum_modulation) {
+                                spectrum_intent = Some(SpectrumIntent::Listen(bin));
+                                listen_after = None;
+                            } else {
+                                checked(&mut log, app.cancel_spectrum_pending(), 0xE032);
+                            }
                         }
                     }
                 }
             }
         }
-        let crossband_open = app.status().view.screen == Screen::Crossband;
+        let crossband_open = app.view_ref().screen == Screen::Crossband;
         if !LIVE_TX && (!crossband_open || upper || lower) && second_rx.take().is_some() {
             stop_secondary(&mut secondary);
         }
@@ -2946,7 +2991,7 @@ fn main() -> ! {
             let voice_candidate: Option<u8> = None;
             let requested_slot = update
                 .ptt_slot
-                .or_else(|| voice_candidate.map(|_| app.status().view.active_slot));
+                .or_else(|| voice_candidate.map(|_| app.view_ref().active_slot));
             let requested_tx =
                 requested_slot.and_then(|slot| profile_for_slot(&app, &settings, slot).ok());
             let manual_requested = update.ptt_tx_requested
@@ -2959,7 +3004,7 @@ fn main() -> ! {
             if LIVE_TX
                 && !css_open
                 && !was_css_receive
-                && app.status().view.screen != Screen::Crossband
+                && app.view_ref().screen != Screen::Crossband
                 && (manual_requested || voice_candidate.is_some())
             {
                 if let (Some((target, tx_profile)), Some(slot), Some(tx)) = (
@@ -3021,7 +3066,7 @@ fn main() -> ! {
                         battery_sag.begin_tx(started_at);
                         tx_authorization = voice_authorization.or_else(|| {
                             tx_policy::authorize_target(
-                                &app.status().view,
+                                app.view_ref(),
                                 target,
                                 *tx_profile,
                                 launch_ptt,
@@ -3063,6 +3108,7 @@ fn main() -> ! {
         } else {
             None
         };
+        let mut scan_sample = None;
         let had_aprs_audio = packet_rx.needs_audio();
         checked(
             &mut log,
@@ -3083,7 +3129,7 @@ fn main() -> ! {
                 || now.wrapping_sub(signal_at) >= if packet_rx.needs_audio() { 50 } else { 1 })
         {
             if let Some(p) = current {
-                last_signal = Some(checked(
+                let fresh = checked(
                     &mut log,
                     if packet_rx.needs_audio() {
                         let mut audio = p.audio;
@@ -3110,7 +3156,20 @@ fn main() -> ! {
                         radio.observe(p.audio, p.receive.map(|r| r.tone).unwrap_or(0))
                     },
                     0xE05A,
-                ));
+                );
+                last_signal = Some(fresh);
+                if scope.listening() {
+                    scope.observe_listen_rssi(now, p.frequency, fresh.rssi);
+                }
+                if scanner.active() {
+                    scan_sample = p.receive.map(|rx| {
+                        uv98_radio_runtime::scan::FindSample::measured(
+                            rx.frequency_10hz,
+                            fresh,
+                            p.audio,
+                        )
+                    });
+                }
                 signal_at = now;
                 #[cfg(feature = "pa5-audio")]
                 if view.screen == Screen::About && !packet_rx.needs_audio() && !css_receive {
@@ -3465,6 +3524,7 @@ fn main() -> ! {
                     now,
                     radio.state(),
                     last_signal.is_some_and(|s| s.audio_open),
+                    scan_sample,
                 ),
                 0xE032,
             ) {
@@ -3585,7 +3645,11 @@ fn main() -> ! {
                 ],
             );
         }
-        checked(&mut log, app.set_radio_view(report), 0xE032);
+        checked(
+            &mut log,
+            app.set_scan_radio_view(report, scanner.awaiting_tune()),
+            0xE032,
+        );
         if beacon.active() || relay_active {
             battery_sag.end_tx();
         }
@@ -3666,36 +3730,55 @@ fn main() -> ! {
         // Cycle admission does not interrupt an in-flight transfer.
         let (row_budget, admission_cycles) = if beacon.active() || aprs_open {
             (1, LCD_BATCH_ADMISSION_CYCLES)
-        } else if radio.tx_active_or_starting() || relay_active || upper || lower {
+        } else if radio.tx_active_or_starting() || relay_active {
             (2, LCD_BATCH_ADMISSION_CYCLES)
-        } else if radio.state() == RfState::Configuring {
-            // Finish RX restoration before spending more foreground time on LCD.
+        } else if radio.state() == RfState::Configuring
+            || (scanner.awaiting_tune() && app.view_ref().screen == Screen::Home)
+        {
+            // A scan step selects the new channel before stopping the old RX.
+            // Keep the previous LCD card intact across that gap and RF setup.
             (0, LCD_BATCH_ADMISSION_CYCLES)
+        } else if upper || lower {
+            (2, LCD_BATCH_ADMISSION_CYCLES)
         } else if scope.active()
             || current.is_some_and(|profile| profile.audio.modulation == Modulation::Am)
         {
-            (4, LCD_BATCH_ADMISSION_CYCLES)
-        } else if app.status().view.screen == Screen::Menu
+            let rows = if app.home_channel_paint_pending() { 5 } else { 4 };
+            (rows, LCD_BATCH_ADMISSION_CYCLES)
+        } else if (app.view_ref().screen == Screen::Menu || page_timing.is_some())
             && !scanner.active()
+            && !tuner_open
+            && !crossband_open
+            && !css_receive
+            && !packet_rx.listening()
+            && dual_watch.is_none()
             && raw.is_some_and(|(_, ptt)| !ptt)
             && ptt::side_idle(adc.raw)
         {
-            // Complete the two changed menu rows together when possible. Fresh
-            // matrix/PTT/side samples between every <=6-row window stop the
-            // batch on input changes; the main loop then handles that input.
-            (67, LCD_BATCH_ADMISSION_CYCLES * 12)
+            // Reuse the menu's checked input windows for page entry. Other
+            // pages return to normal RF service after at most 12 ms admission.
+            let periods = if app.view_ref().screen == Screen::Menu { 12 } else { 6 };
+            (67, LCD_BATCH_ADMISSION_CYCLES * periods)
         } else if raw.is_some() && ptt::side_idle(adc.raw) {
             // A longer RX-only batch amortizes the keypad and RF work. Each
             // LCD window is still bounded. Either physical PTT source keeps
             // its short budget as soon as it is observed.
-            (16, LCD_BATCH_ADMISSION_CYCLES * 3)
+            if LOWER_PTT_ENABLED
+                && app.home_channel_paint_pending()
+                && raw == Some((0, false))
+                && radio.state() == RfState::Receiving
+            {
+                (32, LCD_BATCH_ADMISSION_CYCLES * 5)
+            } else {
+                (16, LCD_BATCH_ADMISSION_CYCLES * 3)
+            }
         } else {
             (6, LCD_BATCH_ADMISSION_CYCLES)
         };
         let check_idle_home_input = LOWER_PTT_ENABLED
-            && row_budget == 16
+            && matches!(row_budget, 16 | 32)
             && radio.state() == RfState::Receiving
-            && app.status().view.screen == Screen::Home
+            && app.view_ref().screen == Screen::Home
             && raw == Some((0, false));
         let drawn = checked(
             &mut log,
@@ -3728,6 +3811,33 @@ fn main() -> ! {
             0xE032,
         );
         let now = sample_time(&mut time);
+        if let Some((screen, start, first)) = &mut page_timing {
+            if *screen != app.view_ref().screen {
+                page_timing = None;
+            } else {
+                let elapsed = now.wrapping_sub(*start);
+                if drawn.rows != 0 && first.is_none() {
+                    *first = Some(elapsed);
+                }
+                if !drawn.pending {
+                    completed_page = first.map(|first| [*screen as u32, first, elapsed]);
+                    page_timing = None;
+                }
+            }
+        }
+        if completed_page.is_some()
+            && !drawn.pending
+            && raw == Some((0, false))
+            && ptt::side_idle(adc.raw)
+            && !radio.tx_active_or_starting()
+            && !relay_active
+            && !beacon.active()
+            && !aprs_open
+        {
+            if let Some(times) = completed_page.take() {
+                event(&mut log, 0x177, times);
+            }
+        }
         if cfg!(feature = "verbose-runtime") {
             max_render_cycles =
                 max_render_cycles.max(DWT::cycle_count().wrapping_sub(render_start));
@@ -3788,7 +3898,7 @@ fn main() -> ! {
         // Debounce, AGC and scan deadlines use the monotonic clock, not loop
         // counts. A fixed 1ms sleep previously delayed every UI batch.
         if !drawn.pending {
-            idle.us(100);
+            idle.us::<100>();
         }
     }
 }
@@ -3818,3 +3928,6 @@ core::arch::global_asm!(
     "b __diag_terminal_fail_stop",
     ".size DefaultHandler, . - DefaultHandler",
 );
+
+#[cfg(target_arch = "arm")]
+core::arch::global_asm!(include_str!("memmove.s"), options(raw));

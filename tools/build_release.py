@@ -18,16 +18,19 @@ def tool(name, *arguments, check=True):
                           cwd=ROOT, check=check)
 
 
-def build_locale(language, target_dir, stage):
+def build_locale(language, target_dir, stage, profile="channel-tx"):
     folder = stage / language
     folder.mkdir()
+    features = ["channel-tx", f"locale-{language}"]
+    if profile == "voice-keyer":
+        features.append(profile)
     subprocess.run(["cargo", "build", "--release", "--locked", "--offline",
                     "--target-dir", target_dir, "--target", TARGET, "-p", "uv98-diag-firmware",
-                    "--features", f"channel-tx,locale-{language}"], cwd=ROOT, check=True)
+                    "--features", ",".join(features)], cwd=ROOT, check=True)
     linked = target_dir / TARGET / "release/uv98-diag-firmware"
     report = folder / "flash-budget.json"
     check = tool("check_flash_budget.py", linked, "--language", language,
-                 "--profile", "channel-tx", "--report", report, check=False)
+                 "--profile", profile, "--report", report, check=False)
     if not report.exists():
         check.check_returncode()
         raise ValueError(f"{language}: missing Flash budget report")
@@ -45,10 +48,15 @@ def build_locale(language, target_dir, stage):
     elf = image / f"UV98-diag-{VERSION}.elf"
     tool("check_diag_preinit.py", elf, "--report", image / "early-machine-code-check.json")
     tool("check_device_profile.py", elf, "--report", image / "device-profile-check.json")
+    tool("check_diag_memmove.py", elf)
+    if profile == "voice-keyer":
+        for name in ("config", "clip", "stream_irq"):
+            tool(f"check_voice_{name}.py", elf, "--report", image / f"voice-{name}.json")
+        tool("check_voice_irq_startup.py", elf)
     return budget
 
 
-def build_release(destination):
+def build_release(destination, profile="channel-tx"):
     destination = destination.resolve()
     if destination.exists():
         raise FileExistsError(f"Output directory already exists: {destination}")
@@ -58,11 +66,11 @@ def build_release(destination):
         stage = Path(temp) / "images"
         stage.mkdir()
         tool("pack_ui_locales.py", "--check")
-        budgets = {lang: build_locale(lang, Path(temp) / "target", stage) for lang in LANGUAGES}
+        budgets = {lang: build_locale(lang, Path(temp) / "target", stage, profile) for lang in LANGUAGES}
         below = [lang.upper() for lang, report in budgets.items() if report["status"] != "passed"]
         if below:
             raise ValueError("Flash reserve below minimum for " + ", ".join(below))
-        summary = {"profile": "channel-tx", "languages": budgets}
+        summary = {"profile": profile, "languages": budgets}
         (stage / "flash-budget.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
         stage.rename(destination)
     print(f"Checked RU/EN/DE images: {destination}")
@@ -71,7 +79,9 @@ def build_release(destination):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output_directory", type=Path, help="new directory for images and reports")
+    parser.add_argument("--profile", choices=("channel-tx", "voice-keyer"), default="channel-tx")
     try:
-        build_release(parser.parse_args().output_directory)
+        args = parser.parse_args()
+        build_release(args.output_directory, args.profile)
     except (OSError, subprocess.CalledProcessError, ValueError) as error:
         sys.exit(str(error))

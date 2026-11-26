@@ -21,6 +21,7 @@ compile_error!("Choose only one handheld UI locale feature");
 compile_error!("locale-all is for host previews only");
 
 const CAPACITY: usize = 256;
+const OFFSET_GROUP: usize = 16;
 
 struct Catalog {
     bytes: &'static [u8],
@@ -38,18 +39,29 @@ impl Catalog {
         let pairs = bytes[3] as usize;
         let dictionary = 4 + glyphs * 2;
         let offsets = dictionary + pairs * 2;
+        let offset_count = count + 1;
         Self {
             bytes,
             count,
             glyphs,
             dictionary,
             offsets,
-            pool: offsets + (count + 1) * 2,
+            pool: offsets + offset_count + offset_count.div_ceil(OFFSET_GROUP),
         }
     }
 
     fn word(&self, offset: usize) -> usize {
         u16::from_le_bytes([self.bytes[offset], self.bytes[offset + 1]]) as usize
+    }
+
+    fn message_offset(&self, index: usize) -> usize {
+        let group = index / OFFSET_GROUP;
+        let low = self.bytes[self.offsets + index];
+        let first_low = self.bytes[self.offsets + group * OFFSET_GROUP];
+        let high = self.bytes[self.offsets + self.count + 1 + group];
+        // The generator guarantees each group spans at most 255 bytes.
+        let high = usize::from(high) + usize::from(low < first_low);
+        (high << 8) | usize::from(low)
     }
 }
 
@@ -94,9 +106,8 @@ impl Message {
             let _ = self.write_char('?');
             return;
         }
-        let offset = catalog.offsets + id * 2;
-        let start = catalog.pool + catalog.word(offset);
-        let end = catalog.pool + catalog.word(offset + 2);
+        let start = catalog.pool + catalog.message_offset(id);
+        let end = catalog.pool + catalog.message_offset(id + 1);
         let mut stack = [0u8; 24];
         for &token in &catalog.bytes[start..end] {
             let mut used = 1;

@@ -12,9 +12,11 @@ struct Mmio {
     _pins: LcdPins,
 }
 impl Registers for Mmio {
+    #[inline(always)]
     fn status(&mut self) -> u32 {
         self.spi.sts().read().bits()
     }
+    #[inline(always)]
     fn transmit(&mut self, byte: u8) {
         // Reviewed stock helper uses a 32-bit DT store at offset0x0C.
         unsafe {

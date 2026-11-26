@@ -3,7 +3,7 @@
 use crate::{scan, Audio};
 pub use uv98_band_plan::{aviation_band, operating_range as range};
 use uv98_codeplug::channels::{Bandwidth, Channel, OperationMode};
-use uv98_handheld_ui::controller::{Mode, View, STEP_10HZ, TX_CTCSS};
+use uv98_handheld_ui::controller::{Mode, ScanRange, View, STEP_10HZ, TX_CTCSS};
 use uv98_rf_sequence::{Modulation, RxRequest, TxRequest, Width};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -274,12 +274,27 @@ pub fn profile(
 }
 
 pub fn scan_target(view: View) -> Result<scan::Target, Error> {
+    scan_target_with_range(&view, None)
+}
+
+pub fn scan_target_with_range(
+    view: &View,
+    custom: Option<ScanRange>,
+) -> Result<scan::Target, Error> {
     if view.cb_for_slot(view.active_slot).is_some() {
         // A general +/-500 kHz VFO sweep is not the irregular CB channel grid.
         return Err(Error::Options);
     }
     if view.mode == Mode::Channel {
         return Ok(scan::Target::Channels);
+    }
+    if let Some(range) = custom {
+        range.validate().map_err(|_| Error::Frequency)?;
+        return Ok(scan::Target::Vfo {
+            low: range.lower_10hz,
+            high: range.upper_10hz,
+            step: range.step_10hz,
+        });
     }
     let (low, high) = range(view.vfo_10hz).ok_or(Error::Frequency)?;
     let step = *STEP_10HZ
@@ -573,6 +588,45 @@ mod tests {
             Err(Error::Modulation)
         );
     }
+    #[test]
+    fn custom_window_stays_out_of_channel_and_cb_scan() {
+        let requested = ScanRange {
+            lower_10hz: 14_400_000,
+            upper_10hz: 14_600_000,
+            step_10hz: 2_500,
+        };
+        let mut v = view();
+        v.mode = Mode::Vfo;
+        assert_eq!(
+            scan_target_with_range(&v, Some(requested)),
+            Ok(scan::Target::Vfo {
+                low: requested.lower_10hz,
+                high: requested.upper_10hz,
+                step: requested.step_10hz
+            })
+        );
+        assert!(scan_target_with_range(
+            &v,
+            Some(ScanRange {
+                upper_10hz: requested.upper_10hz + 1,
+                ..requested
+            })
+        )
+        .is_err());
+        v.mode = Mode::Channel;
+        assert_eq!(
+            scan_target_with_range(&v, Some(requested)),
+            Ok(scan::Target::Channels)
+        );
+        v.mode = Mode::Vfo;
+        v.active_slot = uv98_handheld_ui::controller::Slot::A;
+        v.cb = Some(uv98_handheld_ui::cb::CbChannel::default());
+        assert_eq!(
+            scan_target_with_range(&v, Some(requested)),
+            Err(Error::Options)
+        );
+    }
+
     #[test]
     fn scan_window_clamped_and_hole_rejected() {
         let mut v = view();

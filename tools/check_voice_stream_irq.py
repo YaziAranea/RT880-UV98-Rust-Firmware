@@ -57,24 +57,38 @@ def foreground_start(image, symbols, decoder):
         literal, counter, low, high = pre
     else:
         # R57 interleaves an iterator register spill with the DWT address
-        # load. Include the complete spill so the actual linked instructions
-        # restore the iterator rather than skipping the intervening store.
-        start = address + offset - 34
-        pre = list(md.disasm(code[offset-34:offset], start))
-        require([i.mnemonic for i in pre] == [
-            "add", "add.w", "add.w", "strd", "str.w", "ldr", "stm.w", "ldr.w", "add", "add.w",
-        ], "unsupported ABI: DWT/iterator setup")
-        base_low, base_high, interior, pair, final, literal, middle, counter, low, high = pre
+        # load. LLVM emits the first pair as STRD or two word stores. Start
+        # before the complete spill in either case and run the linked stores.
+        for size, pair_ops in ((34, ["strd"]), (38, ["str.w", "str.w"])):
+            start = address + offset - size
+            pre = list(md.disasm(code[offset-size:offset], start))
+            if [i.mnemonic for i in pre] == (
+                ["add", "add.w", "add.w"] + pair_ops
+                + ["str.w", "ldr", "stm.w", "ldr.w", "add", "add.w"]
+            ):
+                break
+        else:
+            raise AssertionError("unsupported ABI: DWT/iterator setup")
+        base_low, base_high, interior, *pair, final, literal, middle, counter, low, high = pre
         spill = [re.fullmatch(pattern, i.op_str) for i, pattern in (
             (base_low, rf"r0, sp, #{immediate}"),
             (base_high, rf"r0, r0, #{immediate}"),
             (interior, rf"r1, r0, #{immediate}"),
-            (pair, rf"sl, r6, \[r0, #{immediate}\]"),
             (final, rf"sb, \[r0, #{immediate}\]"),
         )]
         require(all(spill) and middle.op_str == "r1, {r5, r8, fp}",
                 "unsupported ABI: iterator spill registers")
-        base_lo, base_hi, middle_off, pair_off, final_off = (int(m[1], 0) for m in spill)
+        base_lo, base_hi, middle_off, final_off = (int(m[1], 0) for m in spill)
+        if len(pair) == 1:
+            first = re.fullmatch(rf"sl, r6, \[r0, #{immediate}\]", pair[0].op_str)
+            require(first, "unsupported ABI: iterator pair store registers")
+        else:
+            first = re.fullmatch(rf"sl, \[r0, #{immediate}\]", pair[0].op_str)
+            second = re.fullmatch(rf"r6, \[r0, #{immediate}\]", pair[1].op_str)
+            require(first and second, "unsupported ABI: iterator pair store registers")
+            require(int(second[1], 0) == int(first[1], 0) + 4,
+                    "unsupported ABI: iterator pair store offsets")
+        pair_off = int(first[1], 0)
         require(middle_off == pair_off + 8 and final_off == pair_off + 20,
                 "unsupported ABI: iterator spill offsets")
         iterator_registers = (

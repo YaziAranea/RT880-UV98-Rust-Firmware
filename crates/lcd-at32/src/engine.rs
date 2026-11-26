@@ -2,6 +2,9 @@ use crate::{BusTiming, Error, TimingPhase, Wait};
 use core::num::NonZeroU32;
 use uv98_display::DisplayBus;
 
+const TDBE: u32 = 1 << 1;
+const STATUS_ERRORS: u32 = 0x78;
+
 /// Volatile operations must complete without panic or retained references.
 pub(crate) trait Registers {
     fn status(&mut self) -> u32;
@@ -38,11 +41,11 @@ impl<R: Registers, T: BusTiming> Engine<R, T> {
     fn wait(&mut self, phase: Wait) -> Result<(), Error> {
         for _ in 0..self.budget.get() {
             let status = self.registers.status();
-            if status & 0x78 != 0 {
+            if status & STATUS_ERRORS != 0 {
                 return Err(Error::Status(status));
             }
             let ready = match phase {
-                Wait::TransmitEmpty => status & 2 != 0,
+                Wait::TransmitEmpty => status & TDBE != 0,
                 Wait::NotBusy => status & 0x80 == 0,
             };
             if ready {
@@ -62,6 +65,27 @@ impl<R: Registers, T: BusTiming> Engine<R, T> {
     }
     fn write_byte(&mut self, byte: u8) -> Result<(), Error> {
         self.wait(Wait::TransmitEmpty)?;
+        self.registers.transmit(byte);
+        Ok(())
+    }
+    #[inline(always)]
+    fn write_pixel_byte(&mut self, byte: u8) -> Result<(), Error> {
+        // The pixel stream waits for TDBE on every byte. Keep retries local so
+        // polling a busy SPI shifter takes only a few instructions per read.
+        let mut polls = self.budget.get();
+        loop {
+            let status = self.registers.status();
+            match status & (TDBE | STATUS_ERRORS) {
+                TDBE => break,
+                0 => {
+                    polls -= 1;
+                    if polls == 0 {
+                        return Err(Error::Timeout(Wait::TransmitEmpty));
+                    }
+                }
+                _ => return Err(Error::Status(status)),
+            }
+        }
         self.registers.transmit(byte);
         Ok(())
     }
@@ -132,8 +156,8 @@ impl<R: Registers, T: BusTiming> DisplayBus for Engine<R, T> {
         self.transfer_with(true, pixels.is_empty(), |bus| {
             for &pixel in pixels {
                 let [high, low] = pixel.to_be_bytes();
-                bus.write_byte(high)?;
-                bus.write_byte(low)?;
+                bus.write_pixel_byte(high)?;
+                bus.write_pixel_byte(low)?;
             }
             Ok(())
         })

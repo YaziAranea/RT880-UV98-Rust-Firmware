@@ -3,6 +3,8 @@
 //! The adapter must qualify every point before accepting Prepare and must
 //! restore the complete normal receive configuration, not just its frequency.
 
+use core::num::NonZeroU32;
+
 use crate::{Range, Ticket, Timing, HALF_CLOCK};
 
 pub const BINS: usize = 81;
@@ -59,6 +61,14 @@ impl Config {
     }
 }
 
+/// An RSSI observation from normal RX while listening on a selected bin.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HeldSample {
+    pub sequence: NonZeroU32,
+    pub bin: u8,
+    pub raw: u16,
+}
+
 /// Stable storage: unknown points have a clear valid bit, never a synthetic
 /// zero reading. Fresh distinguishes this sweep from the previous sweep.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -69,6 +79,9 @@ pub struct Plot {
     pub fresh: [u8; BITMAP_BYTES],
     pub peak_valid: [u8; BITMAP_BYTES],
     pub sweep: u32,
+    /// Separate from the wide sweep because normal RX measures just one bin
+    /// with its own bandwidth and gain configuration.
+    pub held_sample: Option<HeldSample>,
     pub display_floor: Option<u16>,
     pub held_bin: Option<u8>,
     pub trigger_bin: Option<u8>,
@@ -83,6 +96,7 @@ impl Plot {
         fresh: [0; BITMAP_BYTES],
         peak_valid: [0; BITMAP_BYTES],
         sweep: 0,
+        held_sample: None,
         display_floor: None,
         held_bin: None,
         trigger_bin: None,

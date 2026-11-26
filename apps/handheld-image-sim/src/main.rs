@@ -23,6 +23,8 @@ use uv98_handheld_ui::render::{
 use uv98_keys::{Key, Timing};
 use uv98_nor_read::Bus;
 
+mod scan_gallery;
+
 struct Memory {
     data: Vec<u8>,
     address: Option<usize>,
@@ -713,12 +715,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let args: Vec<_> = std::env::args_os().collect();
     if args.len() != 3 {
-        return Err(
-            "usage: uv98-handheld-image-sim <4MiB-storage-backup> <new-output-directory>".into(),
-        );
+        return Err("usage: uv98-handheld-image-sim <4MiB-storage-backup|--scan-pages> <new-output-directory>".into());
     }
     let input = Path::new(&args[1]);
     let output = Path::new(&args[2]);
+    if args[1] == "--scan-pages" {
+        return scan_gallery::run(output);
+    }
     let data = fs::read(input)?;
     if data.len() != uv98_nor_read::CAPACITY_BYTES as usize {
         return Err("expected exactly 4 MiB NOR main-array backup".into());
@@ -2161,6 +2164,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "57-SIMULATED-spectrum-listening.png",
         milliseconds.get(),
     )?);
+    // Keep the receiver on one bin. A stable carrier must still advance the
+    // time axis after it has filled the entire 16-row waterfall.
+    let mut held = snapshot;
+    for sequence in 1..=20 {
+        held.plot.held_sample = Some(uv98_spectrum::compact::HeldSample {
+            bin: cursor,
+            raw: 165,
+            sequence: std::num::NonZeroU32::new(sequence).unwrap(),
+        });
+        let before = panel.borrow().pixels[190 * WIDTH..254 * WIDTH].to_vec();
+        assert!(app.set_spectrum(held).unwrap());
+        drain(&mut app);
+        assert!(
+            before[..] != panel.borrow().pixels[190 * WIDTH..254 * WIDTH],
+            "held carrier froze the waterfall at observation {sequence}"
+        );
+        let name = format!("57-held-{sequence:02}.png");
+        frames.push(capture(&mut app, &panel, output, &name, milliseconds.get())?);
+    }
     // Overlay must still say audio is on and must not stop Listen.
     assert_eq!(tap_request(&mut app, &mut now, Key::Menu), None);
     assert!(app.status().view.spectrum_menu);

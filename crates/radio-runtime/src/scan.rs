@@ -8,6 +8,24 @@ pub const DWELL_MS: u32 = 150;
 pub const RESUME_MS: u32 = 500;
 pub const TUNE_TIMEOUT_MS: u32 = super::CONFIG_TIMEOUT_MS + super::RECEIVE_SETTLE_MS + 500;
 
+/// A fresh read on the applied RX frequency. A forced-open speaker (monitor,
+/// SQL 0) or an AM audio tail alone is insufficient evidence for the journal.
+pub struct FindSample {
+    pub frequency_10hz: u32,
+    raw: Option<u16>,
+}
+
+impl FindSample {
+    pub fn measured(frequency_10hz: u32, signal: super::Signal, audio: super::Audio) -> Self {
+        let carrier = signal.status_0c & 2 != 0;
+        let accepted = carrier && signal.audio_open && audio.squelch != 0 && !audio.monitor;
+        Self {
+            frequency_10hz,
+            raw: accepted.then_some(signal.rssi),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Target {
     Channels,
@@ -118,6 +136,7 @@ pub struct Scheduler {
     last_now: Option<u32>,
     since: u32,
     vfo_point: usize,
+    open_find: Option<(u32, u16)>,
     // Memory slot IDs or zero-based points in the current VFO grid.
     skipped: [u8; CHANNEL_COUNT / 8],
 }
@@ -136,6 +155,7 @@ impl Scheduler {
             last_now: None,
             since: 0,
             vfo_point: 0,
+            open_find: None,
             skipped: [0; CHANNEL_COUNT / 8],
         }
     }
@@ -150,6 +170,32 @@ impl Scheduler {
     }
     pub const fn paused(&self) -> bool {
         matches!(self.status.phase, Phase::Paused | Phase::Quiet)
+    }
+
+    /// Called only for a new hardware observation, after the tune ACK. Report
+    /// an opening once, then only stronger samples until the carrier closes.
+    pub fn observe_find(&mut self, sample: FindSample) -> Option<(u16, bool)> {
+        if !matches!(
+            self.status.phase,
+            Phase::Dwelling | Phase::Paused | Phase::Quiet
+        ) {
+            return None;
+        }
+        let Some(raw) = sample.raw else {
+            self.open_find = None;
+            return None;
+        };
+        let opened = match self.open_find {
+            Some((hz, peak)) if hz == sample.frequency_10hz => {
+                if raw <= peak {
+                    return None;
+                }
+                false
+            }
+            _ => true,
+        };
+        self.open_find = Some((sample.frequency_10hz, raw));
+        Some((raw, opened))
     }
 
     /// Only used for a session scanning the memory catalog.
@@ -196,7 +242,22 @@ impl Scheduler {
         self.issue(now)
     }
 
+    /// Remove marked points from this VFO pass before the foreground tunes
+    /// the receiver. Editing the journal stops the scan, so a new session
+    /// always picks up restored frequencies from an empty skip bitmap.
+    pub fn omit_marked_vfo(&mut self, mut action: Action, marked: impl Fn(u32) -> bool) -> Action {
+        while let Action::TuneFrequency(hz) = action {
+            if !marked(hz) {
+                break;
+            }
+            self.skipped[self.vfo_point / 8] |= 1 << (self.vfo_point % 8);
+            action = self.issue(self.since).unwrap_or(Action::Stop);
+        }
+        action
+    }
+
     fn issue(&mut self, now: u32) -> Result<Action, Error> {
+        self.open_find = None;
         let action = match self.status.target {
             Some(Target::Channels) => Action::NextChannel,
             Some(Target::Vfo { low, high, step }) => {
@@ -356,6 +417,134 @@ mod tests {
         assert!(scan
             .tune_ack(scan.status().ticket.unwrap(), now, State::Receiving)
             .unwrap());
+    }
+
+    #[test]
+    fn marked_vfo_is_never_tuned_and_an_entirely_marked_grid_stops() {
+        let target = Target::Vfo {
+            low: 14_400_000,
+            high: 14_402_500,
+            step: 2_500,
+        };
+        let mut scan = Scheduler::new();
+        let first = scan.start(target, 1).unwrap();
+        assert_eq!(
+            scan.omit_marked_vfo(first, |f| f == 14_400_000),
+            Action::TuneFrequency(14_402_500)
+        );
+        scan.cancel();
+        let first = scan.start(target, 2).unwrap();
+        assert_eq!(scan.omit_marked_vfo(first, |_| true), Action::Stop);
+        assert!(!scan.active());
+        let restored = scan.start(target, 3).unwrap();
+        assert_eq!(
+            scan.omit_marked_vfo(restored, |_| false),
+            Action::TuneFrequency(14_400_000)
+        );
+    }
+
+    #[test]
+    fn journal_requires_confirmed_rx_and_counts_openings_not_poll_iterations() {
+        use crate::{Audio, Signal};
+        let audio = Audio {
+            modulation: uv98_rf_sequence::Modulation::Fm,
+            gain: 1,
+            dac: 1,
+            squelch: 1,
+            monitor: false,
+            tone_required: false,
+        };
+        let signal = Signal {
+            rssi: 203,
+            squelch_open: true,
+            audio_open: true,
+            status_0c: 2,
+            am_gain_index: 0,
+        };
+        let hz = 14_550_000;
+        let sample = |s, a| FindSample::measured(hz, s, a);
+        let mut scan = Scheduler::new();
+        scan.start(
+            Target::Vfo {
+                low: hz,
+                high: hz,
+                step: 1250,
+            },
+            1,
+        )
+        .unwrap();
+        assert_eq!(scan.observe_find(sample(signal, audio)), None);
+        ack(&mut scan, 2);
+        assert_eq!(
+            scan.observe_find(sample(
+                signal,
+                Audio {
+                    monitor: true,
+                    ..audio
+                }
+            )),
+            None
+        );
+        assert_eq!(
+            scan.observe_find(sample(
+                signal,
+                Audio {
+                    squelch: 0,
+                    ..audio
+                }
+            )),
+            None
+        );
+        assert_eq!(
+            scan.observe_find(sample(
+                Signal {
+                    status_0c: 0,
+                    ..signal
+                },
+                audio
+            )),
+            None
+        );
+        assert_eq!(
+            scan.observe_find(sample(
+                Signal {
+                    audio_open: false,
+                    ..signal
+                },
+                audio
+            )),
+            None
+        );
+        assert_eq!(scan.observe_find(sample(signal, audio)), Some((203, true)));
+        assert_eq!(scan.observe_find(sample(signal, audio)), None);
+        assert_eq!(
+            scan.observe_find(sample(
+                Signal {
+                    rssi: 225,
+                    ..signal
+                },
+                audio
+            )),
+            Some((225, false))
+        );
+        assert_eq!(
+            scan.observe_find(sample(
+                Signal {
+                    status_0c: 0,
+                    ..signal
+                },
+                audio
+            )),
+            None
+        );
+        assert_eq!(scan.observe_find(sample(signal, audio)), Some((203, true)));
+        assert_eq!(
+            scan.tick(2 + DWELL_MS, false).unwrap(),
+            Action::TuneFrequency(hz)
+        );
+        assert_eq!(scan.observe_find(sample(signal, audio)), None);
+        ack(&mut scan, 3 + DWELL_MS);
+        assert_eq!(scan.observe_find(sample(signal, audio)), Some((203, true)));
     }
 
     fn next_in_zone(

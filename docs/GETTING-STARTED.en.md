@@ -6,7 +6,7 @@
 
 This guide covers first-time preparation of a UV-98 Plus / the investigated RT-880 platform. **Read the original data while stock firmware is installed. Choose firmware only after checking compatibility.** You can complete the backup without installing Rust firmware.
 
-R57 offers separate RU, EN and DE BINs. A full firmware write clears the settings journal, including the saved A/B position. [Release page](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r57) · [Set up the R57 voice key](../RELEASE-NOTES-R57.md#english)
+R58 offers separate RU, EN and DE BINs. A full firmware write clears the settings journal, including the saved A/B position. [Release page](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/tag/r58) · [R58 release notes](../RELEASE-NOTES-R58.md#english) · [Set up the voice key](../RELEASE-NOTES-R57.md#english)
 
 ## 1. Prepare the radio and a folder
 
@@ -15,7 +15,7 @@ R57 offers separate RU, EN and DE BINs. A full firmware write clears the setting
 3. Use the stock CPS for your model to read the radio and save its original `.880dmf` or `.98pdmf` file. Keep an existing original such as `999.880dmf` unchanged.
 4. Close the stock CPS, Radio Tuning Software and other programs using the cable. Before the first read in our CPS, power the radio off for 3 seconds, then start it normally again.
 5. Create a folder such as `Documents/UV98-backup-2026-11-16`. Suggested subfolders: `01-original`, `02-calibration`, `03-nor`, `04-settings`, `05-recovery`. Put the original CPS file in `01-original`.
-6. Extract [CPS 0.11.0 for Windows](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-CPS-0.11.0.zip) or the [complete R57 package](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/R57-RT880-UV98.zip). Keep `libunwind.dll` beside `UV98-CPS.exe`. Run CPS, choose **English** in **Язык / Language / Sprache**, then open **Backups**. Select the actual cable COM port using **Refresh list → Available ports**. Old port numbers in screenshots and logs may differ.
+6. Extract [CPS 0.11.0 for Windows](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-CPS-0.11.0.zip) or the [complete R58 package](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/R58-RT880-UV98.zip). Keep `libunwind.dll` beside `UV98-CPS.exe`. Run CPS, choose **English** in **Язык / Language / Sprache**, then open **Backups**. Select the actual cable COM port using **Refresh list → Available ports**. Old port numbers in screenshots and logs may differ.
 
 The toolbar language selector is always visible. All eight tabs and existing status messages switch immediately and unsaved edits stay in place. CPS remembers the selection in your Windows user profile. File dialog titles and filters follow CPS. Standard dialog buttons follow Windows.
 
@@ -79,11 +79,11 @@ Place the file named `RT-880_Upgrade_V1_16_250915.bin` in a `recovery` folder be
 
 ## 4. Check compatibility before flashing
 
-R57 targets the investigated AT32F423 board profile. Verify the board revision before flashing. Backup-based preparation binds the image to your calibration.
+R58 targets the investigated AT32F423 board profile. Verify the board revision before flashing. The public R58 BINs have a zero calibration digest. CPS fills in your radio's calibration digest when it prepares the personal image from your backup.
 
 For a confirmed compatible board, prepare a personal BIN. **No Rust compiler is needed.**
 
-1. Choose the original R57 BIN for your language from the complete package's `firmware` folder or download it separately. [RU](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-r57-ru.bin) · [EN](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-r57-en.bin) · [DE](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r57/UV98-r57-de.bin) In CPS open **Firmware → Select BIN…** and choose that file. A release catalog is optional for a compatible original application BIN with a calibration profile.
+1. Choose the original R58 BIN for your language from the complete package's `firmware` folder or download it separately. [RU](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-ru.bin) · [EN](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-en.bin) · [DE](https://github.com/YaziAranea/RT880-UV98-Rust-Firmware/releases/download/r58/UV98-r58-de.bin) In CPS open **Firmware → Select BIN…** and choose that file. A release catalog is optional for a compatible original application BIN with a calibration profile.
 2. Click **Prepare an image for my radio…**.
 3. Select **`manifest.json` from the full 4 MiB NOR snapshot** created by “Read settings storage (4 MiB)”. Select the manifest, not `storage-address-space.bin` itself. A calibration-only snapshot is not sufficient.
 4. Choose a parent folder for new images, for example `Documents/UV98-personal`. CPS creates a new `UV98-personal-…` directory inside it.
@@ -94,7 +94,7 @@ CPS checks the two-read status, file sizes and SHA256 values, and verifies that 
 
 The catalog records the personal BIN's SHA256 and schema 2 personalization provenance, including the source and snapshot hashes. CPS structural checks establish file layout and integrity. Verify the release source, publisher and board revision independently.
 
-If preparation is rejected, check that you selected your own complete two-read NOR snapshot and the original R57 BIN. Keep the original manifest and snapshot files together.
+If preparation is rejected, check that you selected your own complete two-read NOR snapshot and the original R58 BIN. Keep the original manifest and snapshot files together.
 
 Proceed only after successful preparation, confirmation of board compatibility, and saving verified backups and the correct factory BIN in two places.
 
@@ -107,11 +107,28 @@ Proceed only after successful preparation, confirmation of board compatibility, 
 5. Wait for explicit completion. Do not switch off the radio, unplug the cable or close CPS during writing.
 6. After completion, switch off for 3 seconds and start **without PTT**. Check the display, keys and reception. Keep the operation log.
 
-**Firmware language.** Flash the BIN for your chosen language. Each R57 BIN has one interface language. Set the CPS language separately in its toolbar.
+**Firmware language.** Flash the BIN for your chosen language. Each R58 BIN has one interface language. Set the CPS language separately in its toolbar.
 
 With the default bindings, the upper PTT requests A and the lower PTT requests B. A green border marks the receiving slot. The red TX border takes priority. A large red **L**, yellow **M** or green **H** shows the configured power of the transmitting slot, including B while A is selected. Each slot's power starts at LOW and changes are held in RAM. The battery icon shows up to four approximate level bars and the voltage in 0.1 V steps (`--.-V` when unavailable). [Lower PTT hardware evidence](../research/r37/ptt.md)
 
 Loader acknowledgements confirm file transfer. Check startup, reception, short presses of both PTT buttons, repeater reply, and zone scan on the radio.
+
+Check **R58-SC3** under **SYSTEM / TX → ABOUT FIRMWARE**. The menu header shows **R58**.
+
+### VFO scan range and log
+
+1. Select A or B on the home screen. Hold **MENU** to switch between channel and VFO mode. In VFO mode, open **SCAN/SPECTRUM → SCAN RANGE**.
+2. Press **MENU** on **MODE** to select **CUSTOM**. Use the arrows to select **LOW, MHZ** and **HIGH, MHZ**. Enter 6–8 digits and press **MENU** to confirm each limit. For example, `145475` sets 145.475 MHz and `145525` sets 145.525 MHz. Press `*` to delete the last digit.
+3. Press **MENU** on **STEP, KHZ** to choose the step. Select **SAVE** and press **MENU**. Both limits are included. The span must be a multiple of the step and fit within a single receive band. The limit is 1024 points. Save **AUTO** to return to scanning around the current VFO frequency.
+4. Choose **SCAN/SPECTRUM → SCANNING → START**. To detect signals, set squelch to 1–10 and turn off monitor. Tap **EXIT** on the home screen to stop scanning.
+
+In **SCAN/SPECTRUM → SCAN LOG**, use the arrows to browse up to 16 frequencies. A continuous signal counts as one opening. After stopping the scan, press **MENU**, select **↑** for A or **↓** for B, and press **MENU** to tune. **EXIT** cancels the selection. Tap **#** to mark a frequency for the VFO scan to skip. Tap it again to restore the frequency. The radio keeps the limits, log and marks until power-off.
+
+### Spectrum AM/FM and waterfall
+
+1. Enter **126400** in VFO mode and press **MENU**. Hold **0** with the default shortcut, or open **SCAN/SPECTRUM → SPECTRUM**. In the spectrum view, the digit keys control the sweep.
+2. In **AUTO**, the cursor shows **AM** at 126.400 MHz and throughout the band from 118.000 MHz up to but excluding 137.000 MHz. It shows **FM** outside that band. During a sweep, press **MENU → ↑**, then press **MENU** in **AM/FM** to choose a mode. Tap **EXIT** to close the menu.
+3. Press **6** to listen at the cursor. Tap **0** to return to the sweep. Tap **#** to switch between **AUTO AUDIO** and **AUTO SWEEP**. While a signal is held, the waterfall adds measurements at that frequency and leaves adjacent frequencies blank in each new line.
 
 ### CB grid
 

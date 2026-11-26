@@ -10,6 +10,13 @@ use uv98_signaling::mdc1200::UnitId;
 pub use uv98_signaling::radio_name::RadioName;
 use uv98_signaling::radio_name::NAME_BYTES;
 
+mod scan;
+use scan::ScanJournal;
+pub use scan::{
+    ScanJournalEntry, ScanJournalPage, ScanRange, ScanRangeError, ScanRangeField, ScanRangePage,
+    SCAN_JOURNAL_CAPACITY, SCAN_RANGE_MAX_POINTS,
+};
+
 pub const CHANNEL_COUNT: usize = 1024;
 const NO_ZONE_PRIORITY: u16 = u16::MAX;
 // This is an editor bound, not a claim that the radio supports every frequency.
@@ -28,7 +35,7 @@ pub const STEP_10HZ: [u32; 6] = [250, 500, 625, 1000, 1250, 2500];
 /// Spectrum window width in sweep intervals; points = intervals + 1.
 pub const SPECTRUM_INTERVALS: [u8; 5] = [4, 10, 20, 40, 80];
 /// Items in the spectrum context menu, in display order.
-pub const SPECTRUM_MENU_LEN: u8 = 8;
+pub const SPECTRUM_MENU_LEN: u8 = 9;
 pub const SPECTRUM_MENU_LISTEN: u8 = 0;
 pub const SPECTRUM_MENU_ACCEPT_VFO: u8 = 1;
 pub const SPECTRUM_MENU_SPAN_WIDER: u8 = 2;
@@ -37,6 +44,32 @@ pub const SPECTRUM_MENU_STEP_BIGGER: u8 = 4;
 pub const SPECTRUM_MENU_STEP_SMALLER: u8 = 5;
 pub const SPECTRUM_MENU_CLEAR_PEAKS: u8 = 6;
 pub const SPECTRUM_MENU_CLOSE: u8 = 7;
+pub const SPECTRUM_MENU_MODULATION: u8 = 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpectrumModulation {
+    Auto,
+    Am,
+    Fm,
+}
+
+impl SpectrumModulation {
+    pub const fn is_am(self, frequency_10hz: u32) -> bool {
+        match self {
+            Self::Auto => uv98_band_plan::aviation_band(frequency_10hz),
+            Self::Am => true,
+            Self::Fm => false,
+        }
+    }
+
+    const fn next(self) -> Self {
+        match self {
+            Self::Auto => Self::Am,
+            Self::Am => Self::Fm,
+            Self::Fm => Self::Auto,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -143,6 +176,8 @@ pub enum Screen {
     RxToneSearch,
     DtmfMemory,
     AprsRx,
+    ScanRange,
+    ScanJournal,
 }
 
 pub const DTMF_MEMORY_SLOTS: usize = 3;
@@ -289,10 +324,12 @@ pub enum MenuItem {
     DtmfMemory,
     TxTimeout,
     AprsRx,
+    ScanRange,
+    ScanJournal,
 }
 
 /// Full catalog for tooling. The visible menu uses `menu_entries`.
-pub const MENU_ITEMS: [MenuItem; 38] = [
+pub const MENU_ITEMS: [MenuItem; 40] = [
     MenuItem::Mode,
     MenuItem::Modulation,
     MenuItem::Channels,
@@ -331,6 +368,8 @@ pub const MENU_ITEMS: [MenuItem; 38] = [
     MenuItem::DtmfMemory,
     MenuItem::TxTimeout,
     MenuItem::AprsRx,
+    MenuItem::ScanRange,
+    MenuItem::ScanJournal,
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -384,6 +423,8 @@ pub const fn menu_entries(group: Option<MenuGroup>) -> &'static [MenuEntry] {
             Item(MenuItem::Shortwave),
             Item(MenuItem::ScanPriority),
             Item(MenuItem::RxToneSearch),
+            Item(MenuItem::ScanRange),
+            Item(MenuItem::ScanJournal),
         ],
         Some(MenuGroup::Keys) => &[
             Item(MenuItem::Shortcuts),
@@ -969,6 +1010,7 @@ pub struct View {
     pub spectrum_span_index: u8,
     pub spectrum_trigger: u8,
     pub spectrum_auto_listen: bool,
+    pub spectrum_modulation: SpectrumModulation,
     pub spectrum_step_index: u8,
     /// The context menu overlays the graph; it owns MENU/UP/DOWN until EXIT.
     pub spectrum_menu: bool,
@@ -1015,6 +1057,8 @@ pub struct View {
     pub key_light: LightMode,
     pub rx_tone_search: Option<RxToneSearch>,
     pub dtmf_memory_page: Option<DtmfMemoryPage>,
+    pub scan_range_page: Option<ScanRangePage>,
+    pub scan_journal_page: Option<ScanJournalPage>,
 }
 
 impl View {
@@ -1171,6 +1215,8 @@ pub struct Controller {
     active_dtmf_memory: u8,
     aprs_rx_history: [AprsPacket; APRS_RX_CAPACITY as usize],
     aprs_rx_head: u8,
+    manual_scan_range: Option<ScanRange>,
+    scan_journal: ScanJournal,
 }
 
 impl Controller {
@@ -1257,6 +1303,7 @@ impl Controller {
                 spectrum_span_index: 0,
                 spectrum_trigger: 24,
                 spectrum_auto_listen: true,
+                spectrum_modulation: SpectrumModulation::Auto,
                 shortwave_khz: 6_070,
                 shortwave_fraction_hz: 0,
                 shortwave_step: ShortwaveMode::Am.default_step_index(),
@@ -1308,6 +1355,8 @@ impl Controller {
                 key_light: LightMode::On,
                 rx_tone_search: None,
                 dtmf_memory_page: None,
+                scan_range_page: None,
+                scan_journal_page: None,
             },
             request: None,
             ptt_tx_requested: false,
@@ -1333,6 +1382,8 @@ impl Controller {
             active_dtmf_memory: 0,
             aprs_rx_history: [AprsPacket::EMPTY; APRS_RX_CAPACITY as usize],
             aprs_rx_head: 0,
+            manual_scan_range: None,
+            scan_journal: ScanJournal::new(),
         }
     }
 
@@ -2341,6 +2392,12 @@ impl Controller {
         if self.view.screen != Screen::DtmfMemory {
             self.view.dtmf_memory_page = None;
         }
+        if self.view.screen != Screen::ScanRange {
+            self.view.scan_range_page = None;
+        }
+        if self.view.screen != Screen::ScanJournal {
+            self.view.scan_journal_page = None;
+        }
         if self.view.aprs_auto_armed && (self.view.screen != Screen::Aprs || self.view.ptt_down) {
             self.disarm_aprs_auto();
         }
@@ -2822,7 +2879,7 @@ impl Controller {
             && self.view.spectrum_listening;
         let modal_exit = matches!(
             self.view.screen,
-            Screen::Cb | Screen::Mdc | Screen::RadioName
+            Screen::Cb | Screen::Mdc | Screen::RadioName | Screen::ScanRange | Screen::ScanJournal
         ) || (self.view.screen == Screen::Home
             && self.selected_cb().is_some()
             && event == InputEvent::Hold(Key::Exit));
@@ -2859,6 +2916,14 @@ impl Controller {
             return;
         }
         self.view.notice = Notice::None;
+        if self.view.screen == Screen::ScanRange {
+            self.scan_range_input(event);
+            return;
+        }
+        if self.view.screen == Screen::ScanJournal {
+            self.scan_journal_input(event);
+            return;
+        }
         if self.view.screen == Screen::Cb {
             self.cb_input(event);
             return;
@@ -3053,6 +3118,8 @@ impl Controller {
                 | Screen::Mdc
                 | Screen::RadioName
                 | Screen::DtmfMemory
+                | Screen::ScanRange
+                | Screen::ScanJournal
         ) {
             self.view.ptt_slot = None;
             self.ptt_suppressed_until_release = true;
@@ -3562,6 +3629,11 @@ impl Controller {
                 self.view.spectrum_menu = false;
                 self.queue_request(Request::ResetSpectrumPeaks);
             }
+            SPECTRUM_MENU_MODULATION => {
+                if !self.view.spectrum_listening && self.view.spectrum_pending_listen.is_none() {
+                    self.view.spectrum_modulation = self.view.spectrum_modulation.next();
+                }
+            }
             _ => {
                 self.view.spectrum_menu = false;
                 self.queue_request(Request::StopSpectrum);
@@ -3804,22 +3876,11 @@ impl Controller {
                     self.view.mode = Mode::Channel;
                 }
                 EntryKind::Frequency => {
-                    // Six ordinary keypad digits name MHz with three decimals;
-                    // seven/eight digits retain finer precision. Leading zeroes
-                    // remain significant through Entry::digits.
-                    let value = match entry.digits {
-                        6 => entry.value * 100,
-                        7 => entry.value * 10,
-                        8 => entry.value,
-                        _ => {
-                            self.view.notice = Notice::InvalidFrequency;
-                            return;
-                        }
-                    };
-                    if !valid_frequency(value) {
+                    let Some(value) = frequency_entry_value(entry).filter(|&f| valid_frequency(f))
+                    else {
                         self.view.notice = Notice::InvalidFrequency;
                         return;
-                    }
+                    };
                     self.view.vfo_10hz = value;
                     self.view.reverse = false;
                     self.view.mode = Mode::Vfo;
@@ -3910,6 +3971,8 @@ impl Controller {
                         self.open_setting(Setting::ScanPriority);
                     }
                     MenuItem::RxToneSearch => self.start_rx_tone_search(bitmap),
+                    MenuItem::ScanRange => self.open_scan_range(),
+                    MenuItem::ScanJournal => self.open_scan_journal(),
                     MenuItem::DtmfMemory => self.open_dtmf_memory(),
                     MenuItem::Shortcuts => self.view.screen = Screen::Shortcuts,
                     MenuItem::Power => self.open_setting(Setting::Power),
@@ -3998,6 +4061,8 @@ impl Controller {
             | Screen::Gps
             | Screen::Aprs
             | Screen::AprsRx
+            | Screen::ScanRange
+            | Screen::ScanJournal
             | Screen::Cb
             | Screen::Mdc
             | Screen::RadioName => {}
@@ -4078,6 +4143,17 @@ impl Controller {
 
 const fn valid_frequency(value: u32) -> bool {
     value >= MIN_FREQUENCY_10HZ && value <= MAX_FREQUENCY_10HZ
+}
+
+fn frequency_entry_value(entry: Entry) -> Option<u32> {
+    // Six digits name MHz with three decimals. Seven/eight retain finer
+    // precision. Leading zeroes remain significant through Entry::digits.
+    match entry.digits {
+        6 => Some(entry.value * 100),
+        7 => Some(entry.value * 10),
+        8 => Some(entry.value),
+        _ => None,
+    }
 }
 
 pub const fn binding_index(digit: u8) -> Option<u8> {
@@ -4503,6 +4579,186 @@ mod tests {
             MenuEntry::Item(item)
         );
         press(ui, Key::Menu, bitmap)
+    }
+
+    #[test]
+    fn custom_scan_range_preserves_invalid_draft_and_only_applies_on_save() {
+        use Key::{Digit0, Digit1, Digit2, Digit4, Digit5, Down, Exit, Menu, Up};
+        let bitmap = [0; 128];
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        choose_menu(&mut ui, MenuItem::ScanRange, &bitmap);
+        let initial = ui.view.scan_range_page.unwrap();
+        assert_eq!(
+            initial.step_10hz,
+            STEP_10HZ[usize::from(ui.view.step_index)]
+        );
+        assert!(!initial.manual);
+        assert_eq!(ui.scan_range(), None);
+        digits(&mut ui, &[Menu, Down, Digit1, Menu], &bitmap);
+        let invalid = ui.view.scan_range_page.unwrap();
+        assert_eq!(invalid.error, Some(ScanRangeError::Entry));
+        assert_eq!(invalid.entry.unwrap().digits, 1);
+
+        digits(
+            &mut ui,
+            &[Digit4, Digit5, Digit0, Digit0, Digit0, Menu, Down],
+            &bitmap,
+        );
+        digits(
+            &mut ui,
+            &[Digit1, Digit4, Digit5, Digit0, Digit0, Digit1, Menu],
+            &bitmap,
+        );
+        digits(&mut ui, &[Down, Menu, Down, Menu], &bitmap);
+        let invalid = ui.view.scan_range_page.unwrap();
+        assert_eq!(invalid.error, Some(ScanRangeError::Grid));
+        assert_eq!(
+            (invalid.lower_10hz, invalid.upper_10hz),
+            (14_500_000, 14_500_100)
+        );
+        assert_eq!(ui.scan_range(), None);
+
+        digits(
+            &mut ui,
+            &[Up, Up, Digit1, Digit4, Digit5, Digit2, Digit5, Digit0, Menu],
+            &bitmap,
+        );
+        digits(&mut ui, &[Down, Down, Menu], &bitmap);
+        let saved = ScanRange {
+            lower_10hz: 14_500_000,
+            upper_10hz: 14_525_000,
+            step_10hz: 2500,
+        };
+        assert_eq!(ui.view.screen, Screen::Menu);
+        assert_eq!(ui.scan_range(), Some(saved));
+
+        choose_menu(&mut ui, MenuItem::ScanRange, &bitmap);
+        digits(&mut ui, &[Menu, Exit], &bitmap);
+        assert_eq!(ui.scan_range(), Some(saved));
+        choose_menu(&mut ui, MenuItem::ScanRange, &bitmap);
+        digits(&mut ui, &[Menu, Down, Menu], &bitmap);
+        assert_eq!(ui.scan_range(), None);
+    }
+
+    #[test]
+    fn custom_scan_range_validates_inclusive_limit_grid_and_operating_window() {
+        let mut range = ScanRange {
+            lower_10hz: 14_550_000,
+            upper_10hz: 14_550_000 + 1023 * 250,
+            step_10hz: 250,
+        };
+        assert_eq!(range.validate(), Ok(()));
+        range.upper_10hz += 250;
+        assert_eq!(range.validate(), Err(ScanRangeError::TooMany));
+        range.upper_10hz += 1;
+        assert_eq!(range.validate(), Err(ScanRangeError::Grid));
+        range.step_10hz = 0;
+        assert_eq!(range.validate(), Err(ScanRangeError::Grid));
+        range.lower_10hz = 66_000_000;
+        range.upper_10hz = 84_000_000;
+        assert_eq!(range.validate(), Err(ScanRangeError::Band));
+        range.lower_10hz = 70_000_000;
+        assert_eq!(range.validate(), Err(ScanRangeError::Band));
+        range.lower_10hz = 85_000_000;
+        assert_eq!(range.validate(), Err(ScanRangeError::Bounds));
+    }
+
+    #[test]
+    fn scan_journal_requires_confirmation_and_never_emits_ptt() {
+        use Key::{Down, Exit, Menu};
+        let bitmap = catalog(&[2, 7]);
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        let first = 14_550_000;
+        let second = 14_552_500;
+        ui.record_scan_find(first, 75, true, 1_000);
+        ui.record_scan_find(second, 80, true, 2_000);
+        ui.record_scan_find(first, 93, false, 2_500);
+        ui.record_scan_find(first, 84, true, 3_900);
+        ui.record_scan_find(first, 94, false, 5_000);
+
+        let (group, index) = menu_location(MenuItem::ScanJournal);
+        ui.view.screen = Screen::Menu;
+        ui.view.menu_group = group;
+        ui.view.menu_index = index;
+        ui.view.scan = ScanState::Running;
+        assert_eq!(
+            press(&mut ui, Menu, &bitmap).request,
+            Some(Request::StopScan)
+        );
+        assert_eq!(ui.view.scan, ScanState::Stopping);
+        press(&mut ui, Menu, &bitmap);
+        let page = ui.view.scan_journal_page.unwrap();
+        assert_eq!((page.count, page.index, page.target), (2, 0, None));
+        assert_eq!(
+            page.entry.unwrap(),
+            ScanJournalEntry {
+                frequency_10hz: first,
+                last_opened_s: 3,
+                detections: 2,
+                peak_raw_rssi: 94,
+                ignored: false,
+            }
+        );
+        ui.acknowledge_scan_stopped();
+
+        let old_a = ui.context(Slot::A);
+        let old_b = ui.context(Slot::B);
+        digits(&mut ui, &[Down, Menu], &bitmap);
+        assert_eq!(ui.view.scan_journal_page.unwrap().target, Some(Slot::A));
+        digits(&mut ui, &[Down, Exit], &bitmap);
+        assert_eq!(ui.view.scan_journal_page.unwrap().target, None);
+        assert_eq!((ui.context(Slot::A), ui.context(Slot::B)), (old_a, old_b));
+        digits(&mut ui, &[Menu, Down], &bitmap);
+        for event in [
+            InputEvent::Ptt(true),
+            InputEvent::Short(Menu),
+            InputEvent::Ptt(false),
+        ] {
+            let change = ui.handle(event, &bitmap);
+            assert!(!change.ptt_tx_requested);
+            assert_eq!(ui.view.screen, Screen::ScanJournal);
+        }
+        let change = press(&mut ui, Menu, &bitmap);
+        assert_eq!(change.request, None);
+        assert!(!change.ptt_tx_requested);
+        assert!(change.slot_changed);
+        assert_eq!(ui.view.screen, Screen::Home);
+        assert_eq!(ui.context(Slot::A), old_a);
+        assert_eq!(ui.context(Slot::B).mode, Mode::Vfo);
+        assert_eq!(ui.context(Slot::B).vfo_10hz, second);
+    }
+
+    #[test]
+    fn scan_journal_evicts_oldest_unignored_and_can_restore_pinned_entry() {
+        use Key::{Down, Hash};
+        let bitmap = [0; 128];
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        let first = 14_550_000;
+        ui.record_scan_find(first, 90, true, 1_000);
+        choose_menu(&mut ui, MenuItem::ScanJournal, &bitmap);
+        press(&mut ui, Hash, &bitmap);
+        assert!(ui.scan_frequency_ignored(first));
+        for index in 1..=u32::from(SCAN_JOURNAL_CAPACITY) {
+            ui.record_scan_find(first + index * 250, 120, true, 1_000 + index);
+        }
+        ui.record_scan_find(first, 100, true, 3_000);
+        let page = ui.view.scan_journal_page.unwrap();
+        assert_eq!(page.count, SCAN_JOURNAL_CAPACITY);
+        assert_eq!(page.index, page.count - 1);
+        assert_eq!(page.entry.unwrap().peak_raw_rssi, 90);
+        assert_eq!(page.entry.unwrap().detections, 1);
+        assert_eq!(page.entry.unwrap().last_opened_s, 1);
+        press(&mut ui, Down, &bitmap);
+        assert_eq!(ui.view.scan_journal_page.unwrap().index, page.index);
+
+        press(&mut ui, Hash, &bitmap);
+        assert!(!ui.scan_frequency_ignored(first));
+        ui.record_scan_find(first, 100, true, 4_000);
+        let page = ui.view.scan_journal_page.unwrap();
+        assert_eq!(page.index, 0);
+        assert_eq!(page.entry.unwrap().peak_raw_rssi, 100);
+        assert_eq!(page.entry.unwrap().detections, 2);
+        assert_eq!(page.entry.unwrap().last_opened_s, 4);
     }
 
     #[test]
@@ -5402,6 +5658,54 @@ mod tests {
         let close = press(&mut ui, Key::Menu, &bitmap);
         assert_eq!(close.request, Some(Request::StopSpectrum));
         assert_eq!(ui.view.screen, Screen::Home);
+    }
+
+    #[test]
+    fn spectrum_modulation_cycles_without_retuning_or_changing_slots() {
+        let bitmap = [0; 128];
+        let mut ui = Controller::new(&bitmap, DEFAULT_FREQUENCY_10HZ);
+        digits(
+            &mut ui,
+            &[
+                Key::Digit1,
+                Key::Digit2,
+                Key::Digit6,
+                Key::Digit4,
+                Key::Digit0,
+                Key::Digit0,
+            ],
+            &bitmap,
+        );
+        press(&mut ui, Key::Menu, &bitmap);
+        let original_a = ui.context(Slot::A);
+        let original_b = ui.context(Slot::B);
+        assert_eq!(original_a.vfo_10hz, 12_640_000);
+        ui.handle(InputEvent::Hold(Key::Digit0), &bitmap);
+        assert_eq!(ui.view.spectrum_modulation, SpectrumModulation::Auto);
+        press(&mut ui, Key::Menu, &bitmap);
+        press(&mut ui, Key::Up, &bitmap);
+        assert_eq!(ui.view.spectrum_option, SPECTRUM_MENU_MODULATION);
+        for modulation in [
+            SpectrumModulation::Am,
+            SpectrumModulation::Fm,
+            SpectrumModulation::Auto,
+        ] {
+            assert_eq!(press(&mut ui, Key::Menu, &bitmap).request, None);
+            assert_eq!(ui.view.spectrum_modulation, modulation);
+            assert!(ui.view.spectrum_menu);
+        }
+        press(&mut ui, Key::Exit, &bitmap);
+        press(&mut ui, Key::Digit6, &bitmap);
+        let bin = ui.view.spectrum_pending_listen.unwrap();
+        press(&mut ui, Key::Menu, &bitmap);
+        press(&mut ui, Key::Up, &bitmap);
+        assert_eq!(press(&mut ui, Key::Menu, &bitmap).request, None);
+        assert_eq!(ui.view.spectrum_modulation, SpectrumModulation::Auto);
+        assert!(ui.confirm_spectrum_listen(bin));
+        assert_eq!(press(&mut ui, Key::Menu, &bitmap).request, None);
+        assert_eq!(ui.view.spectrum_modulation, SpectrumModulation::Auto);
+        assert_eq!(ui.context(Slot::A), original_a);
+        assert_eq!(ui.context(Slot::B), original_b);
     }
 
     #[test]
